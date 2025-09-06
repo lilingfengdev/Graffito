@@ -193,7 +193,12 @@ class AuditService:
             await session.commit()
             
             # 发送通知给投稿者
-            # TODO: 通过接收器发送消息
+            try:
+                from services.notification_service import NotificationService
+                notifier = NotificationService()
+                await notifier.send_submission_rejected(submission_id, reason=submission.rejection_reason)
+            except Exception:
+                pass
             
             return {
                 'success': True,
@@ -336,6 +341,14 @@ class AuditService:
             submission.comment = comment
             await session.commit()
             
+            # 通知审核群重新审核
+            try:
+                from services.notification_service import NotificationService
+                notifier = NotificationService()
+                await notifier.send_audit_request(submission_id)
+            except Exception:
+                pass
+
             return {
                 'success': True,
                 'message': f'已添加评论: {comment}',
@@ -357,7 +370,12 @@ class AuditService:
             if not submission:
                 return {'success': False, 'message': '投稿不存在'}
                 
-            # TODO: 通过接收器发送消息给投稿者
+            try:
+                from services.notification_service import NotificationService
+                notifier = NotificationService()
+                await notifier.send_to_user(submission.sender_id, message, submission.group_name)
+            except Exception:
+                pass
             
             return {
                 'success': True,
@@ -439,7 +457,13 @@ class AuditService:
             if not reply_content:
                 return {'success': False, 'message': f'未知的指令: {command}'}
                 
-            # TODO: 发送快捷回复给投稿者
+            # 发送快捷回复给投稿者
+            try:
+                from services.notification_service import NotificationService
+                notifier = NotificationService()
+                await notifier.send_to_user(submission.sender_id, reply_content, submission.group_name)
+            except Exception:
+                pass
             
             return {
                 'success': True,

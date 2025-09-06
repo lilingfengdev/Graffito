@@ -117,11 +117,14 @@ account_groups:
     main_account:
       qq_id: "1234567890"
       http_port: 3000
+      http_token: ""
     minor_accounts:
       - qq_id: "9876543210"
         http_port: 3001
+        http_token: ""
       - qq_id: "5555555555"
         http_port: 3002
+        http_token: ""
 ```
 
 主账号用于接收投稿，所有账号都可以发送。

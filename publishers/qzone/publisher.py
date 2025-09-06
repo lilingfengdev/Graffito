@@ -82,7 +82,12 @@ class QzonePublisher(BasePublisher):
                 
             # 通过NapCat API获取cookies
             port = account_info['http_port']
-            async with httpx.AsyncClient() as client:
+            headers = {}
+            http_token = account_info.get('http_token')
+            if http_token:
+                headers['Authorization'] = f'Bearer {http_token}'
+
+            async with httpx.AsyncClient(headers=headers) as client:
                 # 获取QQ空间cookies
                 response = await client.get(
                     f"http://127.0.0.1:{port}/get_cookies",

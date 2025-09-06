@@ -1,7 +1,7 @@
 """基于 NoneBot2 的 QQ 接收器实现"""
 import asyncio
 import time
-from typing import Dict, Any, Optional
+from typing import Dict, Any, Optional, List, Tuple
 
 from loguru import logger
 from uvicorn import Server, Config
@@ -32,6 +32,16 @@ class QQReceiver(BaseReceiver):
         self.server: Optional[Server] = None
         self.friend_request_cache: Dict[str, float] = {}
         self.suppression_cache: Dict[str, list] = {}
+        # 注入的服务
+        self.audit_service = None
+        self.submission_service = None
+        self.notification_service = None
+
+    def set_services(self, audit_service, submission_service, notification_service):
+        """注入服务实例供指令处理使用"""
+        self.audit_service = audit_service
+        self.submission_service = submission_service
+        self.notification_service = notification_service
 
     async def initialize(self):
         await super().initialize()
@@ -110,6 +120,30 @@ class QQReceiver(BaseReceiver):
                     self.logger.debug(f"消息被抑制: {user_id}")
                     return
 
+                # 群内优先尝试解析指令；私聊才进行投稿处理
+                if isinstance(event, GroupMessageEvent):
+                    handled = await self._try_handle_group_command(bot, event)
+                    if handled:
+                        return
+                    # 非指令的群消息不创建投稿
+                    return
+
+                # 私聊 -> 进入投稿缓存/建稿流程
+                # 提取消息段（用于渲染）
+                segments: List[Dict[str, Any]] = []
+                try:
+                    for seg in event.get_message():
+                        try:
+                            seg_data = dict(getattr(seg, "data", {}))
+                        except Exception:
+                            seg_data = {}
+                        segments.append({
+                            "type": getattr(seg, "type", None),
+                            "data": seg_data,
+                        })
+                except Exception:
+                    segments = []
+
                 data: Dict[str, Any] = {
                     "post_type": "message",
                     "message_type": message_type,
@@ -117,14 +151,12 @@ class QQReceiver(BaseReceiver):
                     "self_id": self_id,
                     "message_id": str(getattr(event, "message_id", "")),
                     "raw_message": raw_plain,
+                    "message": segments,
                     "time": int(getattr(event, "time", int(time.time()))),
                     "sender": {
                         "nickname": getattr(getattr(event, "sender", None), "nickname", None),
                     },
                 }
-
-                if isinstance(event, GroupMessageEvent):
-                    data["group_id"] = str(getattr(event, "group_id", ""))
 
                 await self.process_message(data)
             except Exception as e:
@@ -301,8 +333,15 @@ class QQReceiver(BaseReceiver):
                 uid = int(user_id)
             except Exception:
                 uid = user_id  # 适配少数实现允许字符串
-            await bot.call_api("send_private_msg", user_id=uid, message=message)
-            return True
+            # 重试发送，缓解偶发超时
+            for attempt in range(3):
+                try:
+                    await bot.call_api("send_private_msg", user_id=uid, message=message)
+                    return True
+                except Exception as e:
+                    if attempt == 2:
+                        raise
+                    await asyncio.sleep(0.8 + attempt * 0.8)
         except Exception as e:
             self.logger.error(f"发送私聊消息失败: {e}")
             return False
@@ -317,10 +356,490 @@ class QQReceiver(BaseReceiver):
                 gid = int(group_id)
             except Exception:
                 gid = group_id
-            await bot.call_api("send_group_msg", group_id=gid, message=message)
-            return True
+            # 重试发送，缓解 Napcat/OneBot 偶发 retcode 1200 超时
+            for attempt in range(3):
+                try:
+                    await bot.call_api("send_group_msg", group_id=gid, message=message)
+                    return True
+                except Exception as e:
+                    if attempt == 2:
+                        raise
+                    await asyncio.sleep(1.0 + attempt * 1.0)
         except Exception as e:
             self.logger.error(f"发送群消息失败: {e}")
             return False
+
+    # ===== 指令解析与执行 =====
+    async def _try_handle_group_command(self, bot: Bot, event: GroupMessageEvent) -> bool:
+        try:
+            self_id = str(getattr(bot, "self_id", ""))
+            group_id = str(getattr(event, "group_id", ""))
+
+            # 是否 @了本机器人
+            if not self._is_at_self(event, self_id):
+                return False
+
+            # 取得 @ 后的纯文本
+            after_text = event.get_plaintext().strip()
+
+            # 帮助命令：任何成员、任意群均可触发
+            if after_text in ("帮助", "help", "指令"):
+                await self.send_group_message(group_id, self._build_help_text())
+                return True
+
+            # 其余命令：仅管理员/群主允许在管理群执行
+            if not self._is_admin_sender(event):
+                return False
+
+            group_name = self._resolve_group_name_by_group_id(group_id) or self._resolve_group_name_by_self_id(self_id)
+            if not group_name:
+                return False
+
+            # 如果是回复消息，尝试从被回复的消息里解析内部编号
+            reply_sub_id = await self._try_extract_submission_id_from_reply(bot, event)
+            if reply_sub_id is not None and after_text:
+                full_text = f"{reply_sub_id} {after_text}"
+            else:
+                full_text = after_text
+
+            if not full_text:
+                return False
+
+            # 判断是审核指令还是全局指令
+            tokens = full_text.split()
+            if not tokens:
+                return False
+
+            # 以数字开头 -> 审核指令
+            if tokens[0].isdigit():
+                submission_id = int(tokens[0])
+                cmd = tokens[1] if len(tokens) > 1 else ""
+                extra = " ".join(tokens[2:]) if len(tokens) > 2 else None
+                return await self._handle_audit_command(group_id, submission_id, cmd, str(event.user_id), extra)
+
+            # 非数字开头 -> 全局指令
+            return await self._handle_global_command(group_id, group_name, full_text)
+        except Exception as e:
+            self.logger.error(f"解析群指令失败: {e}", exc_info=True)
+            return False
+
+    def _is_admin_sender(self, event: GroupMessageEvent) -> bool:
+        try:
+            role = getattr(getattr(event, "sender", None), "role", None)
+            return role in ("admin", "owner")
+        except Exception:
+            return False
+
+    def _is_at_self(self, event: GroupMessageEvent, self_id: str) -> bool:
+        try:
+            return event.to_me
+        except Exception:
+            return False
+
+    async def _try_extract_submission_id_from_reply(self, bot: Bot, event: GroupMessageEvent) -> Optional[int]:
+        try:
+            reply_id = None
+            for seg in event.get_message():
+                if seg.type == "reply":
+                    rid = seg.data.get("id") or seg.data.get("message_id")
+                    if rid is not None:
+                        reply_id = int(rid)
+                        break
+            if reply_id is None:
+                return None
+
+            # 获取被回复消息
+            try:
+                resp = await bot.call_api("get_msg", message_id=reply_id)
+                # 解析纯文本
+                plain = ""
+                try:
+                    parts = []
+                    for seg in resp.get("message", []):
+                        if seg.get("type") == "text":
+                            parts.append(seg.get("data", {}).get("text", ""))
+                    plain = "".join(parts)
+                except Exception:
+                    plain = str(resp)
+                import re
+                m = re.search(r"内部编号(\d+)", plain)
+                if m:
+                    return int(m.group(1))
+            except Exception:
+                return None
+        except Exception:
+            return None
+        return None
+
+    def _resolve_group_name_by_group_id(self, group_id: str) -> Optional[str]:
+        try:
+            from config import get_settings
+            settings = get_settings()
+            for gname, group in settings.account_groups.items():
+                if str(group.manage_group_id) == str(group_id):
+                    return gname
+        except Exception:
+            pass
+        return None
+
+    def _resolve_group_name_by_self_id(self, self_id: str) -> Optional[str]:
+        try:
+            from config import get_settings
+            settings = get_settings()
+            for gname, group in settings.account_groups.items():
+                if str(group.main_account.qq_id) == str(self_id):
+                    return gname
+                for minor in group.minor_accounts:
+                    if str(minor.qq_id) == str(self_id):
+                        return gname
+        except Exception:
+            pass
+        return None
+
+    async def _handle_audit_command(self, group_id: str, submission_id: int, cmd: str, operator_id: str, extra: Optional[str]) -> bool:
+        try:
+            if not self.audit_service:
+                await self.send_group_message(group_id, "审核服务未就绪")
+                return True
+
+            # 将未知指令作为快捷回复键交给审核服务 quick_reply 兜底
+            result = await self.audit_service.handle_command(submission_id, cmd, operator_id, extra)
+
+            # 审核通过：触发发布并通知投稿者（解耦地调用服务层）
+            pub_ok = None
+            notif_ok = None
+            if cmd == "是":
+                try:
+                    if self.submission_service:
+                        pub_ok = await self.submission_service.publish_single_submission(submission_id)
+                except Exception as e:
+                    self.logger.error(f"审核通过后发布失败: {e}")
+                    pub_ok = False
+                try:
+                    if self.notification_service:
+                        notif_ok = await self.notification_service.send_submission_approved(submission_id)
+                except Exception as e:
+                    self.logger.error(f"审核通过后通知投稿者失败: {e}")
+                    notif_ok = False
+
+            # 特殊命令：立即 -> 同步触发发送暂存区并单发当前投稿
+            if cmd == "立即":
+                try:
+                    # 仅单发当前，避免与暂存区重复发送
+                    if self.submission_service:
+                        await self.submission_service.publish_single_submission(submission_id)
+                except Exception as e:
+                    self.logger.error(f"立即发送失败: {e}")
+
+            # 结果反馈
+            msg = result.get("message") if isinstance(result, dict) else str(result)
+            if cmd == "是":
+                parts = []
+                if pub_ok is not None:
+                    parts.append("已发布到QQ空间" if pub_ok else "发布到QQ空间失败")
+                if notif_ok is not None:
+                    parts.append("已私聊通知投稿者" if notif_ok else "通知投稿者失败")
+                if parts:
+                    extra_line = "；".join(parts)
+                    msg = (msg or "") + ("\n" + extra_line if extra_line else "")
+            if result.get("need_reaudit"):
+                msg = (msg or "") + "\n请继续发送审核指令"
+            await self.send_group_message(group_id, msg or "已处理")
+            return True
+        except Exception as e:
+            self.logger.error(f"执行审核指令异常: {e}", exc_info=True)
+            await self.send_group_message(group_id, f"指令执行失败: {e}")
+            return True
+
+    async def _handle_global_command(self, group_id: str, group_name: str, text: str) -> bool:
+        try:
+            # 规范化：按空白切分
+            parts = text.split()
+            if not parts:
+                return False
+            cmd = parts[0]
+            arg1 = parts[1] if len(parts) > 1 else None
+            arg_rest = " ".join(parts[1:]) if len(parts) > 1 else None
+
+            # 帮助
+            if cmd in ("帮助", "help", "指令"):
+                await self.send_group_message(group_id, self._build_help_text())
+                return True
+
+            # 设定编号 N
+            if cmd == "设定编号" and arg1 and arg1.isdigit():
+                try:
+                    from pathlib import Path
+                    num_dir = Path("data/cache/numb")
+                    num_dir.mkdir(parents=True, exist_ok=True)
+                    with open(num_dir / f"{group_name}_numfinal.txt", "w", encoding="utf-8") as f:
+                        f.write(str(int(arg1)))
+                    await self.send_group_message(group_id, f"外部编号已设定为{arg1}")
+                except Exception as e:
+                    await self.send_group_message(group_id, f"设定编号失败: {e}")
+                return True
+
+            # 自动重新登录 / 手动重新登录（统一按刷新登录处理）
+            if cmd in ("自动重新登录", "手动重新登录"):
+                try:
+                    from core.plugin import plugin_manager
+                    publisher = plugin_manager.get_publisher("qzone_publisher")
+                    if not publisher:
+                        await self.send_group_message(group_id, "QQ空间发送器未就绪")
+                        return True
+                    # 找到本组的所有账号
+                    accounts = [
+                        acc_id for acc_id, info in getattr(publisher, "accounts", {}).items()
+                        if info.get("group_name") == group_name
+                    ]
+                    if not accounts:
+                        await self.send_group_message(group_id, "未找到本组账号")
+                        return True
+                    ok_list = []
+                    fail_list = []
+                    for acc in accounts:
+                        try:
+                            ok = await publisher.refresh_login(acc)
+                            (ok_list if ok else fail_list).append(acc)
+                        except Exception:
+                            fail_list.append(acc)
+                    msg = "自动登录QQ空间尝试完毕\n" if cmd == "自动重新登录" else "手动登录刷新尝试完毕\n"
+                    if ok_list:
+                        msg += f"成功: {', '.join(ok_list)}\n"
+                    if fail_list:
+                        msg += f"失败: {', '.join(fail_list)}"
+                    await self.send_group_message(group_id, msg.strip())
+                except Exception as e:
+                    await self.send_group_message(group_id, f"刷新登录失败: {e}")
+                return True
+
+            # 调出 <id> -> 仅重渲染
+            if cmd == "调出" and arg1 and arg1.isdigit():
+                if not self.audit_service:
+                    await self.send_group_message(group_id, "审核服务未就绪")
+                    return True
+                res = await self.audit_service.rerender(int(arg1), operator_id=group_id)
+                await self.send_group_message(group_id, res.get("message", "已处理"))
+                return True
+
+            # 信息 <id>
+            if cmd == "信息" and arg1 and arg1.isdigit():
+                from core.database import get_db
+                from sqlalchemy import select
+                from core.models import Submission
+                db = await get_db()
+                async with db.get_session() as session:
+                    r = await session.execute(select(Submission).where(Submission.id == int(arg1)))
+                    sub = r.scalar_one_or_none()
+                    if not sub:
+                        await self.send_group_message(group_id, "投稿不存在")
+                        return True
+                    llm = sub.llm_result or {}
+                    msg = (
+                        f"接收者：{sub.receiver_id}\n"
+                        f"发送者：{sub.sender_id}\n"
+                        f"所属组：{sub.group_name}\n"
+                        f"处理后json：{llm if llm else '无'}\n"
+                        f"状态：{sub.status} 匿名：{ '是' if sub.is_anonymous else '否'}"
+                    )
+                    await self.send_group_message(group_id, msg)
+                return True
+
+            # 待处理
+            if cmd == "待处理":
+                if not self.submission_service:
+                    await self.send_group_message(group_id, "投稿服务未就绪")
+                    return True
+                pendings = await self.submission_service.get_pending_submissions(group_name)
+                if not pendings:
+                    await self.send_group_message(group_id, "本组没有待处理项目")
+                else:
+                    ids = "\n".join(str(s.id) for s in pendings)
+                    await self.send_group_message(group_id, f"本组待处理项目:\n{ids}")
+                return True
+
+            # 删除待处理 -> 全部标为已删除
+            if cmd == "删除待处理":
+                try:
+                    from core.database import get_db
+                    from sqlalchemy import select, update
+                    from core.models import Submission
+                    from core.enums import SubmissionStatus
+                    db = await get_db()
+                    async with db.get_session() as session:
+                        r = await session.execute(select(Submission).where(
+                            (Submission.group_name == group_name) & (Submission.status.in_([
+                                SubmissionStatus.PENDING.value,
+                                SubmissionStatus.PROCESSING.value,
+                                SubmissionStatus.WAITING.value
+                            ]))
+                        ))
+                        subs = r.scalars().all()
+                        if subs:
+                            await session.execute(update(Submission).where(Submission.id.in_([s.id for s in subs])).values(status=SubmissionStatus.DELETED.value))
+                            await session.commit()
+                    await self.send_group_message(group_id, "已清空待处理列表")
+                except Exception as e:
+                    await self.send_group_message(group_id, f"清空失败: {e}")
+                return True
+
+            # 删除暂存区
+            if cmd == "删除暂存区":
+                if not self.submission_service:
+                    await self.send_group_message(group_id, "投稿服务未就绪")
+                    return True
+                ok = await self.submission_service.clear_stored_posts(group_name)
+                await self.send_group_message(group_id, "已清空暂存区" if ok else "清空暂存区失败")
+                return True
+
+            # 发送暂存区
+            if cmd == "发送暂存区":
+                if not self.submission_service:
+                    await self.send_group_message(group_id, "投稿服务未就绪")
+                    return True
+                ok = await self.submission_service.publish_stored_posts(group_name)
+                await self.send_group_message(group_id, "投稿已发送" if ok else "发送失败")
+                return True
+
+            # 自检
+            if cmd == "自检":
+                try:
+                    from core.database import get_db
+                    db = await get_db()
+                    db_ok = await db.health_check()
+                except Exception:
+                    db_ok = False
+                # 登录状态
+                login_ok = False
+                try:
+                    from core.plugin import plugin_manager
+                    publisher = plugin_manager.get_publisher("qzone_publisher")
+                    if publisher:
+                        login_ok = await publisher.check_login_status()
+                except Exception:
+                    login_ok = False
+                msg = (
+                    "== 系统自检报告 ==\n"
+                    f"数据库: {'正常' if db_ok else '异常'}\n"
+                    f"QQ空间登录: {'正常' if login_ok else '异常'}\n"
+                    "==== 自检完成 ===="
+                )
+                await self.send_group_message(group_id, msg)
+                return True
+
+            # 取消拉黑 <qq>
+            if cmd == "取消拉黑" and arg1:
+                try:
+                    from core.database import get_db
+                    from sqlalchemy import delete
+                    from core.models import BlackList
+                    db = await get_db()
+                    async with db.get_session() as session:
+                        await session.execute(delete(BlackList).where((BlackList.user_id == str(arg1)) & (BlackList.group_name == group_name)))
+                        await session.commit()
+                    await self.send_group_message(group_id, f"已取消拉黑 senderid: {arg1}")
+                except Exception as e:
+                    await self.send_group_message(group_id, f"取消拉黑失败: {e}")
+                return True
+
+            # 列出拉黑
+            if cmd == "列出拉黑":
+                try:
+                    from core.database import get_db
+                    from sqlalchemy import select
+                    from core.models import BlackList
+                    db = await get_db()
+                    async with db.get_session() as session:
+                        r = await session.execute(select(BlackList).where(BlackList.group_name == group_name))
+                        rows = r.scalars().all()
+                    if not rows:
+                        await self.send_group_message(group_id, "当前账户组没有被拉黑的账号")
+                    else:
+                        lines = ["被拉黑账号列表："]
+                        for row in rows:
+                            lines.append(f"账号: {row.user_id}，理由: {row.reason or '无'}")
+                        await self.send_group_message(group_id, "\n".join(lines))
+                except Exception as e:
+                    await self.send_group_message(group_id, f"查询失败: {e}")
+                return True
+
+            # 快捷回复 管理
+            if cmd == "快捷回复":
+                subcmd = parts[1] if len(parts) > 1 else None
+                if subcmd == "添加" and len(parts) >= 3:
+                    kv = " ".join(parts[2:])
+                    if "=" in kv:
+                        k, v = kv.split("=", 1)
+                        ok, msg = self._quick_reply_update(group_name, k.strip(), v.strip(), op="add")
+                        await self.send_group_message(group_id, msg)
+                        return True
+                    await self.send_group_message(group_id, "错误：格式不正确，请使用 '指令名=内容'")
+                    return True
+                if subcmd == "删除" and len(parts) >= 3:
+                    k = " ".join(parts[2:]).strip()
+                    ok, msg = self._quick_reply_update(group_name, k, None, op="del")
+                    await self.send_group_message(group_id, msg)
+                    return True
+                # 查看列表
+                ok, msg = self._quick_reply_list(group_name)
+                await self.send_group_message(group_id, msg)
+                return True
+
+            # 未识别
+            return False
+        except Exception as e:
+            self.logger.error(f"处理全局指令失败: {e}", exc_info=True)
+            return False
+
+    def _quick_reply_update(self, group_name: str, key: str, value: Optional[str], op: str) -> Tuple[bool, str]:
+        try:
+            from config import get_settings
+            settings = get_settings()
+            group = settings.account_groups.get(group_name)
+            if not group:
+                return False, "找不到账号组配置"
+            # 冲突检查
+            if op == "add":
+                audit_cmds = {"是","否","匿","等","删","拒","立即","刷新","重渲染","扩列审查","评论","回复","展示","拉黑"}
+                if key in audit_cmds:
+                    return False, f"错误：快捷回复指令 '{key}' 与审核指令冲突"
+                group.quick_replies[key] = value or ""
+            elif op == "del":
+                if key not in group.quick_replies:
+                    return False, f"错误：快捷回复指令 '{key}' 不存在"
+                del group.quick_replies[key]
+            else:
+                return False, "无效操作"
+            # 持久化
+            settings.save_yaml()
+            return True, (f"已添加快捷回复指令：{key}" if op == "add" else f"已删除快捷回复指令：{key}")
+        except Exception as e:
+            return False, f"快捷回复更新失败: {e}"
+
+    def _quick_reply_list(self, group_name: str) -> Tuple[bool, str]:
+        try:
+            from config import get_settings
+            settings = get_settings()
+            group = settings.account_groups.get(group_name)
+            qrs = (group.quick_replies if group else {}) or {}
+            if not qrs:
+                return True, "当前账户组未配置快捷回复"
+            lines = ["当前账户组快捷回复列表："]
+            for k, v in qrs.items():
+                lines.append(f"指令: {k}\n内容: {v}")
+            return True, "\n".join(lines)
+        except Exception as e:
+            return False, f"获取快捷回复失败: {e}"
+
+    def _build_help_text(self) -> str:
+        return (
+            "全局指令:\n"
+            "语法: @本账号 指令\n\n"
+            "调出 <编号>\n信息 <编号>\n待处理\n删除待处理\n删除暂存区\n发送暂存区\n"
+            "取消拉黑 <QQ>\n列出拉黑\n设定编号 <数字>\n快捷回复 [添加 指令=内容|删除 指令]\n自检\n\n"
+            "审核指令:\n语法: @本账号 <内部编号> 指令 或 回复审核消息 指令\n"
+            "是/否/匿/等/删/拒/立即/刷新/重渲染/扩列审查/评论 <内容>/回复 <内容>/展示/拉黑 [理由]\n"
+            "也可使用已配置的快捷回复键"
+        )
 
 

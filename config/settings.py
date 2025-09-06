@@ -86,6 +86,8 @@ class AccountInfo(BaseModel):
     """账号信息"""
     qq_id: str
     http_port: int
+    # Napcat HTTP 服务端 Token（可选，用于访问 Napcat 本地 HTTP 接口）
+    http_token: Optional[str] = None
     
 class AccountGroup(BaseModel):
     """账号组配置"""

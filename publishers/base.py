@@ -37,6 +37,7 @@ class BasePublisher(PublisherPlugin):
             self.accounts[group.main_account.qq_id] = {
                 'qq_id': group.main_account.qq_id,
                 'http_port': group.main_account.http_port,
+                'http_token': getattr(group.main_account, 'http_token', None),
                 'group_name': group_name,
                 'is_main': True
             }
@@ -46,6 +47,7 @@ class BasePublisher(PublisherPlugin):
                 self.accounts[minor.qq_id] = {
                     'qq_id': minor.qq_id,
                     'http_port': minor.http_port,
+                    'http_token': getattr(minor, 'http_token', None),
                     'group_name': group_name,
                     'is_main': False
                 }

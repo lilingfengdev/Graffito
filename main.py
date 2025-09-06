@@ -79,6 +79,8 @@ class OQQWallApp:
         
         # 设置消息处理器
         self.setup_message_handlers()
+        # 注入服务到接收器
+        self.inject_services_into_receivers()
         
         logger.info("OQQWall 初始化完成")
         return True
@@ -88,7 +90,9 @@ class OQQWallApp:
         # 注册QQ接收器
         if self.settings.receivers.get('qq'):
             qq_config = self.settings.receivers['qq']
-            if hasattr(qq_config, 'dict'):
+            if hasattr(qq_config, 'model_dump'):
+                qq_config = qq_config.model_dump()
+            elif hasattr(qq_config, 'dict'):
                 qq_config = qq_config.dict()
             elif hasattr(qq_config, '__dict__'):
                 qq_config = qq_config.__dict__
@@ -100,7 +104,9 @@ class OQQWallApp:
         # 注册QQ空间发送器
         if self.settings.publishers.get('qzone'):
             qzone_config = self.settings.publishers['qzone']
-            if hasattr(qzone_config, 'dict'):
+            if hasattr(qzone_config, 'model_dump'):
+                qzone_config = qzone_config.model_dump()
+            elif hasattr(qzone_config, 'dict'):
                 qzone_config = qzone_config.dict()
             elif hasattr(qzone_config, '__dict__'):
                 qzone_config = qzone_config.__dict__
@@ -116,6 +122,19 @@ class OQQWallApp:
         if qq_receiver:
             qq_receiver.set_message_handler(self.handle_message)
             qq_receiver.set_friend_request_handler(self.handle_friend_request)
+
+    def inject_services_into_receivers(self):
+        """将服务实例注入接收器（用于指令处理等场景）"""
+        qq_receiver = plugin_manager.get_receiver('qq_receiver')
+        if qq_receiver and hasattr(qq_receiver, 'set_services'):
+            try:
+                qq_receiver.set_services(
+                    audit_service=self.audit_service,
+                    submission_service=self.submission_service,
+                    notification_service=self.notification_service
+                )
+            except Exception as e:
+                logger.warning(f"注入服务到接收器失败: {e}")
             
     async def handle_message(self, submission):
         """处理收到的消息（投稿）"""
@@ -188,11 +207,19 @@ class OQQWallApp:
             
         # 设置信号处理
         loop = asyncio.get_running_loop()
-        for sig in (signal.SIGTERM, signal.SIGINT):
-            loop.add_signal_handler(
-                sig,
-                lambda s=sig: self.handle_signal(s)
-            )
+        if sys.platform != "win32":
+            for sig in (signal.SIGTERM, signal.SIGINT):
+                loop.add_signal_handler(
+                    sig,
+                    lambda s=sig: self.handle_signal(s)
+                )
+        else:
+            # Windows 不支持 loop.add_signal_handler，使用同步 signal.signal
+            for sig in (signal.SIGTERM, signal.SIGINT):
+                try:
+                    signal.signal(sig, lambda s, f: self.handle_signal(s))
+                except Exception as e:
+                    logger.warning(f"设置 Windows 信号处理器失败: {e}")
             
         try:
             # 启动应用
@@ -220,7 +247,10 @@ async def main():
 if __name__ == "__main__":
     # Windows系统信号兼容
     if sys.platform == "win32":
-        asyncio.set_event_loop_policy(asyncio.WindowsSelectorEventLoopPolicy())
+        try:
+            asyncio.set_event_loop_policy(asyncio.WindowsProactorEventLoopPolicy())
+        except Exception as e:
+            logger.warning(f"设置 Windows Proactor 事件循环策略失败: {e}")
         
     try:
         asyncio.run(main())

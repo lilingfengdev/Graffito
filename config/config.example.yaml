@@ -73,9 +73,11 @@ account_groups:
     main_account:
       qq_id: "1234567890"  # 主账号QQ
       http_port: 3000  # NapCat HTTP端口（若使用 NapCat/QSign 等，需要仍保留）
+      http_token: ""   # Napcat HTTP Token（若启用HTTP鉴权则填写）
     minor_accounts: []  # 副账号列表
     # - qq_id: "9876543210"
     #   http_port: 3001
+    #   http_token: ""
     max_post_stack: 1
     max_images_per_post: 30
     send_schedule: []

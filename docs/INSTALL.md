@@ -129,10 +129,12 @@ account_groups:
     manage_group_id: "123456789"  # 管理群号
     main_account:
       qq_id: "1234567890"  # 主账号QQ
-      http_port: 3000  # NapCat端口
+      http_port: 3000       # NapCat端口
+      http_token: ""        # Napcat HTTP Token（若启用）
     minor_accounts:  # 副账号（可选）
       - qq_id: "9876543210"
         http_port: 3001
+        http_token: ""
 ```
 
 ### LLM配置

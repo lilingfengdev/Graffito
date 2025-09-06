@@ -137,7 +137,7 @@ class SubmissionService:
         db = await get_db()
         async with db.get_session() as session:
             # 获取投稿
-            from sqlalchemy import select
+            from sqlalchemy import select, and_
             stmt = select(Submission).where(Submission.id == submission_id)
             result = await session.execute(stmt)
             submission = result.scalar_one_or_none()
@@ -168,38 +168,15 @@ class SubmissionService:
                 
     async def send_audit_notification(self, submission_id: int):
         """发送审核通知到管理群"""
-        db = await get_db()
-        async with db.get_session() as session:
-            from sqlalchemy import select
-            stmt = select(Submission).where(Submission.id == submission_id)
-            result = await session.execute(stmt)
-            submission = result.scalar_one_or_none()
-            
-            if not submission:
-                return
-                
-            # 构建通知消息
-            message = f"有投稿消息"
-            
-            if submission.is_complete:
-                message += "，AI判断已写完"
-            else:
-                message += "，AI判断未写完"
-                
-            if submission.is_safe:
-                message += "，AI审核判定安全"
-            else:
-                message += "，AI审核判定不安全"
-                
-            message += f"，内部编号{submission.id}，请发送指令"
-            
-            # 添加渲染的图片
-            if submission.rendered_images:
-                # TODO: 发送图片到群
-                pass
-                
-            # TODO: 通过接收器发送到管理群
-            self.logger.info(f"审核通知: {message}")
+        try:
+            # 复用通知服务的统一逻辑（含图片发送）
+            from .notification_service import NotificationService
+            notifier = NotificationService()
+            ok = await notifier.send_audit_request(submission_id)
+            if not ok:
+                self.logger.error(f"发送审核通知失败: submission_id={submission_id}")
+        except Exception as e:
+            self.logger.error(f"发送审核通知异常: {e}", exc_info=True)
             
     async def get_group_name(self, receiver_id: str) -> Optional[str]:
         """根据接收者ID获取账号组名称"""
@@ -277,7 +254,7 @@ class SubmissionService:
                     
                     publish_items.append({
                         'submission_id': submission.id,
-                        'text': text,
+                        'content': text,
                         'images': images
                     })
                     
@@ -311,6 +288,42 @@ class SubmissionService:
                     
         except Exception as e:
             self.logger.error(f"发布暂存投稿失败: {e}", exc_info=True)
+            return False
+            
+    async def publish_single_submission(self, submission_id: int) -> bool:
+        """发布单条投稿，并在成功后从暂存区移除该条
+        
+        Args:
+            submission_id: 投稿ID
+        
+        Returns:
+            是否发布成功
+        """
+        try:
+            # 需要可用的发送器
+            if 'qzone' not in self.publishers:
+                self.logger.error("没有可用的发送器")
+                return False
+            publisher = self.publishers['qzone']
+
+            # 直接复用发送器的单发逻辑（含记录与状态更新）
+            result = await publisher.publish_submission(submission_id)
+
+            # 成功则移除对应暂存记录
+            if result.get('success'):
+                db = await get_db()
+                async with db.get_session() as session:
+                    from sqlalchemy import delete
+                    from core.models import StoredPost
+                    stmt = delete(StoredPost).where(StoredPost.submission_id == submission_id)
+                    await session.execute(stmt)
+                    await session.commit()
+                return True
+            else:
+                self.logger.error(f"发布失败: {result}")
+                return False
+        except Exception as e:
+            self.logger.error(f"发布单条投稿失败: {e}", exc_info=True)
             return False
             
     def build_publish_text(self, submission: Submission) -> str:

@@ -44,30 +44,49 @@ class NotificationService:
                 self.logger.error("QQ接收器未初始化")
                 return False
                 
-            # 构建消息
-            full_message = message
-            if images:
-                # 添加图片CQ码
-                for img in images:
-                    if img.startswith('http'):
-                        full_message += f"[CQ:image,file={img}]"
-                    elif img.startswith('file://'):
-                        full_message += f"[CQ:image,file={img}]"
-                    else:
-                        full_message += f"[CQ:image,file=file://{img}]"
-                        
-            # 发送群消息
-            success = await qq_receiver.send_group_message(
-                manage_group_id,
-                full_message
-            )
-            
-            if success:
-                self.logger.info(f"发送管理群消息成功: {manage_group_id}")
+            # 先发文本
+            success = await qq_receiver.send_group_message(manage_group_id, message)
+            if not success:
+                self.logger.error(f"发送管理群文本失败: {manage_group_id}")
+                # 继续尝试发送图片
             else:
-                self.logger.error(f"发送管理群消息失败: {manage_group_id}")
-                
-            return success
+                self.logger.info(f"发送管理群文本成功: {manage_group_id}")
+
+            # 再逐张发图片，遇到错误重试一次
+            if images:
+                from pathlib import Path
+                for img in images:
+                    # 规范化为可用的 file/url
+                    try:
+                        if isinstance(img, str) and (img.startswith('http://') or img.startswith('https://')):
+                            cq = f"[CQ:image,file={img}]"
+                        else:
+                            p = Path(str(img))
+                            if not str(img).startswith('file://'):
+                                if not p.is_absolute():
+                                    p = (Path.cwd() / p).resolve()
+                                img_uri = p.as_uri()
+                            else:
+                                img_uri = str(img)
+                            cq = f"[CQ:image,file={img_uri}]"
+                    except Exception:
+                        cq = f"[CQ:image,file={img}]"
+
+                    sent_ok = False
+                    for attempt in range(2):
+                        try:
+                            img_ok = await qq_receiver.send_group_message(manage_group_id, cq)
+                            if img_ok:
+                                sent_ok = True
+                                break
+                            await asyncio.sleep(0.8)
+                        except Exception:
+                            await asyncio.sleep(1.0)
+                    if not sent_ok:
+                        self.logger.error(f"发送管理群图片失败: {manage_group_id}, img={img}")
+                        # 不中断其余图片
+
+            return success or True
             
         except Exception as e:
             self.logger.error(f"发送管理群消息异常: {e}", exc_info=True)

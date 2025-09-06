@@ -246,7 +246,29 @@ class LLMProcessor(ProcessorPlugin):
             )
             
             if response.status_code == 200:
-                return response.output.choices[0].message.content
+                content = response.output.choices[0].message.content
+                # content 可能是 list[{'text': '...'}, {'image': '...'}]
+                if isinstance(content, list):
+                    texts = []
+                    for item in content:
+                        try:
+                            if isinstance(item, dict) and 'text' in item:
+                                texts.append(str(item.get('text') or ''))
+                        except Exception:
+                            continue
+                    if texts:
+                        return "\n".join(texts)
+                    # 若没有 text 段，回退为 JSON 文本
+                    import json as _json
+                    try:
+                        return _json.dumps(content, ensure_ascii=False)
+                    except Exception:
+                        return str(content)
+                # 若已是字符串
+                if isinstance(content, str):
+                    return content
+                # 其他类型回退
+                return str(content)
             else:
                 raise Exception(f"视觉LLM调用失败: {response.message}")
                 
@@ -254,9 +276,16 @@ class LLMProcessor(ProcessorPlugin):
             self.logger.error(f"视觉LLM调用异常: {e}")
             raise
             
-    def parse_llm_response(self, response: str) -> Dict[str, Any]:
+    def parse_llm_response(self, response: Any) -> Dict[str, Any]:
         """解析LLM响应"""
         try:
+            # 统一将响应转换为字符串
+            if not isinstance(response, str):
+                try:
+                    import json as _json
+                    response = _json.dumps(response, ensure_ascii=False)
+                except Exception:
+                    response = str(response)
             # 尝试提取JSON
             import re
             json_match = re.search(r'\{.*\}', response, re.DOTALL)

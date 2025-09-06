@@ -75,6 +75,8 @@ class BaseReceiver(ReceiverPlugin):
                 message_time=float(message.get('time', 0))
             )
             session.add(cache)
+            # 需要提交以便后续合并消息时能查询到
+            await session.commit()
             
     async def should_create_submission(self, message: Dict[str, Any]) -> bool:
         """判断是否需要创建新投稿"""
