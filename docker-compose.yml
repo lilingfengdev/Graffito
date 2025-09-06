@@ -1,0 +1,57 @@
+version: '3.8'
+
+services:
+  oqqwall:
+    build: .
+    container_name: oqqwall
+    restart: unless-stopped
+    ports:
+      - "8082:8082"
+    volumes:
+      - ./config:/app/config
+      - ./data:/app/data
+      - ./logs:/app/data/logs
+    environment:
+      - LLM_API_KEY=${LLM_API_KEY}
+      - DEBUG=${DEBUG:-false}
+      - LOG_LEVEL=${LOG_LEVEL:-INFO}
+    networks:
+      - oqqwall_net
+    depends_on:
+      - redis
+    
+  redis:
+    image: redis:7-alpine
+    container_name: oqqwall_redis
+    restart: unless-stopped
+    ports:
+      - "6379:6379"
+    volumes:
+      - redis_data:/data
+    networks:
+      - oqqwall_net
+    command: redis-server --appendonly yes
+    
+  # 可选：PostgreSQL数据库
+  # postgres:
+  #   image: postgres:15-alpine
+  #   container_name: oqqwall_db
+  #   restart: unless-stopped
+  #   environment:
+  #     POSTGRES_DB: oqqwall
+  #     POSTGRES_USER: oqqwall
+  #     POSTGRES_PASSWORD: ${DB_PASSWORD:-oqqwall123}
+  #   ports:
+  #     - "5432:5432"
+  #   volumes:
+  #     - postgres_data:/var/lib/postgresql/data
+  #   networks:
+  #     - oqqwall_net
+
+networks:
+  oqqwall_net:
+    driver: bridge
+
+volumes:
+  redis_data:
+  # postgres_data:

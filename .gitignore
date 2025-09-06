@@ -1,0 +1,88 @@
+# Python
+__pycache__/
+*.py[cod]
+*$py.class
+*.so
+.Python
+venv/
+env/
+ENV/
+.venv
+
+# IDE
+.vscode/
+.idea/
+*.swp
+*.swo
+*~
+.DS_Store
+
+# 配置文件
+config/config.yaml
+.env
+*.env.local
+*.env.production
+
+# 数据文件
+data/
+*.db
+*.db-journal
+*.db-wal
+*.sqlite
+*.sqlite3
+
+# 日志
+logs/
+*.log
+*.log.*
+
+# 缓存
+cache/
+.cache/
+*.cache
+
+# Cookies
+cookies/
+*.json
+cookies-*.json
+
+# 测试
+.coverage
+htmlcov/
+.pytest_cache/
+.tox/
+*.cover
+
+# 构建
+build/
+dist/
+*.egg-info/
+.eggs/
+
+# Docker
+docker-compose.override.yml
+
+# 备份
+*.backup
+*.bak
+backup/
+
+# 临时文件
+tmp/
+temp/
+*.tmp
+*.temp
+
+# 用户数据
+uploads/
+downloads/
+rendered/
+
+# 其他
+.mypy_cache/
+.dmypy.json
+dmypy.json
+.pyre/
+.pytype/
+pip-log.txt
+pip-delete-this-directory.txt
