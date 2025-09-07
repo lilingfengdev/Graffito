@@ -2,6 +2,7 @@
 import asyncio
 import time
 from typing import Dict, Any, Optional, List, Tuple
+import re
 
 from loguru import logger
 from uvicorn import Server, Config
@@ -131,6 +132,12 @@ class QQReceiver(BaseReceiver):
                     return
 
                 # 私聊 -> 进入投稿缓存/建稿流程
+                # 在进入建稿流程前，优先解析私聊指令（如：#评论 <投稿ID> <内容>）
+                if isinstance(event, PrivateMessageEvent):
+                    handled_cmd = await self._try_handle_private_command(user_id, self_id, raw_plain)
+                    if handled_cmd:
+                        return
+
                 # 提取消息段（用于渲染）
                 segments: List[Dict[str, Any]] = []
                 try:
@@ -827,6 +834,103 @@ class QQReceiver(BaseReceiver):
         except Exception as e:
             self.logger.error(f"处理全局指令失败: {e}", exc_info=True)
             return False
+
+    async def _try_handle_private_command(self, user_id: str, self_id: str, raw_text: str) -> bool:
+        """解析并处理私聊指令。目前支持：
+        - #评论 <投稿ID> <内容>  -> 投稿者本人为其投稿追加匿名评论
+        识别到并处理返回 True；未识别返回 False。
+        """
+        try:
+            text = (raw_text or "").strip()
+            # 允许前缀可选的 #
+            m = re.match(r"^#?评论\s+(\d+)\s+(.+)$", text)
+            if not m:
+                return False
+
+            submission_id = int(m.group(1))
+            comment_text = m.group(2).strip()
+            if not comment_text:
+                await self.send_private_message(user_id, "错误：评论内容不能为空")
+                return True
+
+            # 查询投稿并进行状态校验
+            from core.database import get_db
+            from sqlalchemy import select
+            from core.models import Submission
+            from core.enums import SubmissionStatus
+
+            db = await get_db()
+            async with db.get_session() as session:
+                r = await session.execute(select(Submission).where(Submission.id == submission_id))
+                submission = r.scalar_one_or_none()
+
+                if not submission:
+                    await self.send_private_message(user_id, "错误：投稿不存在")
+                    return True
+
+                # 仅允许对已发布的投稿同步评论
+                if submission.status != SubmissionStatus.PUBLISHED.value:
+                    await self.send_private_message(user_id, "当前投稿尚未发布，无法同步评论到QQ空间")
+                    return True
+
+            # 记录审核日志（若可用），根据配置决定是否匿名记录操作者
+            try:
+                if self.audit_service:
+                    try:
+                        from config import get_settings
+                        settings = get_settings()
+                        # 需要 submission 的组名以判断配置
+                        group_name = None
+                        try:
+                            # 重新读取一次提交记录获取组名（上面查询的 submission 已存在于局部作用域，但作用域外不可用）
+                            db2 = await get_db()
+                            async with db2.get_session() as s2:
+                                from sqlalchemy import select as _select
+                                from core.models import Submission as _Submission
+                                rr = await s2.execute(_select(_Submission).where(_Submission.id == submission_id))
+                                sub_row = rr.scalar_one_or_none()
+                                if sub_row:
+                                    group_name = sub_row.group_name
+                        except Exception:
+                            group_name = None
+                        allow_anon = True
+                        if group_name and group_name in settings.account_groups:
+                            grp = settings.account_groups.get(group_name)
+                            allow_anon = bool(getattr(grp, 'allow_anonymous_comment', True))
+                        operator_for_log = "anonymous" if allow_anon else user_id
+                    except Exception:
+                        operator_for_log = user_id
+                    await self.audit_service.log_audit(submission_id, operator_for_log, "评论", comment_text)
+            except Exception:
+                pass
+
+            # 同步到QQ空间：使用对应发布账号调用API
+            try:
+                from core.plugin import plugin_manager
+                publisher = plugin_manager.get_publisher("qzone_publisher")
+                if not publisher:
+                    await self.send_private_message(user_id, "发送器未就绪，稍后再试")
+                    return True
+                result = await publisher.add_comment_for_submission(submission_id, comment_text)
+                if result.get("success"):
+                    await self.send_private_message(user_id, f"评论成功：已同步到QQ空间（投稿 {submission_id}）")
+                else:
+                    await self.send_private_message(user_id, f"评论失败：{result.get('message','未知错误')}")
+                return True
+            except Exception as e:
+                self.logger.error(f"QQ空间评论同步失败: {e}")
+                await self.send_private_message(user_id, "评论失败：系统异常")
+                return True
+
+            # 不应到达此处
+            return False
+        except Exception as e:
+            self.logger.error(f"处理私聊评论指令失败: {e}", exc_info=True)
+            try:
+                await self.send_private_message(user_id, f"处理失败：{e}")
+            except Exception:
+                pass
+            return True
 
     def _quick_reply_update(self, group_name: str, key: str, value: Optional[str], op: str) -> Tuple[bool, str]:
         try:
