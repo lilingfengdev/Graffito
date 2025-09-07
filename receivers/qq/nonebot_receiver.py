@@ -873,10 +873,34 @@ class QQReceiver(BaseReceiver):
                     await self.send_private_message(user_id, "当前投稿尚未发布，无法同步评论到QQ空间")
                     return True
 
-            # 记录审核日志（若可用）
+            # 记录审核日志（若可用），根据配置决定是否匿名记录操作者
             try:
                 if self.audit_service:
-                    await self.audit_service.log_audit(submission_id, user_id, "评论", comment_text)
+                    try:
+                        from config import get_settings
+                        settings = get_settings()
+                        # 需要 submission 的组名以判断配置
+                        group_name = None
+                        try:
+                            # 重新读取一次提交记录获取组名（上面查询的 submission 已存在于局部作用域，但作用域外不可用）
+                            db2 = await get_db()
+                            async with db2.get_session() as s2:
+                                from sqlalchemy import select as _select
+                                from core.models import Submission as _Submission
+                                rr = await s2.execute(_select(_Submission).where(_Submission.id == submission_id))
+                                sub_row = rr.scalar_one_or_none()
+                                if sub_row:
+                                    group_name = sub_row.group_name
+                        except Exception:
+                            group_name = None
+                        allow_anon = True
+                        if group_name and group_name in settings.account_groups:
+                            grp = settings.account_groups.get(group_name)
+                            allow_anon = bool(getattr(grp, 'allow_anonymous_comment', True))
+                        operator_for_log = "anonymous" if allow_anon else user_id
+                    except Exception:
+                        operator_for_log = user_id
+                    await self.audit_service.log_audit(submission_id, operator_for_log, "评论", comment_text)
             except Exception:
                 pass
 
