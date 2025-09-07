@@ -121,6 +121,7 @@ class AccountGroup(BaseModel):
     max_images_per_post: int = 30
     send_schedule: List[str] = Field(default_factory=list)
     watermark_text: str = ""
+    wall_mark: str = ""
     friend_add_message: str = "你好，欢迎投稿"
     quick_replies: Dict[str, str] = Field(default_factory=dict)
     # 是否允许匿名评论（私聊 #评论 指令的操作者在审核日志中匿名记录）

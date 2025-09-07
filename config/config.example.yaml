@@ -101,6 +101,7 @@ account_groups:
     max_images_per_post: 30
     send_schedule: []
     watermark_text: ""
+    wall_mark: "OQQWall"  # 渲染页底部显示的墙标识（如 学校墙/社团墙）
     friend_add_message: "你好，欢迎投稿"
     quick_replies:
       "格式": "投稿格式：直接发送文字+图片即可"
