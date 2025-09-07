@@ -2,6 +2,7 @@
 import asyncio
 import time
 from typing import Dict, Any, Optional, List, Tuple
+import re
 
 from loguru import logger
 from uvicorn import Server, Config
@@ -131,6 +132,12 @@ class QQReceiver(BaseReceiver):
                     return
 
                 # 私聊 -> 进入投稿缓存/建稿流程
+                # 在进入建稿流程前，优先解析私聊指令（如：#评论 <投稿ID> <内容>）
+                if isinstance(event, PrivateMessageEvent):
+                    handled_cmd = await self._try_handle_private_command(user_id, self_id, raw_plain)
+                    if handled_cmd:
+                        return
+
                 # 提取消息段（用于渲染）
                 segments: List[Dict[str, Any]] = []
                 try:
@@ -827,6 +834,80 @@ class QQReceiver(BaseReceiver):
         except Exception as e:
             self.logger.error(f"处理全局指令失败: {e}", exc_info=True)
             return False
+
+    async def _try_handle_private_command(self, user_id: str, self_id: str, raw_text: str) -> bool:
+        """解析并处理私聊指令。目前支持：
+        - #评论 <投稿ID> <内容>  -> 投稿者本人为其投稿追加匿名评论
+        识别到并处理返回 True；未识别返回 False。
+        """
+        try:
+            text = (raw_text or "").strip()
+            # 允许前缀可选的 #
+            m = re.match(r"^#?评论\s+(\d+)\s+(.+)$", text)
+            if not m:
+                return False
+
+            submission_id = int(m.group(1))
+            comment_text = m.group(2).strip()
+            if not comment_text:
+                await self.send_private_message(user_id, "错误：评论内容不能为空")
+                return True
+
+            # 查询投稿并进行权限/状态校验
+            from core.database import get_db
+            from sqlalchemy import select
+            from core.models import Submission
+            from core.enums import SubmissionStatus
+
+            db = await get_db()
+            async with db.get_session() as session:
+                r = await session.execute(select(Submission).where(Submission.id == submission_id))
+                submission = r.scalar_one_or_none()
+
+                if not submission:
+                    await self.send_private_message(user_id, "错误：投稿不存在")
+                    return True
+
+                # 仅允许投稿者本人对自己的投稿添加评论
+                if str(submission.sender_id) != str(user_id):
+                    await self.send_private_message(user_id, "错误：只有投稿者本人可以为该投稿添加评论")
+                    return True
+
+                # 限制在未发布/未删除前添加
+                if submission.status in (SubmissionStatus.PUBLISHED.value, SubmissionStatus.DELETED.value):
+                    await self.send_private_message(user_id, "错误：该投稿已发布或已删除，无法添加评论")
+                    return True
+
+                # 更新评论（匿名评论：不会携带用户身份信息）。若已存在则追加。
+                if submission.comment and str(submission.comment).strip():
+                    submission.comment = f"{submission.comment}\n{comment_text}"
+                else:
+                    submission.comment = comment_text
+                await session.commit()
+
+            # 记录审核日志（若可用）
+            try:
+                if self.audit_service:
+                    await self.audit_service.log_audit(submission_id, user_id, "评论", comment_text)
+            except Exception:
+                pass
+
+            # 通知管理群重新审核（若可用）
+            try:
+                if self.notification_service:
+                    await self.notification_service.send_audit_request(submission_id)
+            except Exception:
+                pass
+
+            await self.send_private_message(user_id, f"已添加评论到投稿 {submission_id}，请等待审核")
+            return True
+        except Exception as e:
+            self.logger.error(f"处理私聊评论指令失败: {e}", exc_info=True)
+            try:
+                await self.send_private_message(user_id, f"处理失败：{e}")
+            except Exception:
+                pass
+            return True
 
     def _quick_reply_update(self, group_name: str, key: str, value: Optional[str], op: str) -> Tuple[bool, str]:
         try:
