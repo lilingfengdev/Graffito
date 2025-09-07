@@ -82,6 +82,22 @@ class QzonePublisherConfig(BaseModel):
     image_source: str = "rendered"  # rendered|chat|both
     include_segments: bool = True  # 是否在文本中包含聊天分段内容
     
+class BilibiliPublisherConfig(BaseModel):
+    """B站发送器配置"""
+    enabled: bool = False
+    max_attempts: int = 3
+    batch_size: int = 30
+    max_images_per_post: int = 9
+    send_schedule: List[str] = Field(default_factory=list)
+    # 发布控制（与通用字段对齐，便于基类使用）
+    publish_text: bool = True
+    include_publish_id: bool = True
+    include_at_sender: bool = False  # B站@需要 at_uids，默认关闭
+    image_source: str = "rendered"  # rendered|chat|both
+    include_segments: bool = False
+    # 账号 cookies 配置：{"account_id": {"cookie_file": "..."}}
+    accounts: Dict[str, Dict[str, Any]] = Field(default_factory=dict)
+
 class AuditConfig(BaseModel):
     """审核配置"""
     auto_approve: bool = False
@@ -146,6 +162,8 @@ class Settings(BaseSettings):
         if 'publishers' in data:
             if 'qzone' in data['publishers']:
                 data['publishers']['qzone'] = QzonePublisherConfig(**data['publishers']['qzone'])
+            if 'bilibili' in data['publishers']:
+                data['publishers']['bilibili'] = BilibiliPublisherConfig(**data['publishers']['bilibili'])
                 
         # 处理账号组配置
         if 'account_groups' in data:

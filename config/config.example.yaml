@@ -63,6 +63,19 @@ publishers:
     include_at_sender: true       # 是否@投稿者
     image_source: both            # 图片来源：rendered|chat|both
     include_segments: false       # 是否包含聊天分段文本（false 不发聊天记录）
+  bilibili:
+    enabled: false
+    max_attempts: 3
+    batch_size: 30
+    max_images_per_post: 9
+    send_schedule: []
+    publish_text: true
+    include_publish_id: true
+    include_at_sender: false
+    image_source: rendered
+    include_segments: false
+    # 可选：直接指定各账号的 cookie 文件位置（如未指定则默认 data/cookies/bilibili_{account_id}.json）
+    accounts: {}
     
 # 审核配置
 audit:

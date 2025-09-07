@@ -31,6 +31,7 @@ from core.plugin import plugin_manager
 # 导入插件
 from receivers.qq import QQReceiver
 from publishers.qzone import QzonePublisher
+from publishers.bilibili import BilibiliPublisher
 
 # 导入服务
 from services import AuditService, SubmissionService, NotificationService
@@ -114,6 +115,21 @@ class OQQWallApp:
             qzone_publisher = QzonePublisher(qzone_config)
             plugin_manager.register(qzone_publisher)
             logger.info("已注册 QQ空间 发送器")
+
+        # 注册B站发送器
+        if self.settings.publishers.get('bilibili'):
+            bili_config = self.settings.publishers['bilibili']
+            if hasattr(bili_config, 'model_dump'):
+                bili_config = bili_config.model_dump()
+            elif hasattr(bili_config, 'dict'):
+                bili_config = bili_config.dict()
+            elif hasattr(bili_config, '__dict__'):
+                bili_config = bili_config.__dict__
+
+            if bili_config.get('enabled'):
+                bili_publisher = BilibiliPublisher(bili_config)
+                plugin_manager.register(bili_publisher)
+                logger.info("已注册 Bilibili 发送器")
             
     def setup_message_handlers(self):
         """设置消息处理器"""
