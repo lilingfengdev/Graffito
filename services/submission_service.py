@@ -9,6 +9,7 @@ from core.models import Submission, MessageCache, StoredPost, PublishRecord
 from core.enums import SubmissionStatus, PublishPlatform
 from processors.pipeline import ProcessingPipeline
 from publishers.qzone import QzonePublisher
+from publishers.bilibili import BilibiliPublisher
 
 
 class SubmissionService:
@@ -38,6 +39,18 @@ class SubmissionService:
                 qzone_publisher = QzonePublisher(qzone_config)
                 await qzone_publisher.initialize()
                 self.publishers['qzone'] = qzone_publisher
+
+        # 初始化B站发送器
+        if settings.publishers.get('bilibili'):
+            bili_config = settings.publishers['bilibili']
+            if hasattr(bili_config, 'dict'):
+                bili_config = bili_config.dict()
+            elif hasattr(bili_config, '__dict__'):
+                bili_config = bili_config.__dict__
+            if bili_config.get('enabled'):
+                bili_publisher = BilibiliPublisher(bili_config)
+                await bili_publisher.initialize()
+                self.publishers['bilibili'] = bili_publisher
                 
         self.logger.info("投稿服务初始化完成")
         
@@ -258,46 +271,38 @@ class SubmissionService:
                 result = await session.execute(stmt)
                 submissions = result.scalars().all()
                 
-                # 构建发布内容
-                publish_items = []
-                for submission in submissions:
-                    # 生成发布文本（即便平台禁用正文，也携带链接）
-                    text = self.build_publish_text(submission, include_text=True)
-                    images = submission.rendered_images or []
-                    
-                    publish_items.append({
-                        'submission_id': submission.id,
-                        'content': text,
-                        'images': images
-                    })
-                    
-                # 使用发送器发布
-                if 'qzone' in self.publishers:
-                    publisher = self.publishers['qzone']
-                    
-                    # 批量发布
-                    results = await publisher.batch_publish(publish_items)
-                    
-                    # 记录发布结果
-                    for i, result in enumerate(results):
-                        if result.get('success'):
-                            # 更新投稿状态
-                            submission = submissions[i]
-                            submission.status = SubmissionStatus.PUBLISHED.value
-                            submission.published_at = datetime.now()
-                            
-                    # 清空暂存区
-                    from sqlalchemy import delete
-                    stmt = delete(StoredPost).where(StoredPost.group_name == group_name)
-                    await session.execute(stmt)
-                    
-                    await session.commit()
-                    
-                    self.logger.info(f"发布 {len(publish_items)} 个投稿完成")
-                    return True
-                else:
+                # 使用发送器发布到所有已启用平台（各自根据平台配置生成文案/图片源）
+                if not self.publishers:
                     self.logger.error("没有可用的发送器")
                     return False
+
+                platform_results: Dict[str, List[Dict[str, Any]]] = {}
+                for name, publisher in self.publishers.items():
+                    try:
+                        res = await publisher.batch_publish_submissions([s.id for s in submissions])
+                        platform_results[name] = res
+                    except Exception as e:
+                        self.logger.error(f"平台 {name} 发布失败: {e}")
+                        platform_results[name] = [{'success': False, 'error': str(e)}] * len(submissions)
+
+                # 若任一平台成功则标记投稿为已发布
+                for i, sub in enumerate(submissions):
+                    ok_any = False
+                    for name, results in platform_results.items():
+                        if i < len(results) and results[i].get('success'):
+                            ok_any = True
+                    if ok_any:
+                        sub.status = SubmissionStatus.PUBLISHED.value
+                        sub.published_at = datetime.now()
+
+                # 清空暂存区
+                from sqlalchemy import delete
+                stmt = delete(StoredPost).where(StoredPost.group_name == group_name)
+                await session.execute(stmt)
+                await session.commit()
+
+                self.logger.info(f"发布 {len(submissions)} 个投稿完成（平台：{list(self.publishers.keys())}）")
+                return True
                     
         except Exception as e:
             self.logger.error(f"发布暂存投稿失败: {e}", exc_info=True)
@@ -313,17 +318,17 @@ class SubmissionService:
             是否发布成功
         """
         try:
-            # 需要可用的发送器
-            if 'qzone' not in self.publishers:
-                self.logger.error("没有可用的发送器")
-                return False
-            publisher = self.publishers['qzone']
+            # 所有平台尝试发布，任一成功即视为成功
+            any_success = False
+            last_error: Optional[str] = None
+            for name, publisher in self.publishers.items():
+                result = await publisher.publish_submission(submission_id)
+                if result.get('success'):
+                    any_success = True
+                else:
+                    last_error = result.get('error') or result.get('message')
 
-            # 直接复用发送器的单发逻辑（含记录与状态更新）
-            result = await publisher.publish_submission(submission_id)
-
-            # 成功则移除对应暂存记录
-            if result.get('success'):
+            if any_success:
                 db = await get_db()
                 async with db.get_session() as session:
                     from sqlalchemy import delete
@@ -333,7 +338,7 @@ class SubmissionService:
                     await session.commit()
                 return True
             else:
-                self.logger.error(f"发布失败: {result}")
+                self.logger.error(f"发布失败: {last_error}")
                 return False
         except Exception as e:
             self.logger.error(f"发布单条投稿失败: {e}", exc_info=True)

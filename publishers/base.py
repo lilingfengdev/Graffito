@@ -66,22 +66,15 @@ class BasePublisher(PublisherPlugin):
                 return {'success': False, 'error': '投稿不存在'}
                 
             # 读取平台配置
-            from config import get_settings
-            settings = get_settings()
-            qzone_cfg = settings.publishers.get('qzone')
-            if hasattr(qzone_cfg, 'dict'):
-                qzone_cfg = qzone_cfg.dict()
-            elif hasattr(qzone_cfg, '__dict__'):
-                qzone_cfg = qzone_cfg.__dict__
-            qzone_cfg = qzone_cfg or {}
+            cfg = self._get_platform_config()
 
             # 准备发布内容（可配置：是否发文本、图片来源）
-            publish_text = qzone_cfg.get('publish_text', True)
+            publish_text = cfg.get('publish_text', True)
             # 即便不发布正文文本，也要附加链接
             content = self.prepare_content(submission, include_text=publish_text, **kwargs)
 
             # 决定图片来源
-            image_source = qzone_cfg.get('image_source', 'rendered')
+            image_source = cfg.get('image_source', 'rendered')
             images: List[str] = []
             if image_source in ('rendered', 'both'):
                 images.extend(submission.rendered_images or [])
@@ -124,16 +117,9 @@ class BasePublisher(PublisherPlugin):
             # 准备批量发布内容
             items = []
             # 读取平台配置
-            from config import get_settings
-            settings = get_settings()
-            qzone_cfg = settings.publishers.get('qzone')
-            if hasattr(qzone_cfg, 'dict'):
-                qzone_cfg = qzone_cfg.dict()
-            elif hasattr(qzone_cfg, '__dict__'):
-                qzone_cfg = qzone_cfg.__dict__
-            qzone_cfg = qzone_cfg or {}
-            publish_text = qzone_cfg.get('publish_text', True)
-            image_source = qzone_cfg.get('image_source', 'rendered')
+            cfg = self._get_platform_config()
+            publish_text = cfg.get('publish_text', True)
+            image_source = cfg.get('image_source', 'rendered')
             for submission in submissions:
                 content = self.prepare_content(submission, include_text=publish_text, **kwargs)
                 images: List[str] = []
@@ -176,18 +162,11 @@ class BasePublisher(PublisherPlugin):
         content = ""
         
         # 配置控制是否包含编号
-        from config import get_settings
-        settings = get_settings()
-        qzone_cfg = settings.publishers.get('qzone')
-        if hasattr(qzone_cfg, 'dict'):
-            qzone_cfg = qzone_cfg.dict()
-        elif hasattr(qzone_cfg, '__dict__'):
-            qzone_cfg = qzone_cfg.__dict__
-        qzone_cfg = qzone_cfg or {}
+        cfg = self._get_platform_config()
 
-        include_publish_id = qzone_cfg.get('include_publish_id', True)
-        include_at_sender = qzone_cfg.get('include_at_sender', True)
-        include_segments = qzone_cfg.get('include_segments', True)
+        include_publish_id = cfg.get('include_publish_id', True)
+        include_at_sender = cfg.get('include_at_sender', True)
+        include_segments = cfg.get('include_segments', True)
 
         if include_text:
             if include_publish_id and submission.publish_id:
@@ -195,7 +174,9 @@ class BasePublisher(PublisherPlugin):
             
             # 添加@
             if not submission.is_anonymous and include_at_sender and kwargs.get('at_sender', True):
-                content += f" @{{uin:{submission.sender_id},nick:,who:1}}"
+                at_text = self.format_at(submission)
+                if at_text:
+                    content += f" {at_text}"
             
             # 添加评论
             if submission.comment:
@@ -227,6 +208,31 @@ class BasePublisher(PublisherPlugin):
                 content = (content + ("\n\n" if content else "")) + links_block
                 
         return content.strip()
+
+    def format_at(self, submission: Submission) -> str:
+        """格式化平台特定的@文本。默认使用QQ空间样式。
+        子类可覆盖以适配平台（如B站仅返回@昵称的纯文本）。
+        """
+        try:
+            return f"@{{uin:{submission.sender_id},nick:,who:1}}"
+        except Exception:
+            return ""
+
+    def _get_platform_config(self) -> Dict[str, Any]:
+        """获取当前平台的配置为字典"""
+        try:
+            from config import get_settings
+            settings = get_settings()
+            cfg = settings.publishers.get(self.platform.value)
+            if hasattr(cfg, 'model_dump'):
+                return cfg.model_dump()
+            if hasattr(cfg, 'dict'):
+                return cfg.dict()
+            if hasattr(cfg, '__dict__'):
+                return cfg.__dict__
+            return cfg or {}
+        except Exception:
+            return {}
 
     def _extract_chat_images(self, submission: Submission) -> List[str]:
         """从投稿的原始消息中提取聊天图片URL"""
