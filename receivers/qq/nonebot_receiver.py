@@ -842,6 +842,33 @@ class QQReceiver(BaseReceiver):
         """
         try:
             text = (raw_text or "").strip()
+            # 反馈指令：#反馈 <内容>
+            m_fb = re.match(r"^#?\s*反馈\s+(.+)$", text)
+            if m_fb:
+                feedback_text = m_fb.group(1).strip()
+                if not feedback_text:
+                    await self.send_private_message(user_id, "错误：反馈内容不能为空")
+                    return True
+                try:
+                    from pathlib import Path
+                    from config import get_settings
+                    settings = get_settings()
+                    base_dir = Path(settings.system.data_dir or "./data")
+                    fb_dir = base_dir / "feedback"
+                    fb_dir.mkdir(parents=True, exist_ok=True)
+                    # 按日期分别记录
+                    day_str = time.strftime("%Y-%m-%d", time.localtime())
+                    ts_str = time.strftime("%Y-%m-%d %H:%M:%S", time.localtime())
+                    group_name = self._resolve_group_name_by_self_id(self_id) or "unknown"
+                    line = f"[{ts_str}] uid={user_id} sid={self_id} group={group_name} feedback={feedback_text}\n"
+                    with open(fb_dir / f"{day_str}.log", "a", encoding="utf-8") as f:
+                        f.write(line)
+                    self.logger.info(f"已记录用户反馈: uid={user_id}, group={group_name}")
+                    await self.send_private_message(user_id, "感谢反馈，我们已记录")
+                except Exception as e:
+                    self.logger.error(f"保存反馈失败: {e}", exc_info=True)
+                    await self.send_private_message(user_id, "反馈保存失败，请稍后重试")
+                return True
             # 允许前缀可选的 #
             m = re.match(r"^#?评论\s+(\d+)\s+(.+)$", text)
             if not m:
