@@ -86,3 +86,5 @@ dmypy.json
 .pytype/
 pip-log.txt
 pip-delete-this-directory.txt
+qlottie
+legacy
