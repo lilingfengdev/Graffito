@@ -78,6 +78,73 @@ class BaseReceiver(ReceiverPlugin):
             # 需要提交以便后续合并消息时能查询到
             await session.commit()
             
+    async def remove_cached_message(self, sender_id: str, receiver_id: str, message_id: str) -> bool:
+        """根据 sender/receiver/message_id 删除一条已缓存的消息。
+        返回是否删除成功（存在即删）。
+        """
+        try:
+            db = await get_db()
+            async with db.get_session() as session:
+                from sqlalchemy import select, delete, and_  # type: ignore
+
+                norm_sender = str(sender_id)
+                norm_receiver = str(receiver_id)
+                norm_mid = str(message_id)
+
+                # 先精确匹配查询，确保确实存在
+                sel = select(MessageCache.id).where(
+                    and_(
+                        MessageCache.sender_id == norm_sender,
+                        MessageCache.receiver_id == norm_receiver,
+                        MessageCache.message_id == norm_mid,
+                    )
+                )
+                r = await session.execute(sel)
+                ids = [row[0] for row in r.fetchall()]
+
+                # 找到则按主键删除
+                if ids:
+                    del_stmt = delete(MessageCache).where(MessageCache.id.in_(ids))
+                    await session.execute(del_stmt)
+                    await session.commit()
+                    return True
+
+                # 兜底：某些实现可能 message_id 不一致或被裁剪，尝试在最新记录里通过 JSON 内容比对
+                # 仅在指定的会话对内查找最近的若干条
+                sel_recent = (
+                    select(MessageCache)
+                    .where(
+                        and_(
+                            MessageCache.sender_id == norm_sender,
+                            MessageCache.receiver_id == norm_receiver,
+                        )
+                    )
+                    .order_by(MessageCache.created_at.desc())
+                    .limit(20)
+                )
+                r2 = await session.execute(sel_recent)
+                rows = r2.scalars().all()
+                hit_ids: list[int] = []
+                for row in rows:
+                    try:
+                        content = row.message_content or {}
+                        mc_mid = str(content.get("message_id", ""))
+                        if mc_mid and mc_mid == norm_mid:
+                            hit_ids.append(row.id)
+                            break
+                    except Exception:
+                        continue
+                if hit_ids:
+                    del_stmt = delete(MessageCache).where(MessageCache.id.in_(hit_ids))
+                    await session.execute(del_stmt)
+                    await session.commit()
+                    return True
+
+                return False
+        except Exception as e:
+            self.logger.error(f"删除缓存消息失败: {e}")
+            return False
+
     async def should_create_submission(self, message: Dict[str, Any]) -> bool:
         """判断是否需要创建新投稿"""
         # 检查是否是新的投稿者或距离上次投稿超过等待时间

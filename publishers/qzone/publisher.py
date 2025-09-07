@@ -8,6 +8,8 @@ from datetime import datetime
 
 import httpx
 from loguru import logger
+from io import BytesIO
+from PIL import Image
 
 from publishers.base import BasePublisher
 from core.enums import PublishPlatform
@@ -28,7 +30,12 @@ class QzonePublisher(BasePublisher):
         
         # 加载所有账号的cookies
         for account_id in self.accounts:
-            await self.load_cookies(account_id)
+            loaded = await self.load_cookies(account_id)
+            # 若本地未找到cookies，尝试通过NapCat刷新获取
+            if not loaded:
+                refreshed = await self.refresh_login(account_id)
+                if not refreshed:
+                    self.logger.warning(f"账号 {account_id} 未登录，稍后发布时将再次尝试刷新")
             
     async def load_cookies(self, account_id: str) -> bool:
         """加载账号cookies"""
@@ -122,9 +129,18 @@ class QzonePublisher(BasePublisher):
         """发布到QQ空间"""
         account_id = kwargs.get('account_id')
         if not account_id:
-            # 选择第一个可用账号
-            for acc_id in self.accounts:
+            # 主账号优先，依次尝试：已登录账号 -> 刷新登录成功的账号
+            candidate_ids = sorted(
+                self.accounts.keys(),
+                key=lambda aid: (not self.accounts[aid].get('is_main', False))
+            )
+            for acc_id in candidate_ids:
+                # 已有有效登录
                 if await self.check_login_status(acc_id):
+                    account_id = acc_id
+                    break
+                # 尝试刷新登录
+                if await self.refresh_login(acc_id):
                     account_id = acc_id
                     break
                     
@@ -202,25 +218,40 @@ class QzonePublisher(BasePublisher):
                 # 网络图片
                 async with httpx.AsyncClient() as client:
                     response = await client.get(image_path)
-                    return response.content
+                    return await self._convert_to_jpeg(response.content)
             elif image_path.startswith('file://'):
                 # 本地文件
                 file_path = image_path.replace('file://', '')
                 with open(file_path, 'rb') as f:
-                    return f.read()
+                    return await self._convert_to_jpeg(f.read())
             elif image_path.startswith('data:image'):
                 # Base64数据
                 import re
                 match = re.match(r'data:image/[^;]+;base64,(.*)', image_path)
                 if match:
-                    return base64.b64decode(match.group(1))
+                    raw = base64.b64decode(match.group(1))
+                    return await self._convert_to_jpeg(raw)
             else:
                 # 尝试作为本地文件
                 if Path(image_path).exists():
                     with open(image_path, 'rb') as f:
-                        return f.read()
+                        return await self._convert_to_jpeg(f.read())
                         
         except Exception as e:
             self.logger.error(f"加载图片失败 {image_path}: {e}")
             
         return None
+
+    async def _convert_to_jpeg(self, content: bytes) -> bytes:
+        """将任意图片内容转换为JPEG，避免QQ空间WebP等不支持格式"""
+        try:
+            img = Image.open(BytesIO(content))
+            if img.mode in ('RGBA', 'LA', 'P'):
+                img = img.convert('RGB')
+            out = BytesIO()
+            img.save(out, format='JPEG', quality=90)
+            return out.getvalue()
+        except Exception as e:
+            # 转换失败则原样返回（可能已是JPEG且可用）
+            self.logger.warning(f"图片格式转换失败，回退原图: {e}")
+            return content

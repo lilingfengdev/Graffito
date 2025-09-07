@@ -36,6 +36,8 @@ class QQReceiver(BaseReceiver):
         self.audit_service = None
         self.submission_service = None
         self.notification_service = None
+        # 撤回事件处理：是否开启
+        self.enable_recall_delete: bool = True
 
     def set_services(self, audit_service, submission_service, notification_service):
         """注入服务实例供指令处理使用"""
@@ -205,6 +207,32 @@ class QQReceiver(BaseReceiver):
                     )
             except Exception as e:
                 self.logger.error(f"处理好友请求失败: {e}", exc_info=True)
+
+        # 撤回事件（好友撤回）
+        try:
+            from nonebot.adapters.onebot.v11 import NoticeEvent
+            recall_matcher = nonebot.on_notice(priority=50, block=False)  # type: ignore
+
+            @recall_matcher.handle()  # type: ignore
+            async def _(bot: Bot, event: NoticeEvent):
+                try:
+                    # 只处理好友撤回
+                    if getattr(event, "notice_type", None) != "friend_recall":
+                        return
+                    if not self.enable_recall_delete:
+                        return
+                    user_id = str(getattr(event, "user_id", ""))
+                    self_id = str(getattr(bot, "self_id", ""))
+                    message_id = str(getattr(event, "message_id", ""))
+                    if not (user_id and self_id and message_id):
+                        return
+                    ok = await self.remove_cached_message(user_id, self_id, message_id)
+                    if ok:
+                        self.logger.info(f"已根据撤回事件删除缓存消息: uid={user_id}, sid={self_id}, mid={message_id}")
+                except Exception as e:
+                    self.logger.error(f"处理撤回事件失败: {e}")
+        except Exception:
+            pass
 
     def _should_process_friend_request(self, user_id: str) -> bool:
         now = time.time()
@@ -613,7 +641,16 @@ class QQReceiver(BaseReceiver):
                     await self.send_group_message(group_id, f"刷新登录失败: {e}")
                 return True
 
-            # 调出 <id> -> 仅重渲染
+            # 重渲染 <id> -> 仅重渲染
+            if cmd == "重渲染" and arg1 and arg1.isdigit():
+                if not self.audit_service:
+                    await self.send_group_message(group_id, "审核服务未就绪")
+                    return True
+                res = await self.audit_service.rerender(int(arg1), operator_id=group_id)
+                await self.send_group_message(group_id, res.get("message", "已处理"))
+                return True
+
+            # 调出 <id> -> 仅重渲染（等价命令）
             if cmd == "调出" and arg1 and arg1.isdigit():
                 if not self.audit_service:
                     await self.send_group_message(group_id, "审核服务未就绪")

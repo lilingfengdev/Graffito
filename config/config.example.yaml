@@ -57,6 +57,12 @@ publishers:
     batch_size: 30
     max_images_per_post: 9
     send_schedule: []  # ["09:00", "12:00", "18:00", "21:00"]
+    # 发布控制
+    publish_text: true            # 是否发布文本（编号/@/评论/链接等）
+    include_publish_id: true      # 是否包含发布编号
+    include_at_sender: true       # 是否@投稿者
+    image_source: both            # 图片来源：rendered|chat|both
+    include_segments: false       # 是否包含聊天分段文本（false 不发聊天记录）
     
 # 审核配置
 audit:

@@ -75,6 +75,12 @@ class QzonePublisherConfig(BaseModel):
     batch_size: int = 30
     max_images_per_post: int = 9
     send_schedule: List[str] = Field(default_factory=list)
+    # 新增控制项
+    publish_text: bool = True  # 是否发布文本（否则仅发图）
+    include_publish_id: bool = True  # 是否在文本中包含发布编号
+    include_at_sender: bool = True  # 是否@投稿人
+    image_source: str = "rendered"  # rendered|chat|both
+    include_segments: bool = True  # 是否在文本中包含聊天分段内容
     
 class AuditConfig(BaseModel):
     """审核配置"""

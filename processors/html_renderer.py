@@ -6,6 +6,9 @@ from typing import Dict, Any, List, Optional
 from datetime import datetime
 from loguru import logger
 from jinja2 import Template
+import re
+import base64
+import re
 
 from core.plugin import ProcessorPlugin
 
@@ -29,6 +32,8 @@ class HTMLRenderer(ProcessorPlugin):
         """渲染HTML"""
         html = await self.render_html(data)
         data['rendered_html'] = html
+        # 暴露在渲染过程中收集到的链接，供后续流程（发布时附带）使用
+        data['extracted_links'] = getattr(self, '_collected_links', [])
         return data
         
     def load_template(self) -> Template:
@@ -150,12 +155,19 @@ class HTMLRenderer(ProcessorPlugin):
 
         .cqface {
             vertical-align: middle;
-            width: 20px !important;
-            height: 20px !important;
+            width: 28px !important;
+            height: 28px !important;
             margin: 0 !important;
             display: inline !important;
             padding: 0 !important;
             transform: translateY(-0.1em);
+        }
+
+        .sticker {
+            display: block !important;
+            width: 120px !important;
+            height: 120px !important;
+            margin-bottom: var(--spacing-lg) !important;
         }
 
         .file-block {
@@ -288,7 +300,9 @@ class HTMLRenderer(ProcessorPlugin):
 <body>
     <div class="container">
         <div class="header">
+            {% if show_avatar %}
             <img src="{{ avatar_url }}" alt="Profile Image">
+            {% endif %}
             <div class="header-text">
                 <h1>{{ nickname }}</h1>
                 <h2>{{ user_id_display }}</h2>
@@ -384,6 +398,8 @@ class HTMLRenderer(ProcessorPlugin):
         
     async def render_html(self, data: Dict[str, Any]) -> str:
         """渲染HTML页面"""
+        # 每次渲染前重置链接收集器
+        self._collected_links: List[str] = []
         # 获取基本信息
         sender_id = data.get('sender_id', '10000')
         nickname = data.get('nickname', '匿名用户')
@@ -395,11 +411,20 @@ class HTMLRenderer(ProcessorPlugin):
             sender_id = '10000'
             nickname = '匿名'
             user_id_display = ''
+            show_avatar = False
         else:
             user_id_display = sender_id
+            show_avatar = True
             
-        # 生成头像URL
-        avatar_url = f"http://q.qlogo.cn/headimg_dl?dst_uin={sender_id}&spec=640&img_type=jpg"
+        # 生成头像URL：匿名时使用透明占位，且不渲染头像元素
+        if is_anonymous:
+            transparent_png = (
+                'iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAA'
+                'AAC0lEQVR42mP8/x8AAwMCAO2e4eYAAAAASUVORK5CYII='
+            )
+            avatar_url = f"data:image/png;base64,{transparent_png}"
+        else:
+            avatar_url = f"http://q.qlogo.cn/headimg_dl?dst_uin={sender_id}&spec=640&img_type=jpg"
         
         # 渲染消息内容
         content_html = self.render_messages(data.get('messages', []))
@@ -410,7 +435,8 @@ class HTMLRenderer(ProcessorPlugin):
             nickname=nickname,
             user_id_display=user_id_display,
             content_html=content_html,
-            watermark_text=watermark_text
+            watermark_text=watermark_text,
+            show_avatar=show_avatar
         )
         
         return html
@@ -450,12 +476,21 @@ class HTMLRenderer(ProcessorPlugin):
     def render_text(self, msg: Dict[str, Any]) -> str:
         """渲染文本消息"""
         text = msg.get('data', {}).get('text', '')
-        text = text.replace('\n', '<br>')
-        return f'<div class="bubble">{text}</div>'
+        # 识别文本中的链接并转为可点击锚点
+        linkified, links = self._linkify_and_collect(text)
+        self._collect_links(links)
+        return f'<div class="bubble">{linkified}</div>'
         
     def render_image(self, msg: Dict[str, Any]) -> str:
         """渲染图片消息"""
-        url = msg.get('data', {}).get('url', '')
+        data = msg.get('data', {})
+        url = data.get('url', '')
+        # 从图片消息的其他字段尝试提取链接（如标题/描述等），不包含图片本身URL
+        links = [u for u in self._extract_urls_from_object(data) if u != url]
+        self._collect_links(links)
+        if links:
+            caption = ' '.join([self._anchor(u) for u in links])
+            return f'<div class="image-block"><img src="{url}" alt="Image"><div class="bubble link-bubble">{caption}</div></div>'
         return f'<img src="{url}" alt="Image">'
         
     def render_video(self, msg: Dict[str, Any]) -> str:
@@ -494,9 +529,26 @@ class HTMLRenderer(ProcessorPlugin):
         
     def render_face(self, msg: Dict[str, Any]) -> str:
         """渲染QQ表情"""
-        face_id = msg.get('data', {}).get('id', '0')
-        # 这里应该有一个表情ID到图片的映射
-        return f'<img class="cqface" src="/static/face/{face_id}.png" alt="表情">'
+        data = msg.get('data', {})
+        face_id = str(data.get('id', '0'))
+        face_text = ''
+        try:
+            raw = data.get('raw') or {}
+            face_text = raw.get('faceText') or ''
+            # 判断是否为“大表情/贴纸”：faceType >= 2 视为大表情
+            face_type_val = raw.get('faceType')
+            is_sticker = False
+            try:
+                if face_type_val is not None and int(face_type_val) >= 2:
+                    is_sticker = True
+            except Exception:
+                is_sticker = False
+        except Exception:
+            pass
+        src = self._get_face_src(face_id)
+        alt = face_text or '表情'
+        css_class = 'sticker' if locals().get('is_sticker') else 'cqface'
+        return f'<img class="{css_class}" src="{src}" alt="{alt}">'
         
     def render_poke(self, msg: Dict[str, Any]) -> str:
         """渲染戳一戳"""
@@ -538,7 +590,24 @@ class HTMLRenderer(ProcessorPlugin):
             card_data = json.loads(data)
             title = card_data.get('prompt', '卡片消息')
             desc = card_data.get('desc', '')
-            
+            # 常见跳转字段
+            url = (
+                card_data.get('jumpUrl') or
+                card_data.get('url') or
+                card_data.get('target_url') or
+                card_data.get('targetUrl') or
+                card_data.get('link')
+            )
+            # 从所有字段兜底提取
+            if not url:
+                urls = self._extract_urls_from_object(card_data)
+                url = urls[0] if urls else None
+            if url:
+                self._collect_links([url])
+                return f'''<a class="card" href="{url}" target="_blank" rel="noopener noreferrer">
+                <div class="card-title">{title}</div>
+                <div class="card-desc">{desc}</div>
+            </a>'''
             return f'''<div class="card">
                 <div class="card-title">{title}</div>
                 <div class="card-desc">{desc}</div>
@@ -568,3 +637,106 @@ class HTMLRenderer(ProcessorPlugin):
         
         icon = icon_map.get(ext, 'unknown.png')
         return f"/static/icons/{icon}"
+
+    # ===== 工具方法 =====
+    def _anchor(self, url: str) -> str:
+        return f'<a href="{url}" target="_blank" rel="noopener noreferrer">{url}</a>'
+
+    def _linkify_and_collect(self, text: str) -> (str, List[str]):
+        """将文本中的URL替换为可点击链接，并返回收集到的URL列表"""
+        if not text:
+            return '', []
+        # 正则匹配URL
+        url_pattern = re.compile(r"(?i)\b((?:https?://|www\.)[^\s<>\"']+)\b")
+
+        collected: List[str] = []
+
+        def _repl(match: re.Match) -> str:
+            url = match.group(1)
+            # 规范化并去除末尾中英文标点
+            url_clean = url.rstrip('.,;:!?)\]}>，。；：！）』」》]')
+            collected.append(url_clean)
+            return self._anchor(url_clean)
+
+        # 首先替换换行
+        text_html = text.replace('\n', '<br>')
+        # 进行链接替换
+        text_html = url_pattern.sub(_repl, text_html)
+        return text_html, collected
+
+    def _collect_links(self, links: List[str]):
+        if not links:
+            return
+        seen = set(self._collected_links)
+        for u in links:
+            if u and u not in seen:
+                self._collected_links.append(u)
+                seen.add(u)
+
+    def _extract_urls_from_object(self, obj: Any) -> List[str]:
+        """从任意嵌套对象中提取URL字符串"""
+        result: List[str] = []
+        try:
+            if isinstance(obj, dict):
+                for v in obj.values():
+                    result.extend(self._extract_urls_from_object(v))
+            elif isinstance(obj, list):
+                for item in obj:
+                    result.extend(self._extract_urls_from_object(item))
+            elif isinstance(obj, str):
+                _, links = self._linkify_and_collect(obj)
+                result.extend(links)
+        except Exception:
+            pass
+        # 去重并保持顺序
+        seen: set = set()
+        unique = [x for x in result if not (x in seen or seen.add(x))]
+        return unique
+
+    def _get_face_src(self, face_id: str) -> str:
+        """根据 face_id 返回 data-URI 图片，优先从 data/qlottie，其次回退 legacy 资源目录。"""
+        # 缓存
+        if not hasattr(self, '_face_cache'):
+            self._face_cache: Dict[str, str] = {}
+        cached = self._face_cache.get(face_id)
+        if cached:
+            return cached
+
+        # 候选目录与文件名模式
+        candidate_dirs = [
+            Path('data/qlottie'),
+            Path('qlottie'),
+        ]
+        name_patterns = [
+            f"{face_id}.png", f"{face_id}.webp", f"{face_id}.gif",
+            f"face_{face_id}.png", f"sticker_{face_id}.png"
+        ]
+
+        for d in candidate_dirs:
+            try:
+                if not d.exists():
+                    continue
+                for name in name_patterns:
+                    p = d / name
+                    if p.exists():
+                        mime = 'image/png'
+                        if p.suffix.lower() == '.gif':
+                            mime = 'image/gif'
+                        elif p.suffix.lower() == '.webp':
+                            mime = 'image/webp'
+                        with open(p, 'rb') as f:
+                            b64 = base64.b64encode(f.read()).decode('ascii')
+                        data_uri = f"data:{mime};base64,{b64}"
+                        self._face_cache[face_id] = data_uri
+                        return data_uri
+            except Exception:
+                continue
+
+        # 找不到时返回一个透明占位（1x1 PNG）
+        transparent_png = (
+            'iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAA' 
+            'AAC0lEQVR42mP8/x8AAwMCAO2e4eYAAAAASUVORK5CYII='
+        )
+        data_uri = f"data:image/png;base64,{transparent_png}"
+        self._face_cache[face_id] = data_uri
+        return data_uri

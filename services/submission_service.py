@@ -83,6 +83,19 @@ class SubmissionService:
                     self.logger.info(f"用户 {sender_id} 在黑名单中，拒绝投稿")
                     return None
                     
+                # 创建投稿（创建前先清理该 sender/receiver 的历史消息缓存，避免累计过多）
+                try:
+                    from sqlalchemy import delete, and_ as _and
+                    _stmt = delete(MessageCache).where(
+                        _and_(
+                            MessageCache.sender_id == sender_id,
+                            MessageCache.receiver_id == receiver_id
+                        )
+                    )
+                    await session.execute(_stmt)
+                except Exception as _e:
+                    self.logger.warning(f"预清理历史消息缓存失败: {sender_id}/{receiver_id}: {_e}")
+
                 # 创建投稿
                 submission = Submission(
                     sender_id=sender_id,
@@ -248,8 +261,8 @@ class SubmissionService:
                 # 构建发布内容
                 publish_items = []
                 for submission in submissions:
-                    # 生成发布文本
-                    text = self.build_publish_text(submission)
+                    # 生成发布文本（即便平台禁用正文，也携带链接）
+                    text = self.build_publish_text(submission, include_text=True)
                     images = submission.rendered_images or []
                     
                     publish_items.append({
@@ -326,28 +339,67 @@ class SubmissionService:
             self.logger.error(f"发布单条投稿失败: {e}", exc_info=True)
             return False
             
-    def build_publish_text(self, submission: Submission) -> str:
-        """构建发布文本"""
+    def build_publish_text(self, submission: Submission, include_text: bool = True) -> str:
+        """构建发布文本
+        
+        Args:
+            include_text: 是否包含编号/@/评论/分段文本。无论如何都会附加 links。
+        """
         text = ""
         
-        # 添加编号
-        if submission.publish_id:
-            text = f"#{submission.publish_id}"
+        # 读取配置，决定是否包含聊天分段文本
+        from config import get_settings
+        settings = get_settings()
+        qzone_cfg = settings.publishers.get('qzone')
+        if hasattr(qzone_cfg, 'dict'):
+            qzone_cfg = qzone_cfg.dict()
+        elif hasattr(qzone_cfg, '__dict__'):
+            qzone_cfg = qzone_cfg.__dict__
+        qzone_cfg = qzone_cfg or {}
+        include_segments = qzone_cfg.get('include_segments', True)
+
+        if include_text:
+            # 添加编号
+            if submission.publish_id:
+                text = f"#{submission.publish_id}"
             
-        # 添加@
-        if not submission.is_anonymous:
-            text += f" @{{uin:{submission.sender_id},nick:,who:1}}"
+            # 添加@
+            if not submission.is_anonymous:
+                text += f" @{{uin:{submission.sender_id},nick:,who:1}}"
             
-        # 添加评论
-        if submission.comment:
-            text += f" {submission.comment}"
+            # 添加评论
+            if submission.comment:
+                text += f" {submission.comment}"
             
-        # 添加处理后的文本
-        if submission.processed_content:
-            segments = submission.processed_content.get('text', [])
-            if segments:
-                text += "\n" + "\n".join(segments)
+            # 添加处理后的文本（聊天分段）
+            if include_segments and submission.processed_content:
+                segments = submission.processed_content.get('text', [])
+                if segments:
+                    text += "\n" + "\n".join(segments)
+            # 附加链接（如有）——美化展示
+            links = submission.processed_content.get('links') or []
+            if links:
+                seen = set()
+                links = [x for x in links if not (x in seen or seen.add(x))]
+                if len(links) == 1:
+                    links_block = f"链接：{links[0]}"
+                else:
+                    numbered = [f"{i+1}) {u}" for i, u in enumerate(links)]
+                    links_block = "链接：\n" + "\n".join(numbered)
+                text += ("\n\n" if text else "") + links_block
                 
+        # 链接不受 include_text 影响（兜底：若前面未附加过，再附加一次美化后的链接）
+        if submission.processed_content:
+            links = submission.processed_content.get('links') or []
+            if links and ("链接：" not in text):
+                seen = set()
+                links = [x for x in links if not (x in seen or seen.add(x))]
+                if len(links) == 1:
+                    links_block = f"链接：{links[0]}"
+                else:
+                    numbered = [f"{i+1}) {u}" for i, u in enumerate(links)]
+                    links_block = "链接：\n" + "\n".join(numbered)
+                text = (text + ("\n\n" if text else "")) + links_block
         return text.strip()
         
     async def clear_stored_posts(self, group_name: str) -> bool:

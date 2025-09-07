@@ -84,7 +84,7 @@ class ProcessingPipeline:
                 submission.is_safe = llm_result.get('safemsg') == 'true'
                 submission.is_complete = llm_result.get('isover') == 'true'
                 
-                # 2. HTML渲染
+                # 2. HTML渲染（会收集链接到 data['extracted_links']）
                 data = await self.html_renderer.process(data)
                 
                 # 3. 图片渲染
@@ -94,12 +94,28 @@ class ProcessingPipeline:
                 submission.rendered_images = data.get('rendered_images', [])
                 submission.processed_content = {
                     'text': llm_result.get('segments', []),
-                    'html': data.get('rendered_html', '')
+                    'html': data.get('rendered_html', ''),
+                    'links': data.get('extracted_links', [])
                 }
                 submission.processed_at = datetime.now()
                 submission.status = SubmissionStatus.WAITING.value
                 
                 await session.commit()
+                
+                # 清理该投稿对应的历史消息缓存，避免后续投稿重复合并旧消息
+                try:
+                    from sqlalchemy import delete, and_
+                    stmt = delete(MessageCache).where(
+                        and_(
+                            MessageCache.sender_id == submission.sender_id,
+                            MessageCache.receiver_id == submission.receiver_id
+                        )
+                    )
+                    await session.execute(stmt)
+                    await session.commit()
+                    self.logger.info(f"已清理消息缓存: sender={submission.sender_id}, receiver={submission.receiver_id}")
+                except Exception as e:
+                    self.logger.error(f"清理消息缓存失败: {e}")
                 
                 self.logger.info(f"投稿处理完成: {submission_id}")
                 return True
@@ -216,11 +232,12 @@ class ProcessingPipeline:
                 # 图片渲染
                 data = await self.content_renderer.process(data)
                 
-                # 保存结果
+                # 保存结果（恢复 extracted_links）
                 submission.rendered_images = data.get('rendered_images', [])
                 submission.processed_content = {
                     'text': data.get('llm_result', {}).get('segments', []),
-                    'html': data.get('rendered_html', '')
+                    'html': data.get('rendered_html', ''),
+                    'links': data.get('extracted_links', [])
                 }
                 submission.processed_at = datetime.now()
                 

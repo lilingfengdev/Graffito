@@ -65,9 +65,34 @@ class BasePublisher(PublisherPlugin):
             if not submission:
                 return {'success': False, 'error': '投稿不存在'}
                 
-            # 准备发布内容
-            content = self.prepare_content(submission, **kwargs)
-            images = submission.rendered_images or []
+            # 读取平台配置
+            from config import get_settings
+            settings = get_settings()
+            qzone_cfg = settings.publishers.get('qzone')
+            if hasattr(qzone_cfg, 'dict'):
+                qzone_cfg = qzone_cfg.dict()
+            elif hasattr(qzone_cfg, '__dict__'):
+                qzone_cfg = qzone_cfg.__dict__
+            qzone_cfg = qzone_cfg or {}
+
+            # 准备发布内容（可配置：是否发文本、图片来源）
+            publish_text = qzone_cfg.get('publish_text', True)
+            # 即便不发布正文文本，也要附加链接
+            content = self.prepare_content(submission, include_text=publish_text, **kwargs)
+
+            # 决定图片来源
+            image_source = qzone_cfg.get('image_source', 'rendered')
+            images: List[str] = []
+            if image_source in ('rendered', 'both'):
+                images.extend(submission.rendered_images or [])
+            if image_source in ('chat', 'both'):
+                # 从 processed_content 或 raw_content 中提取聊天图片URL
+                chat_images = self._extract_chat_images(submission)
+                images.extend(chat_images)
+            # 去重并保序
+            if images:
+                seen = set()
+                images = [x for x in images if not (x in seen or seen.add(x))]
             
             # 发布
             result = await self.publish(content, images, **kwargs)
@@ -98,9 +123,27 @@ class BasePublisher(PublisherPlugin):
                 
             # 准备批量发布内容
             items = []
+            # 读取平台配置
+            from config import get_settings
+            settings = get_settings()
+            qzone_cfg = settings.publishers.get('qzone')
+            if hasattr(qzone_cfg, 'dict'):
+                qzone_cfg = qzone_cfg.dict()
+            elif hasattr(qzone_cfg, '__dict__'):
+                qzone_cfg = qzone_cfg.__dict__
+            qzone_cfg = qzone_cfg or {}
+            publish_text = qzone_cfg.get('publish_text', True)
+            image_source = qzone_cfg.get('image_source', 'rendered')
             for submission in submissions:
-                content = self.prepare_content(submission, **kwargs)
-                images = submission.rendered_images or []
+                content = self.prepare_content(submission, include_text=publish_text, **kwargs)
+                images: List[str] = []
+                if image_source in ('rendered', 'both'):
+                    images.extend(submission.rendered_images or [])
+                if image_source in ('chat', 'both'):
+                    images.extend(self._extract_chat_images(submission))
+                if images:
+                    seen = set()
+                    images = [x for x in images if not (x in seen or seen.add(x))]
                 items.append({
                     'content': content,
                     'images': images,
@@ -123,30 +166,114 @@ class BasePublisher(PublisherPlugin):
                     
             return results
             
-    def prepare_content(self, submission: Submission, **kwargs) -> str:
-        """准备发布内容"""
-        # 基础内容
+    def prepare_content(self, submission: Submission, include_text: bool = True, **kwargs) -> str:
+        """准备发布内容
+        
+        Args:
+            submission: 投稿对象
+            include_text: 是否包含正文（编号/@/评论/分段文本）。即便为 False，仍会附加链接。
+        """
         content = ""
         
-        # 添加编号
-        if submission.publish_id:
-            content = f"#{submission.publish_id}"
+        # 配置控制是否包含编号
+        from config import get_settings
+        settings = get_settings()
+        qzone_cfg = settings.publishers.get('qzone')
+        if hasattr(qzone_cfg, 'dict'):
+            qzone_cfg = qzone_cfg.dict()
+        elif hasattr(qzone_cfg, '__dict__'):
+            qzone_cfg = qzone_cfg.__dict__
+        qzone_cfg = qzone_cfg or {}
+
+        include_publish_id = qzone_cfg.get('include_publish_id', True)
+        include_at_sender = qzone_cfg.get('include_at_sender', True)
+        include_segments = qzone_cfg.get('include_segments', True)
+
+        if include_text:
+            if include_publish_id and submission.publish_id:
+                content = f"#{submission.publish_id}"
             
-        # 添加@
-        if not submission.is_anonymous and kwargs.get('at_sender', True):
-            content += f" @{{uin:{submission.sender_id},nick:,who:1}}"
+            # 添加@
+            if not submission.is_anonymous and include_at_sender and kwargs.get('at_sender', True):
+                content += f" @{{uin:{submission.sender_id},nick:,who:1}}"
             
-        # 添加评论
-        if submission.comment:
-            content += f" {submission.comment}"
+            # 添加评论
+            if submission.comment:
+                content += f" {submission.comment}"
             
-        # 添加处理后的文本内容
+            # 添加处理后的文本内容（聊天分段），受 include_segments 控制
+            if include_segments and submission.processed_content:
+                text_val = submission.processed_content.get('text', '')
+                if isinstance(text_val, list):
+                    text_joined = "\n".join([str(x) for x in text_val if x])
+                else:
+                    text_joined = str(text_val or '')
+                if text_joined:
+                    content += f"\n{text_joined}"
+        
+        # 附加链接列表（不受 include_text 影响），并进行美化展示
         if submission.processed_content:
-            text = submission.processed_content.get('text', '')
-            if text:
-                content += f"\n{text}"
+            links = submission.processed_content.get('links') or []
+            if links:
+                # 去重并保序
+                seen = set()
+                links = [x for x in links if not (x in seen or seen.add(x))]
+                # 美化成列表：单条直接行内，多条加编号
+                if len(links) == 1:
+                    links_block = f"链接：{links[0]}"
+                else:
+                    numbered = [f"{i+1}) {u}" for i, u in enumerate(links)]
+                    links_block = "链接：\n" + "\n".join(numbered)
+                content = (content + ("\n\n" if content else "")) + links_block
                 
         return content.strip()
+
+    def _extract_chat_images(self, submission: Submission) -> List[str]:
+        """从投稿的原始消息中提取聊天图片URL"""
+        images: List[str] = []
+
+        def collect_from_messages(msgs: Any):  # type: ignore[name-defined]
+            if not msgs:
+                return
+            for msg in msgs:
+                try:
+                    if not isinstance(msg, dict):
+                        continue
+                    # 直接图片
+                    if msg.get('type') == 'image':
+                        data = msg.get('data') or {}
+                        url = data.get('url')
+                        # 过滤QQ表情图片：sub_type/subType == 1
+                        sub_type = data.get('sub_type') if 'sub_type' in data else data.get('subType')
+                        try:
+                            is_face_image = str(sub_type) == '1'
+                        except Exception:
+                            is_face_image = False
+                        if url and not is_face_image:
+                            images.append(url)
+                    # 嵌套消息数组
+                    if msg.get('message') and isinstance(msg.get('message'), list):
+                        collect_from_messages(msg.get('message'))
+                    # 合并转发结构 data.messages 或 data.content
+                    data = msg.get('data') or {}
+                    if isinstance(data, dict):
+                        nested_messages = data.get('messages') or data.get('content')
+                        if isinstance(nested_messages, list):
+                            # 每个元素可能为 {message: [...]} 结构
+                            for item in nested_messages:
+                                if isinstance(item, dict) and 'message' in item:
+                                    collect_from_messages(item.get('message'))
+                                else:
+                                    # 也可能直接是消息数组
+                                    collect_from_messages(nested_messages)
+                except Exception:
+                    continue
+
+        try:
+            collect_from_messages(submission.raw_content or [])
+        except Exception:
+            pass
+        return images
         
     async def record_publish(self, submission_ids: List[int], content: str, 
                             images: List[str], result: Dict[str, Any],
