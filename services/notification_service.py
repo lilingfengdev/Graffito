@@ -4,7 +4,7 @@ from typing import Dict, Any, List, Optional
 from loguru import logger
 
 from config import get_settings
-from core.plugin import plugin_manager
+import nonebot
 
 
 class NotificationService:
@@ -38,14 +38,8 @@ class NotificationService:
                 self.logger.error(f"账号组 {group_name} 没有配置管理群")
                 return False
                 
-            # 获取QQ接收器
-            qq_receiver = plugin_manager.get_receiver('qq_receiver')
-            if not qq_receiver:
-                self.logger.error("QQ接收器未初始化")
-                return False
-                
-            # 先发文本
-            success = await qq_receiver.send_group_message(manage_group_id, message)
+            # 先发文本 via NoneBot Bot API
+            success = await self._send_group_text(manage_group_id, message)
             if not success:
                 self.logger.error(f"发送管理群文本失败: {manage_group_id}")
                 # 继续尝试发送图片
@@ -72,16 +66,7 @@ class NotificationService:
                     except Exception:
                         cq = f"[CQ:image,file={img}]"
 
-                    sent_ok = False
-                    for attempt in range(2):
-                        try:
-                            img_ok = await qq_receiver.send_group_message(manage_group_id, cq)
-                            if img_ok:
-                                sent_ok = True
-                                break
-                            await asyncio.sleep(0.8)
-                        except Exception:
-                            await asyncio.sleep(1.0)
+                    sent_ok = await self._send_group_text(manage_group_id, cq)
                     if not sent_ok:
                         self.logger.error(f"发送管理群图片失败: {manage_group_id}, img={img}")
                         # 不中断其余图片
@@ -105,14 +90,8 @@ class NotificationService:
             是否发送成功
         """
         try:
-            # 获取QQ接收器
-            qq_receiver = plugin_manager.get_receiver('qq_receiver')
-            if not qq_receiver:
-                self.logger.error("QQ接收器未初始化")
-                return False
-                
-            # 发送私聊消息
-            success = await qq_receiver.send_private_message(user_id, message)
+            # 发送私聊 via NoneBot Bot API
+            success = await self._send_private_text(user_id, message)
             
             if success:
                 self.logger.info(f"发送私聊消息成功: {user_id}")
@@ -123,6 +102,36 @@ class NotificationService:
             
         except Exception as e:
             self.logger.error(f"发送私聊消息异常: {e}", exc_info=True)
+            return False
+
+    async def _send_group_text(self, group_id: str, message: str) -> bool:
+        try:
+            bots = nonebot.get_bots()
+            if not bots:
+                return False
+            bot = next(iter(bots.values()))
+            try:
+                gid = int(group_id)
+            except Exception:
+                gid = group_id
+            await bot.call_api("send_group_msg", group_id=gid, message=message)
+            return True
+        except Exception:
+            return False
+
+    async def _send_private_text(self, user_id: str, message: str) -> bool:
+        try:
+            bots = nonebot.get_bots()
+            if not bots:
+                return False
+            bot = next(iter(bots.values()))
+            try:
+                uid = int(user_id)
+            except Exception:
+                uid = user_id
+            await bot.call_api("send_private_msg", user_id=uid, message=message)
+            return True
+        except Exception:
             return False
             
     async def send_submission_approved(self, submission_id: int) -> bool:

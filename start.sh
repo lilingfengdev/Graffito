@@ -73,7 +73,7 @@ case "$1" in
         ;;
 esac
 
-# 启动主程序
-echo -e "${GREEN}启动 OQQWall...${NC}"
+# 启动 NoneBot
+echo -e "${GREEN}启动 OQQWall (NoneBot)...${NC}"
 export DRIVER=~fastapi
-python3 main.py
+python3 bot.py
