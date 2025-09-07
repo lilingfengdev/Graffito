@@ -853,7 +853,7 @@ class QQReceiver(BaseReceiver):
                 await self.send_private_message(user_id, "错误：评论内容不能为空")
                 return True
 
-            # 查询投稿并进行权限/状态校验
+            # 查询投稿并进行状态校验
             from core.database import get_db
             from sqlalchemy import select
             from core.models import Submission
@@ -868,22 +868,10 @@ class QQReceiver(BaseReceiver):
                     await self.send_private_message(user_id, "错误：投稿不存在")
                     return True
 
-                # 仅允许投稿者本人对自己的投稿添加评论
-                if str(submission.sender_id) != str(user_id):
-                    await self.send_private_message(user_id, "错误：只有投稿者本人可以为该投稿添加评论")
+                # 仅允许对已发布的投稿同步评论
+                if submission.status != SubmissionStatus.PUBLISHED.value:
+                    await self.send_private_message(user_id, "当前投稿尚未发布，无法同步评论到QQ空间")
                     return True
-
-                # 限制在未发布/未删除前添加
-                if submission.status in (SubmissionStatus.PUBLISHED.value, SubmissionStatus.DELETED.value):
-                    await self.send_private_message(user_id, "错误：该投稿已发布或已删除，无法添加评论")
-                    return True
-
-                # 更新评论（匿名评论：不会携带用户身份信息）。若已存在则追加。
-                if submission.comment and str(submission.comment).strip():
-                    submission.comment = f"{submission.comment}\n{comment_text}"
-                else:
-                    submission.comment = comment_text
-                await session.commit()
 
             # 记录审核日志（若可用）
             try:
@@ -892,15 +880,26 @@ class QQReceiver(BaseReceiver):
             except Exception:
                 pass
 
-            # 通知管理群重新审核（若可用）
+            # 同步到QQ空间：使用对应发布账号调用API
             try:
-                if self.notification_service:
-                    await self.notification_service.send_audit_request(submission_id)
-            except Exception:
-                pass
+                from core.plugin import plugin_manager
+                publisher = plugin_manager.get_publisher("qzone_publisher")
+                if not publisher:
+                    await self.send_private_message(user_id, "发送器未就绪，稍后再试")
+                    return True
+                result = await publisher.add_comment_for_submission(submission_id, comment_text)
+                if result.get("success"):
+                    await self.send_private_message(user_id, f"评论成功：已同步到QQ空间（投稿 {submission_id}）")
+                else:
+                    await self.send_private_message(user_id, f"评论失败：{result.get('message','未知错误')}")
+                return True
+            except Exception as e:
+                self.logger.error(f"QQ空间评论同步失败: {e}")
+                await self.send_private_message(user_id, "评论失败：系统异常")
+                return True
 
-            await self.send_private_message(user_id, f"已添加评论到投稿 {submission_id}，请等待审核")
-            return True
+            # 不应到达此处
+            return False
         except Exception as e:
             self.logger.error(f"处理私聊评论指令失败: {e}", exc_info=True)
             try:

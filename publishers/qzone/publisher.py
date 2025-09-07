@@ -255,3 +255,66 @@ class QzonePublisher(BasePublisher):
             # 转换失败则原样返回（可能已是JPEG且可用）
             self.logger.warning(f"图片格式转换失败，回退原图: {e}")
             return content
+
+    async def add_comment_for_submission(self, submission_id: int, content: str) -> Dict[str, Any]:
+        """为已发布的投稿添加QQ空间评论
+        
+        - 定位该投稿对应的发布记录，获取 tid 与使用的账号
+        - 使用对应账号调用评论 API
+        """
+        try:
+            # 读取投稿及其发布记录
+            from core.database import get_db
+            from sqlalchemy import select
+            from core.models import Submission, PublishRecord
+            from core.enums import SubmissionStatus
+
+            db = await get_db()
+            async with db.get_session() as session:
+                r = await session.execute(select(Submission).where(Submission.id == submission_id))
+                submission = r.scalar_one_or_none()
+                if not submission:
+                    return {"success": False, "message": "投稿不存在"}
+
+                if submission.status != SubmissionStatus.PUBLISHED.value:
+                    return {"success": False, "message": "该投稿尚未发布，无法同步评论"}
+
+                # 查找最近的、成功的发布记录以获取 tid
+                r2 = await session.execute(
+                    select(PublishRecord).order_by(PublishRecord.created_at.desc())
+                )
+                records = r2.scalars().all()
+                target_record = None
+                for record in records:
+                    try:
+                        if not record.is_success:
+                            continue
+                        if not record.publish_result:
+                            continue
+                        sub_ids = record.submission_ids or []
+                        if isinstance(sub_ids, list) and submission_id in sub_ids:
+                            if record.publish_result.get("tid"):
+                                target_record = record
+                                break
+                    except Exception:
+                        continue
+
+                if not target_record:
+                    return {"success": False, "message": "未找到发布记录或缺少tid"}
+
+                account_id = target_record.account_id
+                tid = target_record.publish_result.get("tid")
+                api = self.api_clients.get(account_id)
+                if not api:
+                    return {"success": False, "message": "对应账号未登录或API未初始化"}
+
+                # hostuin 为发布账号的 uin
+                host_uin = api.uin
+                # 调用评论接口
+                result = await api.add_comment(host_uin, str(tid), content)
+                if result.get("success"):
+                    return {"success": True, "message": "评论已同步到QQ空间"}
+                return {"success": False, "message": result.get("message", "评论失败")}
+        except Exception as e:
+            self.logger.error(f"同步QQ空间评论失败: {e}")
+            return {"success": False, "message": str(e)}

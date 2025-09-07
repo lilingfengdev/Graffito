@@ -17,6 +17,7 @@ class QzoneAPI:
     UPLOAD_IMAGE_URL = "https://up.qzone.qq.com/cgi-bin/upload/cgi_upload_image"
     PUBLISH_EMOTION_URL = "https://user.qzone.qq.com/proxy/domain/taotao.qzone.qq.com/cgi-bin/emotion_cgi_publish_v6"
     CHECK_LOGIN_URL = "https://h5.qzone.qq.com/proxy/domain/g.qzone.qq.com/cgi-bin/friendshow/cgi_get_visitor_more"
+    ADD_COMMENT_URL = "https://h5.qzone.qq.com/proxy/domain/taotao.qzone.qq.com/cgi-bin/emotion_cgi_addcomment"
     
     def __init__(self, cookies: Dict[str, str]):
         self.cookies = cookies
@@ -230,3 +231,57 @@ class QzoneAPI:
     async def close(self):
         """关闭客户端"""
         await self.client.aclose()
+
+    async def add_comment(self, host_uin: str, tid: str, content: str) -> Dict[str, Any]:
+        """为说说添加评论
+        
+        Args:
+            host_uin: 说说所属账号（发布账号）的 UIN（纯数字，不带前缀 o）
+            tid: 说说的 tid（发布返回值中包含）
+            content: 评论内容
+        Returns:
+            包含 success 和 message/code 的结果字典
+        """
+        try:
+            post_data = {
+                "hostuin": str(host_uin),
+                "tid": str(tid),
+                # 来源：1 表示来自 H5；具体取值并不严格
+                "t1_source": "1",
+                # 内容字段在不同端存在 content/con 的差异；双写提升兼容性
+                "content": content,
+                "con": content,
+                "format": "json",
+                "qzreferrer": f"https://user.qzone.qq.com/{host_uin}",
+            }
+            params = {
+                "g_tk": self.gtk,
+                "uin": self.uin,
+            }
+            resp = await self.client.post(self.ADD_COMMENT_URL, params=params, data=post_data)
+            if resp.status_code != 200:
+                return {"success": False, "message": f"HTTP错误: {resp.status_code}"}
+            # 解析 JSON 或 JSONP
+            text = resp.text
+            parsed: Dict[str, Any]
+            try:
+                parsed = resp.json()
+            except Exception:
+                try:
+                    if "{" in text and "}" in text:
+                        json_str = text[text.find("{"):text.rfind("}")+1]
+                        parsed = json.loads(json_str)
+                    else:
+                        parsed = {}
+                except Exception:
+                    parsed = {}
+            if parsed.get("code") == 0:
+                return {"success": True, "message": "评论成功"}
+            return {
+                "success": False,
+                "message": parsed.get("message", "评论失败"),
+                "code": parsed.get("code"),
+            }
+        except Exception as e:
+            logger.error(f"评论失败: {e}")
+            return {"success": False, "message": str(e)}
