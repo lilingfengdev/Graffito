@@ -1,10 +1,11 @@
-"""QQ空间API接口（纯 aioqzone 实现）"""
+"""QQ空间API接口（纯 aioqzone 实现）
+
+职责：
+- 仅使用 aioqzone 执行发布说说与评论
+- 基于 aioqzone 的 gtk 与必要 cookie 字段进行轻量登录有效性检查
+"""
 import hashlib
-import json
-import time
-import asyncio
-from typing import Dict, Any, List, Optional
-from urllib.parse import quote
+from typing import Dict, Any, List
 
 from loguru import logger
 

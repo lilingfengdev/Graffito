@@ -1,4 +1,11 @@
-"""QQ空间发送器实现"""
+"""QQ空间发送器
+
+职责：
+- 读取并管理每个账号的 QZone cookies
+- 基于 aioqzone 的 gtk 检查登录有效性
+- 通过 NapCat 本地接口获取/刷新 cookies（仅当无效或缺失时）
+- 发布说说与追加评论
+"""
 import json
 import asyncio
 import base64
@@ -25,7 +32,7 @@ class QzonePublisher(BasePublisher):
         self.api_clients: Dict[str, QzoneAPI] = {}  # API客户端
         
     async def initialize(self):
-        """初始化发送器"""
+        """初始化发送器：加载或刷新 cookies，准备 API 客户端。"""
         await super().initialize()
         
         # 加载所有账号的cookies；若不可用则尝试通过 NapCat 登录刷新
@@ -58,7 +65,7 @@ class QzonePublisher(BasePublisher):
         return False
         
     async def save_cookies(self, account_id: str, cookies: Dict[str, Any]):
-        """保存cookies"""
+        """保存 cookies 并更新 API 客户端。"""
         cookie_file = Path(f"data/cookies/qzone_{account_id}.json")
         cookie_file.parent.mkdir(parents=True, exist_ok=True)
         
@@ -70,7 +77,8 @@ class QzonePublisher(BasePublisher):
     
     async def login_via_napcat(self, account_id: str) -> bool:
         """通过 NapCat 本地 HTTP 接口拉取 qzone.qq.com 域 cookies 完成登录。
-        要求在配置的 account_groups 中为该账号提供 http_port 与可选 http_token。
+        要求：account_groups 为账号提供 http_port，可选 http_token。
+        成功后写入 data/cookies/qzone_{account_id}.json 并校验 gtk。
         """
         try:
             account_info = self.accounts.get(account_id)
@@ -129,7 +137,7 @@ class QzonePublisher(BasePublisher):
             return False
         
     async def check_login_status(self, account_id: Optional[str] = None) -> bool:
-        """检查登录状态：基于 aioqzone gtk 检查；若失效，优先尝试 NapCat 登录。"""
+        """检查登录状态：基于 gtk 检查；失效则优先尝试 NapCat 登录，否则尝试重载磁盘 cookies。"""
         if account_id:
             # 单账号检查
             api = self.api_clients.get(account_id)

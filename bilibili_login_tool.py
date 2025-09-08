@@ -1,17 +1,16 @@
 #!/usr/bin/env python3
 """Bilibili 交互式登录工具
 
-基于 nemo2011/bilibili-api 的登录能力，提供多种登录方式：
+功能：
 - 扫码登录
 - 短信验证码登录
-- 账号密码登录（若库支持）
+- 账号密码登录
 - Cookie 字符串/JSON 导入
 
-登录成功后保存 cookies 至 data/cookies/bilibili_{account_id}.json，
-供系统发布端（BilibiliPublisher）直接使用。
+结果：将凭证保存至 data/cookies/bilibili_{account_id}.json，
+包含 SESSDATA、bili_jct、可选 DedeUserID、buvid3，供发送器使用。
 
-注意：本工具依赖 bilibili-api-python。请先安装：
-    pip install bilibili-api-python
+依赖：bilibili-api-python
 """
 import asyncio
 import json

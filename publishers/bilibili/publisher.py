@@ -1,4 +1,10 @@
-"""Bilibili 发送器实现"""
+"""Bilibili 发送器
+
+职责：
+- 加载/管理每个账号的 B 站 cookies（SESSDATA/bili_jct 等）
+- 基于 bilibili_api 的 Credential 检查可用性
+- 发布图文动态
+"""
 import json
 from pathlib import Path
 from typing import Any, Dict, List, Optional

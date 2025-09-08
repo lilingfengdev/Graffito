@@ -1,4 +1,9 @@
-"""Bilibili 动态 API 接口（纯 bilibili_api 实现）"""
+"""Bilibili 动态 API 接口（纯 bilibili_api 实现）
+
+职责：
+- 使用 nemo2011 的 bilibili_api 完成图文动态所需的图片上传和发布
+- 仅依赖 Credential，不保留任何 HTTP 回退逻辑
+"""
 import json
 from typing import Any, Dict, List, Optional
 
@@ -30,13 +35,13 @@ class BilibiliAPI:
         return bool(self.cookies.get('SESSDATA') and self._get_csrf())
 
     async def upload_image(self, image_bytes: bytes, category: str = 'daily') -> Dict[str, Any]:
-        """上传图片到B站，优先使用 bilibili_api；失败回退 HTTP。"""
+        """上传图片到B站（bilibili_api）。"""
         # dynamic.upload_image
         up_res = await self._bili_dynamic.upload_image(image_bytes, credential=self._bili_credential)
         return up_res if isinstance(up_res, dict) else {'img_src': up_res}
 
     async def create_draw_dynamic(self, content: str, pictures: List[Dict[str, Any]]) -> Dict[str, Any]:
-        """发布图文动态。pictures: [{img_src,width,height}...]。优先使用 bilibili_api。"""
+        """发布图文动态。pictures: [{img_src,width,height}...]（bilibili_api）。"""
         res = await self._bili_dynamic.create_draw_dynamic(
             content=content or '',
             pictures=pictures,
