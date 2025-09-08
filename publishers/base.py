@@ -84,8 +84,8 @@ class BasePublisher(PublisherPlugin):
                 images.extend(chat_images)
             # 去重并保序
             if images:
-                seen = set()
-                images = [x for x in images if not (x in seen or seen.add(x))]
+                from utils.common import deduplicate_preserve_order
+                images = deduplicate_preserve_order(images)
             
             # 发布
             result = await self.publish(content, images, **kwargs)
@@ -128,8 +128,8 @@ class BasePublisher(PublisherPlugin):
                 if image_source in ('chat', 'both'):
                     images.extend(self._extract_chat_images(submission))
                 if images:
-                    seen = set()
-                    images = [x for x in images if not (x in seen or seen.add(x))]
+                    from utils.common import deduplicate_preserve_order
+                    images = deduplicate_preserve_order(images)
                 items.append({
                     'content': content,
                     'images': images,
@@ -197,8 +197,8 @@ class BasePublisher(PublisherPlugin):
             links = submission.processed_content.get('links') or []
             if links:
                 # 去重并保序
-                seen = set()
-                links = [x for x in links if not (x in seen or seen.add(x))]
+                from utils.common import deduplicate_preserve_order
+                links = deduplicate_preserve_order(links)
                 # 美化成列表：单条直接行内，多条加编号
                 if len(links) == 1:
                     links_block = f"链接：{links[0]}"

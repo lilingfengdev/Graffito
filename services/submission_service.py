@@ -384,8 +384,8 @@ class SubmissionService:
             # 附加链接（如有）——美化展示
             links = submission.processed_content.get('links') or []
             if links:
-                seen = set()
-                links = [x for x in links if not (x in seen or seen.add(x))]
+                from utils.common import deduplicate_preserve_order
+                links = deduplicate_preserve_order(links)
                 if len(links) == 1:
                     links_block = f"链接：{links[0]}"
                 else:
@@ -397,8 +397,8 @@ class SubmissionService:
         if submission.processed_content:
             links = submission.processed_content.get('links') or []
             if links and ("链接：" not in text):
-                seen = set()
-                links = [x for x in links if not (x in seen or seen.add(x))]
+                from utils.common import deduplicate_preserve_order
+                links = deduplicate_preserve_order(links)
                 if len(links) == 1:
                     links_block = f"链接：{links[0]}"
                 else:

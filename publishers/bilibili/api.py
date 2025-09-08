@@ -51,6 +51,3 @@ class BilibiliAPI:
             return {'success': True, 'dynamic_id': res.get('dynamic_id') or res.get('data', {}).get('dynamic_id')}
         return {'success': True, 'dynamic_id': res}
 
-    async def close(self):
-        await self.client.aclose()
-
