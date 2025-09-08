@@ -1,4 +1,11 @@
-"""QQ空间发送器实现"""
+"""QQ空间发送器
+
+职责：
+- 读取并管理每个账号的 QZone cookies
+- 基于 aioqzone 的 gtk 检查登录有效性
+- 通过 NapCat 本地接口获取/刷新 cookies（仅当无效或缺失时）
+- 发布说说与追加评论
+"""
 import json
 import asyncio
 import base64
@@ -25,17 +32,20 @@ class QzonePublisher(BasePublisher):
         self.api_clients: Dict[str, QzoneAPI] = {}  # API客户端
         
     async def initialize(self):
-        """初始化发送器"""
+        """初始化发送器：加载或刷新 cookies，准备 API 客户端。"""
         await super().initialize()
         
-        # 加载所有账号的cookies
+        # 加载所有账号的cookies；若不可用则尝试通过 NapCat 登录刷新
         for account_id in self.accounts:
             loaded = await self.load_cookies(account_id)
-            # 若本地未找到cookies，尝试通过NapCat刷新获取
             if not loaded:
-                refreshed = await self.refresh_login(account_id)
-                if not refreshed:
-                    self.logger.warning(f"账号 {account_id} 未登录，稍后发布时将再次尝试刷新")
+                self.logger.info(f"未找到本地 cookies，尝试NapCat登录: {account_id}")
+                await self.login_via_napcat(account_id)
+            else:
+                api = self.api_clients.get(account_id)
+                if api and not await api.check_login():
+                    self.logger.info(f"检测到 cookies 失效，尝试NapCat登录: {account_id}")
+                    await self.login_via_napcat(account_id)
             
     async def load_cookies(self, account_id: str) -> bool:
         """加载账号cookies"""
@@ -55,7 +65,7 @@ class QzonePublisher(BasePublisher):
         return False
         
     async def save_cookies(self, account_id: str, cookies: Dict[str, Any]):
-        """保存cookies"""
+        """保存 cookies 并更新 API 客户端。"""
         cookie_file = Path(f"data/cookies/qzone_{account_id}.json")
         cookie_file.parent.mkdir(parents=True, exist_ok=True)
         
@@ -64,94 +74,126 @@ class QzonePublisher(BasePublisher):
             
         self.cookies[account_id] = cookies
         self.api_clients[account_id] = QzoneAPI(cookies)
-        
-    async def check_login_status(self, account_id: Optional[str] = None) -> bool:
-        """检查登录状态"""
-        if account_id:
-            if account_id in self.api_clients:
-                return await self.api_clients[account_id].check_login()
-            return False
-            
-        # 检查所有账号
-        for acc_id, api in self.api_clients.items():
-            if not await api.check_login():
-                self.logger.warning(f"账号 {acc_id} 登录失效")
-                return False
-        return True
-        
-    async def refresh_login(self, account_id: str) -> bool:
-        """刷新登录（通过NapCat获取新cookies）"""
+    
+    async def login_via_napcat(self, account_id: str) -> bool:
+        """通过 NapCat 本地 HTTP 接口拉取 qzone.qq.com 域 cookies 完成登录。
+        要求：account_groups 为账号提供 http_port，可选 http_token。
+        成功后写入 data/cookies/qzone_{account_id}.json 并校验 gtk。
+        """
         try:
             account_info = self.accounts.get(account_id)
             if not account_info:
                 self.logger.error(f"账号不存在: {account_id}")
                 return False
-                
-            # 通过NapCat API获取cookies
             port = account_info['http_port']
             headers = {}
             http_token = account_info.get('http_token')
             if http_token:
                 headers['Authorization'] = f'Bearer {http_token}'
 
-            async with httpx.AsyncClient(headers=headers) as client:
-                # 获取QQ空间cookies
-                response = await client.get(
+            async with httpx.AsyncClient(headers=headers, timeout=20) as client:
+                # 参考脚本：从 NapCat 获取指定域 Cookie 字符串
+                resp = await client.get(
                     f"http://127.0.0.1:{port}/get_cookies",
                     params={"domain": "qzone.qq.com"}
                 )
-                
-                if response.status_code == 200:
-                    data = response.json()
-                    if data.get('status') == 'ok':
-                        cookies_str = data['data']['cookies']
-                        
-                        # 解析cookies字符串
-                        cookies = {}
-                        for item in cookies_str.split('; '):
-                            if '=' in item:
-                                key, value = item.split('=', 1)
-                                cookies[key] = value
-                                
-                        # 保存cookies
-                        await self.save_cookies(account_id, cookies)
-                        self.logger.info(f"刷新登录成功: {account_id}")
-                        return True
-                        
-            self.logger.error(f"刷新登录失败: {account_id}")
+                if resp.status_code != 200:
+                    self.logger.error(f"NapCat get_cookies HTTP {resp.status_code}: {account_id}")
+                    return False
+                data = resp.json()
+                if data.get('status') != 'ok':
+                    self.logger.error(f"NapCat get_cookies 返回异常: {data}")
+                    return False
+                cookies_str = data['data'].get('cookies') or ''
+                if not cookies_str:
+                    self.logger.error("NapCat 未返回 cookies 字符串")
+                    return False
+                # 解析 cookies
+                cookies: Dict[str, Any] = {}
+                for item in cookies_str.split('; '):
+                    if '=' in item:
+                        k, v = item.split('=', 1)
+                        cookies[k] = v
+                # 补充必要字段：uin/p_uin
+                qq_id = str(account_info.get('qq_id') or '')
+                if qq_id and not cookies.get('uin'):
+                    cookies['uin'] = f"o{qq_id}"
+                if qq_id and not cookies.get('p_uin'):
+                    cookies['p_uin'] = f"o{qq_id}"
+                if not cookies.get('p_skey'):
+                    self.logger.error("缺少 p_skey，登录失败")
+                    return False
+                await self.save_cookies(account_id, cookies)
+                # 验证 gtk 可用
+                api = self.api_clients.get(account_id)
+                ok = await api.check_login() if api else False
+                if not ok:
+                    self.logger.error("登录后 gtk 检查失败")
+                    return False
+                self.logger.info(f"NapCat 登录成功: {account_id}")
+                return True
+        except Exception as e:
+            self.logger.error(f"NapCat 登录异常 {account_id}: {e}")
+            return False
+        
+    async def check_login_status(self, account_id: Optional[str] = None) -> bool:
+        """检查登录状态：基于 gtk 检查；失效则优先尝试 NapCat 登录，否则尝试重载磁盘 cookies。"""
+        if account_id:
+            # 单账号检查
+            api = self.api_clients.get(account_id)
+            ok = await api.check_login() if api else False
+            if ok:
+                return True
+            # 尝试 NapCat 登录
+            if await self.login_via_napcat(account_id):
+                api2 = self.api_clients.get(account_id)
+                return await api2.check_login() if api2 else False
+            # 回退：重载磁盘 cookies（如外部已更新）
+            if await self.load_cookies(account_id):
+                api3 = self.api_clients.get(account_id)
+                return await api3.check_login() if api3 else False
             return False
             
-        except Exception as e:
-            self.logger.error(f"刷新登录异常 {account_id}: {e}")
-            return False
+        # 检查所有账号
+        for acc_id, api in self.api_clients.items():
+            ok = await api.check_login()
+            if not ok:
+                # 尝试 NapCat 登录
+                if await self.login_via_napcat(acc_id):
+                    api2 = self.api_clients.get(acc_id)
+                    if await api2.check_login():
+                        continue
+                # 回退：重载磁盘 cookies
+                if await self.load_cookies(acc_id):
+                    api3 = self.api_clients.get(acc_id)
+                    if await (api3.check_login() if api3 else asyncio.sleep(0)):
+                        continue
+                self.logger.warning(f"账号 {acc_id} 登录失效")
+                return False
+        return True
+        
+    # 移除 refresh_login：使用外部提供的 cookies 文件
             
     async def publish(self, content: str, images: List[str] = None, **kwargs) -> Dict[str, Any]:
         """发布到QQ空间"""
         account_id = kwargs.get('account_id')
         if not account_id:
-            # 主账号优先，依次尝试：已登录账号 -> 刷新登录成功的账号
+            # 主账号优先，选择第一个已加载 cookies 的账号
             candidate_ids = sorted(
                 self.accounts.keys(),
                 key=lambda aid: (not self.accounts[aid].get('is_main', False))
             )
             for acc_id in candidate_ids:
-                # 已有有效登录
-                if await self.check_login_status(acc_id):
-                    account_id = acc_id
-                    break
-                # 尝试刷新登录
-                if await self.refresh_login(acc_id):
+                if acc_id in self.api_clients:
                     account_id = acc_id
                     break
                     
         if not account_id:
             return {'success': False, 'error': '没有可用的账号'}
             
-        # 检查登录状态
+        # 检查登录状态（不再尝试刷新）
         if not await self.check_login_status(account_id):
-            # 尝试刷新登录
-            if not await self.refresh_login(account_id):
-                return {'success': False, 'error': '登录失效且刷新失败'}
+            return {'success': False, 'error': '登录失效或 cookies 无效'}
                 
         # 获取API客户端
         api = self.api_clients.get(account_id)

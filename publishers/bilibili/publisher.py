@@ -1,4 +1,10 @@
-"""Bilibili 发送器实现"""
+"""Bilibili 发送器
+
+职责：
+- 加载/管理每个账号的 B 站 cookies（SESSDATA/bili_jct 等）
+- 基于 bilibili_api 的 Credential 检查可用性
+- 发布图文动态
+"""
 import json
 from pathlib import Path
 from typing import Any, Dict, List, Optional
@@ -84,10 +90,7 @@ class BilibiliPublisher(BasePublisher):
                 self.logger.warning(f"B站账号未登录: {acc_id}")
         return ok_any
 
-    async def refresh_login(self, account_id: str) -> bool:
-        # Bilibili 无 NapCat 自动拉取 cookies，这里仅占位，提示用户更新 cookies 文件
-        self.logger.warning(f"暂不支持自动刷新B站登录，请更新 cookie 文件: bilibili_{account_id}.json")
-        return False
+    # 移除 refresh_login：仅依赖外部 cookies 文件
 
     def format_at(self, submission) -> str:
         # B站不支持通过 QQ 号直接@，默认返回空
