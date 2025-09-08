@@ -63,17 +63,31 @@ class QzonePublisher(BasePublisher):
         self.api_clients[account_id] = QzoneAPI(cookies)
         
     async def check_login_status(self, account_id: Optional[str] = None) -> bool:
-        """检查登录状态"""
+        """检查登录状态：基于 aioqzone gtk 检查；若失效，尝试重载本地 cookies 文件。"""
         if account_id:
-            if account_id in self.api_clients:
-                return await self.api_clients[account_id].check_login()
-            return False
+            # 单账号检查
+            api = self.api_clients.get(account_id)
+            ok = await api.check_login() if api else False
+            if ok:
+                return True
+            # 尝试从磁盘重载 cookies
+            reloaded = await self.load_cookies(account_id)
+            if not reloaded:
+                return False
+            api2 = self.api_clients.get(account_id)
+            return await api2.check_login() if api2 else False
             
         # 检查所有账号
         for acc_id, api in self.api_clients.items():
-            if not await api.check_login():
-                self.logger.warning(f"账号 {acc_id} 登录失效")
-                return False
+            ok = await api.check_login()
+            if not ok:
+                # 尝试重载
+                await self.load_cookies(acc_id)
+                api2 = self.api_clients.get(acc_id)
+                ok2 = await api2.check_login() if api2 else False
+                if not ok2:
+                    self.logger.warning(f"账号 {acc_id} 登录失效")
+                    return False
         return True
         
     # 移除 refresh_login：使用外部提供的 cookies 文件

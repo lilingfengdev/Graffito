@@ -36,10 +36,12 @@ class QzoneAPI:
         return str(hash_val & 2147483647)
         
     async def check_login(self) -> bool:
-        """检查登录状态"""
+        """检查登录状态（基于 aioqzone 的 gtk 与必要字段）"""
         try:
-            # 轻量检查：关键 cookie 存在即可
-            return bool(self.cookies.get('p_skey') and self.uin)
+            if not (self.cookies.get('p_skey') and self.uin):
+                return False
+            gtk_val = str(getattr(self._aioqzone, 'gtk', '') or '')
+            return bool(gtk_val)
         except Exception:
             return False
         
