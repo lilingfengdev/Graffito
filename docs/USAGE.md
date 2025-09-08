@@ -313,6 +313,5 @@ class CustomProcessor(BaseProcessor):
 
 ## 更多帮助
 
-- 查看完整文档：[GitHub Wiki](https://github.com/your-repo/wiki)
-- 提交问题：[GitHub Issues](https://github.com/your-repo/issues)
-- 加入社区：QQ群 123456789
+- 仓库: https://github.com/lilingfengdev/OQQWall-Python
+- Issues: https://github.com/lilingfengdev/OQQWall-Python/issues

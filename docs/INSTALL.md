@@ -12,7 +12,7 @@
 ### 1. 克隆项目
 
 ```bash
-git clone https://github.com/your-repo/OQQWall-Python.git
+git clone https://github.com/lilingfengdev/OQQWall-Python.git
 cd OQQWall-Python
 ```
 
@@ -225,5 +225,5 @@ pip install -r requirements.txt --upgrade
 
 ## 支持
 
-- 提交Issue: [GitHub Issues](https://github.com/your-repo/issues)
-- 文档: [Wiki](https://github.com/your-repo/wiki)
+- 仓库: https://github.com/lilingfengdev/OQQWall-Python
+- Issues: https://github.com/lilingfengdev/OQQWall-Python/issues
