@@ -102,11 +102,6 @@ class PublisherPlugin(Plugin):
     async def check_login_status(self) -> bool:
         """检查登录状态"""
         pass
-        
-    @abstractmethod
-    async def refresh_login(self) -> bool:
-        """刷新登录"""
-        pass
 
 
 class ProcessorPlugin(Plugin):

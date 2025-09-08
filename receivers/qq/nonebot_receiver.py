@@ -614,38 +614,9 @@ class QQReceiver(BaseReceiver):
                     await self.send_group_message(group_id, f"设定编号失败: {e}")
                 return True
 
-            # 自动重新登录 / 手动重新登录（统一按刷新登录处理）
+            # 取消登录刷新相关命令
             if cmd in ("自动重新登录", "手动重新登录"):
-                try:
-                    from core.plugin import plugin_manager
-                    publisher = plugin_manager.get_publisher("qzone_publisher")
-                    if not publisher:
-                        await self.send_group_message(group_id, "QQ空间发送器未就绪")
-                        return True
-                    # 找到本组的所有账号
-                    accounts = [
-                        acc_id for acc_id, info in getattr(publisher, "accounts", {}).items()
-                        if info.get("group_name") == group_name
-                    ]
-                    if not accounts:
-                        await self.send_group_message(group_id, "未找到本组账号")
-                        return True
-                    ok_list = []
-                    fail_list = []
-                    for acc in accounts:
-                        try:
-                            ok = await publisher.refresh_login(acc)
-                            (ok_list if ok else fail_list).append(acc)
-                        except Exception:
-                            fail_list.append(acc)
-                    msg = "自动登录QQ空间尝试完毕\n" if cmd == "自动重新登录" else "手动登录刷新尝试完毕\n"
-                    if ok_list:
-                        msg += f"成功: {', '.join(ok_list)}\n"
-                    if fail_list:
-                        msg += f"失败: {', '.join(fail_list)}"
-                    await self.send_group_message(group_id, msg.strip())
-                except Exception as e:
-                    await self.send_group_message(group_id, f"刷新登录失败: {e}")
+                await self.send_group_message(group_id, "已移除登录刷新逻辑，请更新 cookies 后重试")
                 return True
 
             # 重渲染 <id> -> 仅重渲染

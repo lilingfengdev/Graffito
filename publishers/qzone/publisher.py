@@ -28,14 +28,11 @@ class QzonePublisher(BasePublisher):
         """初始化发送器"""
         await super().initialize()
         
-        # 加载所有账号的cookies
+        # 加载所有账号的cookies（仅本地文件，不再尝试刷新登录）
         for account_id in self.accounts:
             loaded = await self.load_cookies(account_id)
-            # 若本地未找到cookies，尝试通过NapCat刷新获取
             if not loaded:
-                refreshed = await self.refresh_login(account_id)
-                if not refreshed:
-                    self.logger.warning(f"账号 {account_id} 未登录，稍后发布时将再次尝试刷新")
+                self.logger.warning(f"账号 {account_id} 未加载到 cookies")
             
     async def load_cookies(self, account_id: str) -> bool:
         """加载账号cookies"""
@@ -79,79 +76,28 @@ class QzonePublisher(BasePublisher):
                 return False
         return True
         
-    async def refresh_login(self, account_id: str) -> bool:
-        """刷新登录（通过NapCat获取新cookies）"""
-        try:
-            account_info = self.accounts.get(account_id)
-            if not account_info:
-                self.logger.error(f"账号不存在: {account_id}")
-                return False
-                
-            # 通过NapCat API获取cookies
-            port = account_info['http_port']
-            headers = {}
-            http_token = account_info.get('http_token')
-            if http_token:
-                headers['Authorization'] = f'Bearer {http_token}'
-
-            async with httpx.AsyncClient(headers=headers) as client:
-                # 获取QQ空间cookies
-                response = await client.get(
-                    f"http://127.0.0.1:{port}/get_cookies",
-                    params={"domain": "qzone.qq.com"}
-                )
-                
-                if response.status_code == 200:
-                    data = response.json()
-                    if data.get('status') == 'ok':
-                        cookies_str = data['data']['cookies']
-                        
-                        # 解析cookies字符串
-                        cookies = {}
-                        for item in cookies_str.split('; '):
-                            if '=' in item:
-                                key, value = item.split('=', 1)
-                                cookies[key] = value
-                                
-                        # 保存cookies
-                        await self.save_cookies(account_id, cookies)
-                        self.logger.info(f"刷新登录成功: {account_id}")
-                        return True
-                        
-            self.logger.error(f"刷新登录失败: {account_id}")
-            return False
-            
-        except Exception as e:
-            self.logger.error(f"刷新登录异常 {account_id}: {e}")
-            return False
+    # 移除 refresh_login：使用外部提供的 cookies 文件
             
     async def publish(self, content: str, images: List[str] = None, **kwargs) -> Dict[str, Any]:
         """发布到QQ空间"""
         account_id = kwargs.get('account_id')
         if not account_id:
-            # 主账号优先，依次尝试：已登录账号 -> 刷新登录成功的账号
+            # 主账号优先，选择第一个已加载 cookies 的账号
             candidate_ids = sorted(
                 self.accounts.keys(),
                 key=lambda aid: (not self.accounts[aid].get('is_main', False))
             )
             for acc_id in candidate_ids:
-                # 已有有效登录
-                if await self.check_login_status(acc_id):
-                    account_id = acc_id
-                    break
-                # 尝试刷新登录
-                if await self.refresh_login(acc_id):
+                if acc_id in self.api_clients:
                     account_id = acc_id
                     break
                     
         if not account_id:
             return {'success': False, 'error': '没有可用的账号'}
             
-        # 检查登录状态
+        # 检查登录状态（不再尝试刷新）
         if not await self.check_login_status(account_id):
-            # 尝试刷新登录
-            if not await self.refresh_login(account_id):
-                return {'success': False, 'error': '登录失效且刷新失败'}
+            return {'success': False, 'error': '登录失效或 cookies 无效'}
                 
         # 获取API客户端
         api = self.api_clients.get(account_id)
