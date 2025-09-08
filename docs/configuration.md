@@ -79,6 +79,9 @@ account_groups:
 - enabled: 启用 B 站发送器
 - 其他控制项与 qzone 对齐，便于统一
 - accounts: 可声明账号与 cookie 文件
+  - accounts.<account_id>.cookie_file: 指定 cookies 路径；未指定则默认 data/cookies/bilibili_<account_id>.json
+
+详见：docs/bilibili.md
 
 ## audit
 

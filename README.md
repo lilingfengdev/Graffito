@@ -94,6 +94,7 @@ python cli.py test-db
 - 配置说明：docs/configuration.md
 - 架构与扩展：docs/architecture.md、docs/plugins.md、docs/services.md
 - CLI 与 Docker：docs/cli.md、docs/docker.md
+- B 站发布：docs/bilibili.md
 - 迁移与排障：docs/migration.md、docs/troubleshooting.md、docs/faq.md
 
 ### 许可与致谢

@@ -165,6 +165,12 @@ account_groups:
 
 ### 水印设置
 
+### 发布到 Bilibili
+
+- 在 `config.yaml` 启用 `publishers.bilibili.enabled: true` 并准备 cookies 文件。
+- 批量/立即发布时，将同时向 B 站发布图文动态（受平台开关和 cookies 有效性影响）。
+- 详见：docs/bilibili.md
+
 为发布的图片添加水印：
 
 ```yaml
