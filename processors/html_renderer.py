@@ -233,6 +233,18 @@ class HTMLRenderer(ProcessorPlugin):
             box-shadow: var(--shadow-sm);
         }
 
+        .card-title {
+            font-size: var(--font-size-md);
+            font-weight: 600;
+            margin: 0 0 2px 0;
+        }
+
+        .card-desc {
+            font-size: var(--font-size-sm);
+            color: var(--text-secondary);
+            margin: 0;
+        }
+
         .forward {
             border-left: 3px solid var(--secondary-color);
             padding-left: var(--spacing-lg);
@@ -273,6 +285,15 @@ class HTMLRenderer(ProcessorPlugin):
             height: 30px;
         }
 
+        .image-block {
+            display: block;
+        }
+
+        .link-bubble {
+            background-color: #f7f9fc;
+            border: 1px solid var(--border-color);
+        }
+
         /* 水印样式 */
         .wm-overlay {
             position: absolute;
@@ -295,6 +316,25 @@ class HTMLRenderer(ProcessorPlugin):
             line-height: 1;
             mix-blend-mode: multiply;
         }
+
+        .footer {
+            margin-top: var(--spacing-xxl);
+            padding-top: var(--spacing-md);
+            border-top: 1px solid var(--border-color);
+            display: flex;
+            align-items: center;
+            justify-content: space-between;
+            color: var(--text-secondary);
+            font-size: var(--font-size-sm);
+        }
+
+        .footer .brand {
+            font-weight: 600;
+        }
+
+        .footer .timestamp {
+            color: var(--text-muted);
+        }
     </style>
 </head>
 <body>
@@ -310,6 +350,10 @@ class HTMLRenderer(ProcessorPlugin):
         </div>
         <div class="content">
             {{ content_html | safe }}
+        </div>
+        <div class="footer">
+            <div class="brand">{{ wall_mark }}</div>
+            <div class="timestamp">{{ render_time }}</div>
         </div>
     </div>
     <script>
@@ -436,7 +480,9 @@ class HTMLRenderer(ProcessorPlugin):
             user_id_display=user_id_display,
             content_html=content_html,
             watermark_text=watermark_text,
-            show_avatar=show_avatar
+            show_avatar=show_avatar,
+            render_time=datetime.now().strftime("%Y-%m-%d %H:%M"),
+            wall_mark=data.get('wall_mark') or 'OQQWall'
         )
         
         return html

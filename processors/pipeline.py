@@ -70,7 +70,8 @@ class ProcessingPipeline:
                     'nickname': submission.sender_nickname,
                     'messages': messages,
                     'is_anonymous': submission.is_anonymous,
-                    'watermark_text': await self.get_watermark_text(submission.group_name)
+                    'watermark_text': await self.get_watermark_text(submission.group_name),
+                    'wall_mark': (await self.get_wall_mark(submission.group_name)) or submission.group_name or 'OQQWall'
                 }
                 
                 # 执行处理管道
@@ -177,6 +178,17 @@ class ProcessingPipeline:
             return group.watermark_text
             
         return ""
+
+    async def get_wall_mark(self, group_name: Optional[str]) -> str:
+        """获取墙标识文本"""
+        if not group_name:
+            return ""
+        from config import get_settings
+        settings = get_settings()
+        group = settings.account_groups.get(group_name)
+        if group and getattr(group, 'wall_mark', None):
+            return group.wall_mark
+        return ""
         
     async def reprocess_submission(self, submission_id: int, skip_llm: bool = False) -> bool:
         """重新处理投稿
@@ -211,7 +223,8 @@ class ProcessingPipeline:
                     'nickname': submission.sender_nickname,
                     'messages': messages,
                     'is_anonymous': submission.is_anonymous,
-                    'watermark_text': await self.get_watermark_text(submission.group_name)
+                    'watermark_text': await self.get_watermark_text(submission.group_name),
+                    'wall_mark': (await self.get_wall_mark(submission.group_name)) or submission.group_name or 'OQQWall'
                 }
                 
                 # 如果不跳过LLM，执行LLM处理
