@@ -9,6 +9,9 @@ from core.database import get_db
 from core.models import PublishRecord, StoredPost, Submission
 from core.enums import PublishPlatform
 
+from config import get_settings
+from utils.common import deduplicate_preserve_order, get_platform_config
+
 
 class BasePublisher(PublisherPlugin):
     """发送器基类"""
@@ -29,7 +32,6 @@ class BasePublisher(PublisherPlugin):
         
     async def load_accounts(self):
         """加载账号配置"""
-        from config import get_settings
         settings = get_settings()
         
         for group_name, group in settings.account_groups.items():
@@ -84,7 +86,6 @@ class BasePublisher(PublisherPlugin):
                 images.extend(chat_images)
             # 去重并保序
             if images:
-                from utils.common import deduplicate_preserve_order
                 images = deduplicate_preserve_order(images)
             
             # 发布
@@ -128,7 +129,6 @@ class BasePublisher(PublisherPlugin):
                 if image_source in ('chat', 'both'):
                     images.extend(self._extract_chat_images(submission))
                 if images:
-                    from utils.common import deduplicate_preserve_order
                     images = deduplicate_preserve_order(images)
                 items.append({
                     'content': content,
@@ -197,7 +197,6 @@ class BasePublisher(PublisherPlugin):
             links = submission.processed_content.get('links') or []
             if links:
                 # 去重并保序
-                from utils.common import deduplicate_preserve_order
                 links = deduplicate_preserve_order(links)
                 # 美化成列表：单条直接行内，多条加编号
                 if len(links) == 1:
@@ -220,19 +219,7 @@ class BasePublisher(PublisherPlugin):
 
     def _get_platform_config(self) -> Dict[str, Any]:
         """获取当前平台的配置为字典"""
-        try:
-            from config import get_settings
-            settings = get_settings()
-            cfg = settings.publishers.get(self.platform.value)
-            if hasattr(cfg, 'model_dump'):
-                return cfg.model_dump()
-            if hasattr(cfg, 'dict'):
-                return cfg.dict()
-            if hasattr(cfg, '__dict__'):
-                return cfg.__dict__
-            return cfg or {}
-        except Exception:
-            return {}
+        return get_platform_config(self.platform.value)
 
     def _extract_chat_images(self, submission: Submission) -> List[str]:
         """从投稿的原始消息中提取聊天图片URL"""

@@ -9,14 +9,16 @@ from typing import Any, Dict, List, Optional
 
 from loguru import logger
 
+# Early import of third-party bilibili_api to avoid runtime imports
+from bilibili_api import Credential  # type: ignore
+from bilibili_api import dynamic  # type: ignore
+
 
 class BilibiliAPI:
     """Bilibili API 客户端（仅使用 bilibili_api）"""
 
     def __init__(self, cookies: Dict[str, str]):
         self.cookies = cookies
-        from bilibili_api import Credential  # type: ignore
-        from bilibili_api import dynamic  # type: ignore
         sessdata = cookies.get('SESSDATA') or cookies.get('sessdata')
         bili_jct = cookies.get('bili_jct') or cookies.get('csrf')
         dedeuserid = cookies.get('DedeUserID') or cookies.get('dedeuserid')
