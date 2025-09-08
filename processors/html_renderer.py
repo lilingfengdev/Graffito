@@ -45,13 +45,6 @@ class HTMLRenderer(ProcessorPlugin):
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <title>OQQWall消息页</title>
     <style>
-        @font-face {
-            font-family: 'HarmonyOS Sans';
-            font-style: normal;
-            font-weight: 100 900;
-            font-display: swap;
-            src: local('HarmonyOS Sans'), local('HarmonyOS Sans SC'), local('HarmonyOS_Sans_SC'), local('HarmonyOS_Sans');
-        }
         :root {
             --primary-color: #007aff;
             --secondary-color: #71a1cc;
@@ -71,7 +64,7 @@ class HTMLRenderer(ProcessorPlugin):
             --radius-lg: 12px;
             --shadow-sm: 0 0 5px rgba(0, 0, 0, 0.1);
             --shadow-md: 0px 0px 6px rgba(0, 0, 0, 0.2);
-            --font-family: "HarmonyOS Sans", "HarmonyOS_Sans_SC", "HarmonyOS_Sans", "PingFang SC", "Microsoft YaHei", Arial, sans-serif;
+            --font-family: "PingFang SC", "Microsoft YaHei", Arial, sans-serif;
             --font-size-sm: 12px;
             --font-size-md: 14px;
             --font-size-lg: 24px;
