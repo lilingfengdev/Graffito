@@ -45,3 +45,4 @@ class PublishPlatform(str, Enum):
     QQ_GROUP = "qq_group" # QQ群
     BILIBILI = "bilibili" # B站
     WEIBO = "weibo"       # 微博
+    REDNOTE = "rednote"   # 小红书
