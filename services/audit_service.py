@@ -9,6 +9,12 @@ from core.models import Submission, AuditLog, BlackList, StoredPost
 from core.enums import SubmissionStatus, AuditAction
 from processors.pipeline import ProcessingPipeline
 
+# module-level commonly used imports to avoid repeated runtime imports
+from config import get_settings
+from sqlalchemy import update, delete, func
+from services.notification_service import NotificationService
+from utils.common import get_platform_config
+
 
 class AuditService:
     """审核服务，处理投稿审核相关操作"""
@@ -82,7 +88,6 @@ class AuditService:
         db = await get_db()
         async with db.get_session() as session:
             # 获取投稿
-            from sqlalchemy import select
             stmt = select(Submission).where(Submission.id == submission_id)
             result = await session.execute(stmt)
             submission = result.scalar_one_or_none()
@@ -94,7 +99,6 @@ class AuditService:
             submission.status = SubmissionStatus.APPROVED.value
             
             # 获取发布编号
-            from config import get_settings
             settings = get_settings()
             group = settings.account_groups.get(submission.group_name)
             
@@ -140,7 +144,6 @@ class AuditService:
         # 触发立即发送
         db = await get_db()
         async with db.get_session() as session:
-            from sqlalchemy import select
             stmt = select(Submission).where(Submission.id == submission_id)
             result = await session.execute(stmt)
             submission = result.scalar_one_or_none()
@@ -159,7 +162,6 @@ class AuditService:
         """拒绝投稿（跳过）"""
         db = await get_db()
         async with db.get_session() as session:
-            from sqlalchemy import select
             stmt = select(Submission).where(Submission.id == submission_id)
             result = await session.execute(stmt)
             submission = result.scalar_one_or_none()
@@ -180,7 +182,6 @@ class AuditService:
         """拒绝投稿并通知"""
         db = await get_db()
         async with db.get_session() as session:
-            from sqlalchemy import select
             stmt = select(Submission).where(Submission.id == submission_id)
             result = await session.execute(stmt)
             submission = result.scalar_one_or_none()
@@ -194,7 +195,6 @@ class AuditService:
             
             # 发送通知给投稿者
             try:
-                from services.notification_service import NotificationService
                 notifier = NotificationService()
                 await notifier.send_submission_rejected(submission_id, reason=submission.rejection_reason)
             except Exception:
@@ -209,7 +209,6 @@ class AuditService:
         """删除投稿"""
         db = await get_db()
         async with db.get_session() as session:
-            from sqlalchemy import select
             stmt = select(Submission).where(Submission.id == submission_id)
             result = await session.execute(stmt)
             submission = result.scalar_one_or_none()
@@ -237,7 +236,6 @@ class AuditService:
         """切换匿名状态"""
         db = await get_db()
         async with db.get_session() as session:
-            from sqlalchemy import select
             stmt = select(Submission).where(Submission.id == submission_id)
             result = await session.execute(stmt)
             submission = result.scalar_one_or_none()
@@ -301,7 +299,6 @@ class AuditService:
         """扩展审查"""
         db = await get_db()
         async with db.get_session() as session:
-            from sqlalchemy import select
             stmt = select(Submission).where(Submission.id == submission_id)
             result = await session.execute(stmt)
             submission = result.scalar_one_or_none()
@@ -330,7 +327,6 @@ class AuditService:
             
         db = await get_db()
         async with db.get_session() as session:
-            from sqlalchemy import select
             stmt = select(Submission).where(Submission.id == submission_id)
             result = await session.execute(stmt)
             submission = result.scalar_one_or_none()
@@ -343,7 +339,6 @@ class AuditService:
             
             # 通知审核群重新审核
             try:
-                from services.notification_service import NotificationService
                 notifier = NotificationService()
                 await notifier.send_audit_request(submission_id)
             except Exception:
@@ -362,7 +357,6 @@ class AuditService:
             
         db = await get_db()
         async with db.get_session() as session:
-            from sqlalchemy import select
             stmt = select(Submission).where(Submission.id == submission_id)
             result = await session.execute(stmt)
             submission = result.scalar_one_or_none()
@@ -371,7 +365,6 @@ class AuditService:
                 return {'success': False, 'message': '投稿不存在'}
                 
             try:
-                from services.notification_service import NotificationService
                 notifier = NotificationService()
                 await notifier.send_to_user(submission.sender_id, message, submission.group_name)
             except Exception:
@@ -386,7 +379,6 @@ class AuditService:
         """展示内容"""
         db = await get_db()
         async with db.get_session() as session:
-            from sqlalchemy import select
             stmt = select(Submission).where(Submission.id == submission_id)
             result = await session.execute(stmt)
             submission = result.scalar_one_or_none()
@@ -406,7 +398,6 @@ class AuditService:
         """拉黑用户"""
         db = await get_db()
         async with db.get_session() as session:
-            from sqlalchemy import select
             stmt = select(Submission).where(Submission.id == submission_id)
             result = await session.execute(stmt)
             submission = result.scalar_one_or_none()
@@ -437,7 +428,6 @@ class AuditService:
         """快捷回复"""
         db = await get_db()
         async with db.get_session() as session:
-            from sqlalchemy import select
             stmt = select(Submission).where(Submission.id == submission_id)
             result = await session.execute(stmt)
             submission = result.scalar_one_or_none()
@@ -446,7 +436,6 @@ class AuditService:
                 return {'success': False, 'message': '投稿不存在'}
                 
             # 获取快捷回复配置
-            from config import get_settings
             settings = get_settings()
             group = settings.account_groups.get(submission.group_name)
             
@@ -459,7 +448,6 @@ class AuditService:
                 
             # 发送快捷回复给投稿者
             try:
-                from services.notification_service import NotificationService
                 notifier = NotificationService()
                 await notifier.send_to_user(submission.sender_id, reply_content, submission.group_name)
             except Exception:

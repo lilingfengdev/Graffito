@@ -1,6 +1,6 @@
 """数据库管理模块"""
 import asyncio
-from typing import Optional
+from typing import Optional, List
 from contextlib import asynccontextmanager
 from pathlib import Path
 
@@ -127,3 +127,39 @@ async def close_db():
     if _database:
         await _database.close()
         _database = None
+
+# ---------------------------------------------------------------------------
+# Common high-level query helpers to avoid code duplication across services
+# ---------------------------------------------------------------------------
+
+from typing import List, Optional as _Opt
+
+
+async def fetch_submission_by_id(submission_id: int) -> _Opt["Submission"]:
+    """Convenience helper to fetch a single Submission by id.
+
+    It abstracts away boilerplate session handling. Returns ``None`` if not
+    found.
+    """
+    db = await get_db()
+    async with db.get_session() as session:
+        from sqlalchemy import select  # local import to avoid top-level heavy dep
+        from core.models import Submission  # import inside to avoid circulars
+
+        stmt = select(Submission).where(Submission.id == submission_id)
+        result = await session.execute(stmt)
+        return result.scalar_one_or_none()
+
+
+async def fetch_submissions_by_ids(submission_ids: List[int]) -> List["Submission"]:
+    """Fetch multiple ``Submission`` rows preserving DB ordering."""
+    if not submission_ids:
+        return []
+    db = await get_db()
+    async with db.get_session() as session:
+        from sqlalchemy import select
+        from core.models import Submission
+
+        stmt = select(Submission).where(Submission.id.in_(submission_ids))
+        result = await session.execute(stmt)
+        return result.scalars().all()

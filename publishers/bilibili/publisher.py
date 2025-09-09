@@ -5,7 +5,6 @@
 - 基于 bilibili_api 的 Credential 检查可用性
 - 发布图文动态
 """
-import json
 from pathlib import Path
 from typing import Any, Dict, List, Optional
 
@@ -15,6 +14,7 @@ from loguru import logger
 from publishers.base import BasePublisher
 from core.enums import PublishPlatform
 from .api import BilibiliAPI
+from utils import json_util as json
 
 
 class BilibiliPublisher(BasePublisher):

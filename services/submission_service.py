@@ -11,6 +11,12 @@ from processors.pipeline import ProcessingPipeline
 from publishers.qzone import QzonePublisher
 from publishers.bilibili import BilibiliPublisher
 
+# Moved frequently used imports to module level to avoid runtime import overhead
+from config import get_settings
+from sqlalchemy import select, and_, delete, update, func
+from services.notification_service import NotificationService
+from utils.common import deduplicate_preserve_order, get_platform_config
+
 
 class SubmissionService:
     """投稿服务，管理投稿的生命周期"""
@@ -25,7 +31,6 @@ class SubmissionService:
         await self.pipeline.initialize()
         
         # 初始化发送器
-        from config import get_settings
         settings = get_settings()
         
         if settings.publishers.get('qzone'):
@@ -77,8 +82,8 @@ class SubmissionService:
             db = await get_db()
             async with db.get_session() as session:
                 # 检查是否在黑名单
-                from sqlalchemy import select, and_
-                from core.models import BlackList
+                # SQLAlchemy imports moved to module level
+                # BlackList import kept as is to avoid potential circular import
                 
                 # 获取账号组
                 group_name = await self.get_group_name(receiver_id)
@@ -98,9 +103,8 @@ class SubmissionService:
                     
                 # 创建投稿（创建前先清理该 sender/receiver 的历史消息缓存，避免累计过多）
                 try:
-                    from sqlalchemy import delete, and_ as _and
                     _stmt = delete(MessageCache).where(
-                        _and_(
+                        and_(
                             MessageCache.sender_id == sender_id,
                             MessageCache.receiver_id == receiver_id
                         )
@@ -136,7 +140,6 @@ class SubmissionService:
         """处理投稿"""
         try:
             # 等待用户可能的补充消息
-            from config import get_settings
             settings = get_settings()
             wait_time = settings.processing.wait_time
             
@@ -163,7 +166,6 @@ class SubmissionService:
         db = await get_db()
         async with db.get_session() as session:
             # 获取投稿
-            from sqlalchemy import select, and_
             stmt = select(Submission).where(Submission.id == submission_id)
             result = await session.execute(stmt)
             submission = result.scalar_one_or_none()
@@ -196,7 +198,6 @@ class SubmissionService:
         """发送审核通知到管理群"""
         try:
             # 复用通知服务的统一逻辑（含图片发送）
-            from .notification_service import NotificationService
             notifier = NotificationService()
             ok = await notifier.send_audit_request(submission_id)
             if not ok:
@@ -206,7 +207,6 @@ class SubmissionService:
             
     async def get_group_name(self, receiver_id: str) -> Optional[str]:
         """根据接收者ID获取账号组名称"""
-        from config import get_settings
         settings = get_settings()
         
         for group_name, group in settings.account_groups.items():
@@ -222,7 +222,7 @@ class SubmissionService:
         """获取待处理的投稿"""
         db = await get_db()
         async with db.get_session() as session:
-            from sqlalchemy import select, and_
+            # select, func are imported at module level
             
             conditions = [
                 Submission.status.in_([
@@ -243,7 +243,7 @@ class SubmissionService:
         """获取暂存的投稿"""
         db = await get_db()
         async with db.get_session() as session:
-            from sqlalchemy import select
+            # select imported at module level
             stmt = select(StoredPost).where(
                 StoredPost.group_name == group_name
             ).order_by(StoredPost.priority.desc(), StoredPost.created_at)
@@ -266,7 +266,6 @@ class SubmissionService:
             async with db.get_session() as session:
                 submission_ids = [post.submission_id for post in stored_posts]
                 
-                from sqlalchemy import select
                 stmt = select(Submission).where(Submission.id.in_(submission_ids))
                 result = await session.execute(stmt)
                 submissions = result.scalars().all()
@@ -296,7 +295,6 @@ class SubmissionService:
                         sub.published_at = datetime.now()
 
                 # 清空暂存区
-                from sqlalchemy import delete
                 stmt = delete(StoredPost).where(StoredPost.group_name == group_name)
                 await session.execute(stmt)
                 await session.commit()
@@ -331,8 +329,6 @@ class SubmissionService:
             if any_success:
                 db = await get_db()
                 async with db.get_session() as session:
-                    from sqlalchemy import delete
-                    from core.models import StoredPost
                     stmt = delete(StoredPost).where(StoredPost.submission_id == submission_id)
                     await session.execute(stmt)
                     await session.commit()
@@ -353,7 +349,6 @@ class SubmissionService:
         text = ""
         
         # 读取配置，决定是否包含聊天分段文本
-        from config import get_settings
         settings = get_settings()
         qzone_cfg = settings.publishers.get('qzone')
         if hasattr(qzone_cfg, 'dict'):
@@ -384,8 +379,7 @@ class SubmissionService:
             # 附加链接（如有）——美化展示
             links = submission.processed_content.get('links') or []
             if links:
-                seen = set()
-                links = [x for x in links if not (x in seen or seen.add(x))]
+                links = deduplicate_preserve_order(links)
                 if len(links) == 1:
                     links_block = f"链接：{links[0]}"
                 else:
@@ -397,8 +391,7 @@ class SubmissionService:
         if submission.processed_content:
             links = submission.processed_content.get('links') or []
             if links and ("链接：" not in text):
-                seen = set()
-                links = [x for x in links if not (x in seen or seen.add(x))]
+                links = deduplicate_preserve_order(links)
                 if len(links) == 1:
                     links_block = f"链接：{links[0]}"
                 else:
@@ -413,7 +406,6 @@ class SubmissionService:
             db = await get_db()
             async with db.get_session() as session:
                 # 获取最小编号用于回滚
-                from sqlalchemy import select, func
                 stmt = select(func.min(StoredPost.publish_id)).where(
                     StoredPost.group_name == group_name
                 )
@@ -422,7 +414,6 @@ class SubmissionService:
                 
                 if min_num:
                     # 删除暂存投稿
-                    from sqlalchemy import delete
                     stmt = delete(StoredPost).where(StoredPost.group_name == group_name)
                     await session.execute(stmt)
                     
