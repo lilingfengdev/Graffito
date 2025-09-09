@@ -6,7 +6,7 @@
 - 通过 NapCat 本地接口获取/刷新 cookies（仅当无效或缺失时）
 - 发布说说与追加评论
 """
-import json
+from utils import json_util as json
 import asyncio
 import base64
 from pathlib import Path

@@ -4,7 +4,6 @@
 - 使用 nemo2011 的 bilibili_api 完成图文动态所需的图片上传和发布
 - 仅依赖 Credential，不保留任何 HTTP 回退逻辑
 """
-import json
 from typing import Any, Dict, List, Optional
 
 from loguru import logger
