@@ -30,9 +30,7 @@ from core.plugin import plugin_manager
 
 # 导入插件
 from receivers.qq import QQReceiver
-from publishers.qzone import QzonePublisher
-from publishers.bilibili import BilibiliPublisher
-from publishers.rednote import RedNotePublisher
+from publishers.loader import register_publishers_from_configs
 
 # 导入服务
 from services import AuditService, SubmissionService, NotificationService
@@ -103,49 +101,10 @@ class OQQWallApp:
             plugin_manager.register(qq_receiver)
             logger.info("已注册 QQ 接收器")
             
-        # 注册QQ空间发送器
-        if self.settings.publishers.get('qzone'):
-            qzone_config = self.settings.publishers['qzone']
-            if hasattr(qzone_config, 'model_dump'):
-                qzone_config = qzone_config.model_dump()
-            elif hasattr(qzone_config, 'dict'):
-                qzone_config = qzone_config.dict()
-            elif hasattr(qzone_config, '__dict__'):
-                qzone_config = qzone_config.__dict__
-                
-            qzone_publisher = QzonePublisher(qzone_config)
-            plugin_manager.register(qzone_publisher)
-            logger.info("已注册 QQ空间 发送器")
-
-        # 注册B站发送器
-        if self.settings.publishers.get('bilibili'):
-            bili_config = self.settings.publishers['bilibili']
-            if hasattr(bili_config, 'model_dump'):
-                bili_config = bili_config.model_dump()
-            elif hasattr(bili_config, 'dict'):
-                bili_config = bili_config.dict()
-            elif hasattr(bili_config, '__dict__'):
-                bili_config = bili_config.__dict__
-
-            if bili_config.get('enabled'):
-                bili_publisher = BilibiliPublisher(bili_config)
-                plugin_manager.register(bili_publisher)
-                logger.info("已注册 Bilibili 发送器")
-
-        # 注册小红书发送器
-        if self.settings.publishers.get('rednote'):
-            rn_config = self.settings.publishers['rednote']
-            if hasattr(rn_config, 'model_dump'):
-                rn_config = rn_config.model_dump()
-            elif hasattr(rn_config, 'dict'):
-                rn_config = rn_config.dict()
-            elif hasattr(rn_config, '__dict__'):
-                rn_config = rn_config.__dict__
-
-            if rn_config.get('enabled'):
-                rednote_publisher = RedNotePublisher(rn_config)
-                plugin_manager.register(rednote_publisher)
-                logger.info("已注册 小红书 发送器")
+        # 动态注册所有启用的发送器
+        registered = register_publishers_from_configs()
+        if registered:
+            logger.info(f"已动态注册发送器: {list(registered.keys())}")
             
     def setup_message_handlers(self):
         """设置消息处理器"""

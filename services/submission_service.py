@@ -8,9 +8,6 @@ from core.database import get_db
 from core.models import Submission, MessageCache, StoredPost, PublishRecord
 from core.enums import SubmissionStatus, PublishPlatform
 from processors.pipeline import ProcessingPipeline
-from publishers.qzone import QzonePublisher
-from publishers.bilibili import BilibiliPublisher
-from publishers.rednote import RedNotePublisher
 
 # Moved frequently used imports to module level to avoid runtime import overhead
 from config import get_settings
@@ -31,53 +28,15 @@ class SubmissionService:
         """初始化服务"""
         await self.pipeline.initialize()
         
-        # 初始化发送器
-        settings = get_settings()
-        
-        if settings.publishers.get('qzone'):
-            qzone_config = settings.publishers['qzone']
-            if hasattr(qzone_config, 'dict'):
-                qzone_config = qzone_config.dict()
-            elif hasattr(qzone_config, '__dict__'):
-                qzone_config = qzone_config.__dict__
-                
-            if qzone_config.get('enabled'):
-                qzone_publisher = QzonePublisher(qzone_config)
-                await qzone_publisher.initialize()
-                self.publishers['qzone'] = qzone_publisher
+        # 动态获取已注册的发送器（实例及其生命周期由 PluginManager 统一管理）
+        from core.plugin import plugin_manager
+        self.publishers = dict(plugin_manager.publishers)
 
-        # 初始化B站发送器
-        if settings.publishers.get('bilibili'):
-            bili_config = settings.publishers['bilibili']
-            if hasattr(bili_config, 'dict'):
-                bili_config = bili_config.dict()
-            elif hasattr(bili_config, '__dict__'):
-                bili_config = bili_config.__dict__
-            if bili_config.get('enabled'):
-                bili_publisher = BilibiliPublisher(bili_config)
-                await bili_publisher.initialize()
-                self.publishers['bilibili'] = bili_publisher
-
-        # 初始化小红书发送器
-        if settings.publishers.get('rednote'):
-            rn_config = settings.publishers['rednote']
-            if hasattr(rn_config, 'dict'):
-                rn_config = rn_config.dict()
-            elif hasattr(rn_config, '__dict__'):
-                rn_config = rn_config.__dict__
-            if rn_config.get('enabled'):
-                rn_publisher = RedNotePublisher(rn_config)
-                await rn_publisher.initialize()
-                self.publishers['rednote'] = rn_publisher
-                
         self.logger.info("投稿服务初始化完成")
         
     async def shutdown(self):
         """关闭服务"""
         await self.pipeline.shutdown()
-        
-        for publisher in self.publishers.values():
-            await publisher.shutdown()
             
     async def create_submission(self, sender_id: str, receiver_id: str, 
                               message: Dict[str, Any]) -> Optional[int]:
@@ -353,65 +312,7 @@ class SubmissionService:
             self.logger.error(f"发布单条投稿失败: {e}", exc_info=True)
             return False
             
-    def build_publish_text(self, submission: Submission, include_text: bool = True) -> str:
-        """构建发布文本
-        
-        Args:
-            include_text: 是否包含编号/@/评论/分段文本。无论如何都会附加 links。
-        """
-        text = ""
-        
-        # 读取配置，决定是否包含聊天分段文本
-        settings = get_settings()
-        qzone_cfg = settings.publishers.get('qzone')
-        if hasattr(qzone_cfg, 'dict'):
-            qzone_cfg = qzone_cfg.dict()
-        elif hasattr(qzone_cfg, '__dict__'):
-            qzone_cfg = qzone_cfg.__dict__
-        qzone_cfg = qzone_cfg or {}
-        include_segments = qzone_cfg.get('include_segments', True)
-
-        if include_text:
-            # 添加编号
-            if submission.publish_id:
-                text = f"#{submission.publish_id}"
-            
-            # 添加@
-            if not submission.is_anonymous:
-                text += f" @{{uin:{submission.sender_id},nick:,who:1}}"
-            
-            # 添加评论
-            if submission.comment:
-                text += f" {submission.comment}"
-            
-            # 添加处理后的文本（聊天分段）
-            if include_segments and submission.processed_content:
-                segments = submission.processed_content.get('text', [])
-                if segments:
-                    text += "\n" + "\n".join(segments)
-            # 附加链接（如有）——美化展示
-            links = submission.processed_content.get('links') or []
-            if links:
-                links = deduplicate_preserve_order(links)
-                if len(links) == 1:
-                    links_block = f"链接：{links[0]}"
-                else:
-                    numbered = [f"{i+1}) {u}" for i, u in enumerate(links)]
-                    links_block = "链接：\n" + "\n".join(numbered)
-                text += ("\n\n" if text else "") + links_block
-                
-        # 链接不受 include_text 影响（兜底：若前面未附加过，再附加一次美化后的链接）
-        if submission.processed_content:
-            links = submission.processed_content.get('links') or []
-            if links and ("链接：" not in text):
-                links = deduplicate_preserve_order(links)
-                if len(links) == 1:
-                    links_block = f"链接：{links[0]}"
-                else:
-                    numbered = [f"{i+1}) {u}" for i, u in enumerate(links)]
-                    links_block = "链接：\n" + "\n".join(numbered)
-                text = (text + ("\n\n" if text else "")) + links_block
-        return text.strip()
+    
         
     async def clear_stored_posts(self, group_name: str) -> bool:
         """清空暂存区"""

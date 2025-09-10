@@ -183,12 +183,17 @@ class Settings(BaseSettings):
                 data['receivers']['qq'] = QQReceiverConfig(**data['receivers']['qq'])
         
         if 'publishers' in data:
-            if 'qzone' in data['publishers']:
-                data['publishers']['qzone'] = QzonePublisherConfig(**data['publishers']['qzone'])
-            if 'bilibili' in data['publishers']:
-                data['publishers']['bilibili'] = BilibiliPublisherConfig(**data['publishers']['bilibili'])
-            if 'rednote' in data['publishers']:
-                data['publishers']['rednote'] = RedNotePublisherConfig(**data['publishers']['rednote'])
+            # Accept raw dict first; schema validation will happen inside each publisher if needed
+            try:
+                if 'qzone' in data['publishers']:
+                    data['publishers']['qzone'] = QzonePublisherConfig(**data['publishers']['qzone'])
+                if 'bilibili' in data['publishers']:
+                    data['publishers']['bilibili'] = BilibiliPublisherConfig(**data['publishers']['bilibili'])
+                if 'rednote' in data['publishers']:
+                    data['publishers']['rednote'] = RedNotePublisherConfig(**data['publishers']['rednote'])
+            except Exception:
+                # If per-publisher schema fails, keep raw dicts; dynamic overrides may supply valid fields
+                pass
                 
         # 处理账号组配置
         if 'account_groups' in data:
