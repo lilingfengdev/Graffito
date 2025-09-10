@@ -16,6 +16,7 @@ from config import get_settings
 from sqlalchemy import select, and_, delete, update, func
 from services.notification_service import NotificationService
 from utils.common import deduplicate_preserve_order, get_platform_config
+from core.task_queue import build_queue_backend, TaskQueueBackend
 
 
 class SubmissionService:
@@ -26,7 +27,7 @@ class SubmissionService:
         self.pipeline = ProcessingPipeline()
         self.publishers = {}
         self.scheduler: Optional[AsyncIOScheduler] = None
-        self._pub_queues: Dict[str, asyncio.Queue] = {}
+        self._queue_backend: TaskQueueBackend = build_queue_backend()
         self._pub_workers: Dict[str, asyncio.Task] = {}
         
     async def initialize(self):
@@ -371,8 +372,6 @@ class SubmissionService:
                 self.scheduler.add_job(self._enqueue_scheduled_group_jobs, trigger, args=[pub_name], id=f"sched_{pub_name}_{t}", replace_existing=True)
 
     def _ensure_publisher_worker(self, pub_name: str):
-        if pub_name not in self._pub_queues:
-            self._pub_queues[pub_name] = asyncio.Queue(maxsize=100)
         if pub_name not in self._pub_workers or self._pub_workers[pub_name].done():
             self._pub_workers[pub_name] = asyncio.create_task(self._publisher_worker(pub_name))
 
@@ -380,13 +379,11 @@ class SubmissionService:
         """按组入队执行 flush（避免一次处理过大批量）。"""
         try:
             settings = get_settings()
-            q = self._pub_queues.get(pub_name)
-            if not q:
-                return
+            await self._queue_backend.ensure_queue(pub_name)
             # 逐组入队
             for group_name in list(settings.account_groups.keys()):
                 try:
-                    await q.put({'type': 'flush_group', 'group_name': group_name})
+                    await self._queue_backend.enqueue(pub_name, {'type': 'flush_group', 'group_name': group_name})
                 except Exception as e:
                     self.logger.error(f"入队失败 {pub_name}/{group_name}: {e}")
         except Exception as e:
@@ -394,14 +391,15 @@ class SubmissionService:
 
     async def _publisher_worker(self, pub_name: str):
         """每个发布器一个串行 worker，消费队列任务。"""
-        q = self._pub_queues.get(pub_name)
-        if not q:
-            return
         while True:
             try:
-                job = await q.get()
+                popped = await self._queue_backend.pop(pub_name, timeout=5)
+                if popped is None:
+                    await asyncio.sleep(0.2)
+                    continue
+                raw, job = popped
                 if not isinstance(job, dict):
-                    q.task_done()
+                    await self._queue_backend.ack(pub_name, raw)
                     continue
                 jtype = job.get('type')
                 if jtype == 'flush_group':
@@ -411,7 +409,7 @@ class SubmissionService:
                         self.logger.info(f"[{pub_name}] 组 {g} 定时发送完成: {ok}")
                     except Exception as e:
                         self.logger.error(f"[{pub_name}] 组 {g} 定时发送失败: {e}")
-                q.task_done()
+                await self._queue_backend.ack(pub_name, raw)
                 # 轻微等待，避免打满平台接口
                 await asyncio.sleep(0.2)
             except asyncio.CancelledError:
