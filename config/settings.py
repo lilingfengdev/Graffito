@@ -37,6 +37,23 @@ class RedisConfig(BaseModel):
     host: str = "localhost"
     port: int = 6379
     db: int = 0
+class QueueMySQLConfig(BaseModel):
+    host: str = "localhost"
+    port: int = 3306
+    user: str = "root"
+    password: str = ""
+    database: str = "oqqqueue"
+    table: str = "oqq_tasks"
+
+class QueueConfig(BaseModel):
+    """任务队列配置
+    backend: AsyncSQLiteQueue | AsyncQueue | MySQLQueue
+    path: 本地队列目录（用于 Async* 后端）
+    mysql: MySQL 连接参数（用于 MySQLQueue）
+    """
+    backend: str = "AsyncSQLiteQueue"
+    path: str = "data/queues"
+    mysql: QueueMySQLConfig = QueueMySQLConfig()
     
 class LLMConfig(BaseModel):
     """LLM配置"""
@@ -153,6 +170,7 @@ class Settings(BaseSettings):
     server: ServerConfig = ServerConfig()
     database: DatabaseConfig = DatabaseConfig()
     redis: RedisConfig = RedisConfig()
+    queue: QueueConfig = QueueConfig()
     llm: LLMConfig = LLMConfig()
     processing: ProcessingConfig = ProcessingConfig()
     receivers: Dict[str, Any] = Field(default_factory=dict)

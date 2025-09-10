@@ -18,6 +18,8 @@ apscheduler>=3.10.0
 redis>=5.0.0
 orjson>=3.9.10
 persist-queue>=0.8.1
+aiosqlite>=0.19.0
+aiofiles>=23.2.1
 
 # 数据验证
 pydantic>=2.5.0

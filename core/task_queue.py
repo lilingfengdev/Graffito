@@ -1,20 +1,14 @@
-"""Persistent task queue abstraction for publisher scheduling.
+"""Persistent task queue abstraction for publisher scheduling (configurable).
 
-Supports Redis-backed persistent queues when enabled via settings.redis.enabled,
-and falls back to in-memory asyncio queues otherwise.
+Supported backends (configured via settings.queue.backend):
+  - AsyncSQLiteQueue: backed by persist-queue SQLiteAckQueue with async wrappers
+  - AsyncQueue: backed by persist-queue file Queue with async wrappers
+  - MySQLQueue: backed by persist-queue MySQLQueue
 """
 from __future__ import annotations
 
 import asyncio
 from typing import Dict, Optional, Tuple, Any
-
-import orjson
-
-try:
-    from redis.asyncio import Redis, from_url  # type: ignore
-except Exception:  # pragma: no cover
-    Redis = None  # type: ignore
-    from_url = None  # type: ignore
 
 
 class TaskQueueBackend:
@@ -34,94 +28,18 @@ class TaskQueueBackend:
         raise NotImplementedError
 
 
-class RedisQueueBackend(TaskQueueBackend):
-    def __init__(self, url: str):
-        if from_url is None:
-            raise RuntimeError("redis-py not available; cannot use RedisQueueBackend")
-        self._redis: Redis = from_url(url, encoding=None, decode_responses=False)
-
-    def _keys(self, name: str) -> Tuple[str, str]:
-        base = f"oqqwall:queue:{name}"
-        return base + ":pending", base + ":processing"
-
-    async def ensure_queue(self, name: str):
-        # No-op for Redis
-        return None
-
-    async def enqueue(self, name: str, job: Dict[str, Any]):
-        pending, _ = self._keys(name)
-        payload = orjson.dumps(job)
-        await self._redis.rpush(pending, payload)
-
-    async def pop(self, name: str, timeout: int = 5) -> Optional[Tuple[Any, Dict[str, Any]]]:
-        pending, processing = self._keys(name)
-        # Atomically move from pending to processing
-        data = await self._redis.brpoplpush(pending, processing, timeout=timeout)
-        if data is None:
-            return None
-        try:
-            job = orjson.loads(data)
-        except Exception:
-            job = {}
-        return data, job
-
-    async def ack(self, name: str, token: Any):
-        _, processing = self._keys(name)
-        # Remove one occurrence from processing list
-        await self._redis.lrem(processing, 1, token)
-
-    async def recover_inflight(self, name: str):
-        pending, processing = self._keys(name)
-        # Move all items from processing back to pending
-        while True:
-            data = await self._redis.rpoplpush(processing, pending)
-            if data is None:
-                break
+try:
+    from persistqueue import SQLiteAckQueue, Queue as FileQueue  # type: ignore
+except Exception:  # pragma: no cover
+    SQLiteAckQueue = None  # type: ignore
+    FileQueue = None  # type: ignore
 
 
-class MemoryQueueBackend(TaskQueueBackend):
-    def __init__(self):
-        self._pending: Dict[str, asyncio.Queue] = {}
-        self._processing: Dict[str, list] = {}
-
-    async def ensure_queue(self, name: str):
-        if name not in self._pending:
-            self._pending[name] = asyncio.Queue(maxsize=100)
-        if name not in self._processing:
-            self._processing[name] = []
-
-    async def enqueue(self, name: str, job: Dict[str, Any]):
-        await self.ensure_queue(name)
-        raw = orjson.dumps(job)
-        await self._pending[name].put(raw)
-
-    async def pop(self, name: str, timeout: int = 5) -> Optional[Tuple[Any, Dict[str, Any]]]:
-        await self.ensure_queue(name)
-        try:
-            raw = await asyncio.wait_for(self._pending[name].get(), timeout=timeout)
-        except asyncio.TimeoutError:
-            return None
-        self._processing[name].append(raw)
-        try:
-            job = orjson.loads(raw)
-        except Exception:
-            job = {}
-        return raw, job
-
-    async def ack(self, name: str, token: Any):
-        await self.ensure_queue(name)
-        try:
-            self._processing[name].remove(token)
-        except ValueError:
-            pass
-
-    async def recover_inflight(self, name: str):
-        # Move all processing back to pending
-        await self.ensure_queue(name)
-        items = list(self._processing[name])
-        self._processing[name].clear()
-        for raw in items:
-            await self._pending[name].put(raw)
+try:
+    # MySQLQueue may be provided under persistqueue.sqlqueue
+    from persistqueue.sqlqueue import MySQLQueue  # type: ignore
+except Exception:  # pragma: no cover
+    MySQLQueue = None  # type: ignore
 
 
 try:
@@ -131,15 +49,17 @@ except Exception:  # pragma: no cover
     SQLiteAckQueue = None  # type: ignore
 
 
-class PersistQueueBackend(TaskQueueBackend):
+class AsyncSQLiteQueueBackend(TaskQueueBackend):
+    """Async wrapper over persist-queue SQLiteAckQueue (ack-capable)."""
     def __init__(self, base_dir: str = "data/queues"):
+        from pathlib import Path
         if SQLiteAckQueue is None:
-            raise RuntimeError("persist-queue not available; cannot use PersistQueueBackend")
-        self._queues: Dict[str, SQLiteAckQueue] = {}
+            raise RuntimeError("persist-queue not available; cannot use AsyncSQLiteQueue")
+        self._queues: Dict[str, Any] = {}
         self._base_dir = Path(base_dir)
         self._base_dir.mkdir(parents=True, exist_ok=True)
 
-    def _get_queue(self, name: str) -> Any:
+    def _get_queue_sync(self, name: str) -> Any:
         q = self._queues.get(name)
         if q is None:
             path = str(self._base_dir / name)
@@ -148,51 +68,166 @@ class PersistQueueBackend(TaskQueueBackend):
         return q
 
     async def ensure_queue(self, name: str):
-        self._get_queue(name)
+        await asyncio.to_thread(self._get_queue_sync, name)
 
     async def enqueue(self, name: str, job: Dict[str, Any]):
-        q = self._get_queue(name)
-        q.put(job)
+        def _put():
+            q = self._get_queue_sync(name)
+            q.put(job)
+        await asyncio.to_thread(_put)
 
     async def pop(self, name: str, timeout: int = 5) -> Optional[Tuple[Any, Dict[str, Any]]]:
-        q = self._get_queue(name)
-        try:
-            item = q.get(block=True, timeout=timeout)
-        except Exception:
+        def _get():
+            q = self._get_queue_sync(name)
+            try:
+                item = q.get(block=True, timeout=timeout)
+            except Exception:
+                return None
+            return item
+        item = await asyncio.to_thread(_get)
+        if item is None:
             return None
-        # item is the original dict we put
         return item, (item if isinstance(item, dict) else {})
 
     async def ack(self, name: str, token: Any):
-        q = self._get_queue(name)
-        try:
-            q.ack(token)
-        except Exception:
-            pass
+        def _ack():
+            q = self._get_queue_sync(name)
+            try:
+                q.ack(token)
+            except Exception:
+                pass
+        await asyncio.to_thread(_ack)
 
     async def recover_inflight(self, name: str):
-        # SQLiteAckQueue will redeliver unacked items on next get automatically
+        # Unacked items will be redelivered automatically
+        return None
+
+
+class AsyncFileQueueBackend(TaskQueueBackend):
+    """Async wrapper over persist-queue file Queue (no ack)."""
+    def __init__(self, base_dir: str = "data/queues"):
+        from pathlib import Path
+        if FileQueue is None:
+            raise RuntimeError("persist-queue not available; cannot use AsyncQueue")
+        self._queues: Dict[str, Any] = {}
+        self._base_dir = Path(base_dir)
+        self._base_dir.mkdir(parents=True, exist_ok=True)
+
+    def _get_queue_sync(self, name: str) -> Any:
+        q = self._queues.get(name)
+        if q is None:
+            path = str(self._base_dir / name)
+            self._queues[name] = FileQueue(path)
+            q = self._queues[name]
+        return q
+
+    async def ensure_queue(self, name: str):
+        await asyncio.to_thread(self._get_queue_sync, name)
+
+    async def enqueue(self, name: str, job: Dict[str, Any]):
+        def _put():
+            q = self._get_queue_sync(name)
+            q.put(job)
+        await asyncio.to_thread(_put)
+
+    async def pop(self, name: str, timeout: int = 5) -> Optional[Tuple[Any, Dict[str, Any]]]:
+        def _get():
+            q = self._get_queue_sync(name)
+            try:
+                item = q.get(block=True, timeout=timeout)
+            except Exception:
+                return None
+            return item
+        item = await asyncio.to_thread(_get)
+        if item is None:
+            return None
+        return item, (item if isinstance(item, dict) else {})
+
+    async def ack(self, name: str, token: Any):
+        # FileQueue 没有 ack 语义，视为立即完成
+        return None
+
+    async def recover_inflight(self, name: str):
+        return None
+
+
+class MySQLQueueBackend(TaskQueueBackend):
+    """Wrapper over persist-queue MySQLQueue (ack availability depends on version)."""
+    def __init__(self, host: str, port: int, user: str, password: str, database: str, table: str = 'oqq_tasks'):
+        if MySQLQueue is None:
+            raise RuntimeError("persist-queue MySQLQueue not available")
+        self._queues: Dict[str, Any] = {}
+        self._conn_kwargs = dict(host=host, port=port, user=user, passwd=password, db=database, table=table)
+
+    def _get_queue_sync(self, name: str) -> Any:
+        q = self._queues.get(name)
+        if q is None:
+            # Some versions don't support table per queue; emulate by table suffix
+            kwargs = dict(self._conn_kwargs)
+            kwargs['table'] = f"{kwargs.get('table','oqq_tasks')}_{name}"
+            self._queues[name] = MySQLQueue(**kwargs)
+            q = self._queues[name]
+        return q
+
+    async def ensure_queue(self, name: str):
+        await asyncio.to_thread(self._get_queue_sync, name)
+
+    async def enqueue(self, name: str, job: Dict[str, Any]):
+        def _put():
+            q = self._get_queue_sync(name)
+            q.put(job)
+        await asyncio.to_thread(_put)
+
+    async def pop(self, name: str, timeout: int = 5) -> Optional[Tuple[Any, Dict[str, Any]]]:
+        def _get():
+            q = self._get_queue_sync(name)
+            try:
+                item = q.get(block=True, timeout=timeout)
+            except Exception:
+                return None
+            return item
+        item = await asyncio.to_thread(_get)
+        if item is None:
+            return None
+        return item, (item if isinstance(item, dict) else {})
+
+    async def ack(self, name: str, token: Any):
+        def _ack():
+            q = self._get_queue_sync(name)
+            # MySQLQueue may or may not support ack; ignore if not
+            try:
+                q.ack(token)
+            except Exception:
+                pass
+        await asyncio.to_thread(_ack)
+
+    async def recover_inflight(self, name: str):
         return None
 
 
 def build_queue_backend() -> TaskQueueBackend:
-    """Create a queue backend based on settings.redis.enabled.
-    Prefers Redis if enabled; otherwise uses persist-queue if available; falls back to in-memory.
+    """Build backend per settings.queue.backend.
+
+    Options: 'AsyncSQLiteQueue' | 'AsyncQueue' | 'MySQLQueue'
     """
-    try:
-        from config import get_settings
-        settings = get_settings()
-        redis_cfg = settings.redis
-        if getattr(redis_cfg, 'enabled', False):
-            host = getattr(redis_cfg, 'host', 'localhost')
-            port = int(getattr(redis_cfg, 'port', 6379))
-            db = int(getattr(redis_cfg, 'db', 0))
-            url = f"redis://{host}:{port}/{db}"
-            return RedisQueueBackend(url)
-        # Redis disabled -> try persist-queue
-        if SQLiteAckQueue is not None:
-            return PersistQueueBackend()
-    except Exception:
-        pass
-    return MemoryQueueBackend()
+    from config import get_settings
+    settings = get_settings()
+    qcfg = getattr(settings, 'queue', None)
+    backend = (getattr(qcfg, 'backend', None) or 'AsyncSQLiteQueue').strip()
+    if backend == 'AsyncSQLiteQueue':
+        base_dir = getattr(qcfg, 'path', 'data/queues')
+        return AsyncSQLiteQueueBackend(base_dir)
+    if backend == 'AsyncQueue':
+        base_dir = getattr(qcfg, 'path', 'data/queues')
+        return AsyncFileQueueBackend(base_dir)
+    if backend == 'MySQLQueue':
+        mysql = getattr(qcfg, 'mysql', {}) or {}
+        host = mysql.get('host', 'localhost')
+        port = int(mysql.get('port', 3306))
+        user = mysql.get('user', 'root')
+        password = mysql.get('password', '')
+        database = mysql.get('database', 'oqqqueue')
+        table = mysql.get('table', 'oqq_tasks')
+        return MySQLQueueBackend(host, port, user, password, database, table)
+    raise RuntimeError(f"Unsupported queue backend: {backend}")
 
