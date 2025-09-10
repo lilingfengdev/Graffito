@@ -1,4 +1,4 @@
-THIS SHOULD BE A LINTER ERROR"""Persistent task queue abstraction for publisher scheduling.
+"""Persistent task queue abstraction for publisher scheduling.
 
 Supports Redis-backed persistent queues when enabled via settings.redis.enabled,
 and falls back to in-memory asyncio queues otherwise.
