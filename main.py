@@ -32,6 +32,7 @@ from core.plugin import plugin_manager
 from receivers.qq import QQReceiver
 from publishers.qzone import QzonePublisher
 from publishers.bilibili import BilibiliPublisher
+from publishers.rednote import RedNotePublisher
 
 # 导入服务
 from services import AuditService, SubmissionService, NotificationService
@@ -130,6 +131,21 @@ class OQQWallApp:
                 bili_publisher = BilibiliPublisher(bili_config)
                 plugin_manager.register(bili_publisher)
                 logger.info("已注册 Bilibili 发送器")
+
+        # 注册小红书发送器
+        if self.settings.publishers.get('rednote'):
+            rn_config = self.settings.publishers['rednote']
+            if hasattr(rn_config, 'model_dump'):
+                rn_config = rn_config.model_dump()
+            elif hasattr(rn_config, 'dict'):
+                rn_config = rn_config.dict()
+            elif hasattr(rn_config, '__dict__'):
+                rn_config = rn_config.__dict__
+
+            if rn_config.get('enabled'):
+                rednote_publisher = RedNotePublisher(rn_config)
+                plugin_manager.register(rednote_publisher)
+                logger.info("已注册 小红书 发送器")
             
     def setup_message_handlers(self):
         """设置消息处理器"""

@@ -98,6 +98,26 @@ class BilibiliPublisherConfig(BaseModel):
     # 账号 cookies 配置：{"account_id": {"cookie_file": "..."}}
     accounts: Dict[str, Dict[str, Any]] = Field(default_factory=dict)
 
+class RedNotePublisherConfig(BaseModel):
+    """小红书发送器配置"""
+    enabled: bool = False
+    max_attempts: int = 3
+    batch_size: int = 20
+    max_images_per_post: int = 9
+    send_schedule: List[str] = Field(default_factory=list)
+    # 发布控制
+    publish_text: bool = True
+    include_publish_id: bool = False
+    include_at_sender: bool = False
+    image_source: str = "rendered"  # rendered|chat|both
+    include_segments: bool = False
+    # 账号 cookies 配置：{"account_id": {"cookie_file": "..."}}
+    accounts: Dict[str, Dict[str, Any]] = Field(default_factory=dict)
+    # Playwright 配置
+    headless: bool = True
+    slow_mo_ms: int = 0
+    user_agent: Optional[str] = None
+
 class AuditConfig(BaseModel):
     """审核配置"""
     auto_approve: bool = False
@@ -167,6 +187,8 @@ class Settings(BaseSettings):
                 data['publishers']['qzone'] = QzonePublisherConfig(**data['publishers']['qzone'])
             if 'bilibili' in data['publishers']:
                 data['publishers']['bilibili'] = BilibiliPublisherConfig(**data['publishers']['bilibili'])
+            if 'rednote' in data['publishers']:
+                data['publishers']['rednote'] = RedNotePublisherConfig(**data['publishers']['rednote'])
                 
         # 处理账号组配置
         if 'account_groups' in data:

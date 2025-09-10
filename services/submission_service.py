@@ -10,6 +10,7 @@ from core.enums import SubmissionStatus, PublishPlatform
 from processors.pipeline import ProcessingPipeline
 from publishers.qzone import QzonePublisher
 from publishers.bilibili import BilibiliPublisher
+from publishers.rednote import RedNotePublisher
 
 # Moved frequently used imports to module level to avoid runtime import overhead
 from config import get_settings
@@ -56,6 +57,18 @@ class SubmissionService:
                 bili_publisher = BilibiliPublisher(bili_config)
                 await bili_publisher.initialize()
                 self.publishers['bilibili'] = bili_publisher
+
+        # 初始化小红书发送器
+        if settings.publishers.get('rednote'):
+            rn_config = settings.publishers['rednote']
+            if hasattr(rn_config, 'dict'):
+                rn_config = rn_config.dict()
+            elif hasattr(rn_config, '__dict__'):
+                rn_config = rn_config.__dict__
+            if rn_config.get('enabled'):
+                rn_publisher = RedNotePublisher(rn_config)
+                await rn_publisher.initialize()
+                self.publishers['rednote'] = rn_publisher
                 
         self.logger.info("投稿服务初始化完成")
         

@@ -284,6 +284,34 @@ class BilibiliPublisher(BasePublisher):
         pass
 ```
 
+#### 启用小红书（RedNote）发送器
+
+在 `config/config.yaml` 中配置：
+
+```yaml
+publishers:
+  rednote:
+    enabled: true
+    accounts:
+      myacc:
+        cookie_file: data/cookies/rednote_myacc.json
+```
+
+登录工具会将浏览器 cookies 以 Playwright 兼容格式保存到 `data/cookies/rednote_{account}.json`。
+
+#### 小红书评论
+
+若需要为已发布到红书的投稿追加评论，可在业务层调用：
+
+```python
+from publishers.rednote import RedNotePublisher
+
+# 已在 SubmissionService 中初始化并保存 publisher 实例时：
+result = await rednote_publisher.add_comment_for_submission(submission_id, "你的评论内容")
+```
+
+前提：发布成功结果需包含可访问的笔记 URL。
+
 ### 自定义处理器
 
 实现处理管道阶段：
