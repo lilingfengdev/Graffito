@@ -155,3 +155,46 @@ class RedNotePublisher(BasePublisher):
             results.append(res)
         return results
 
+    async def add_comment_for_submission(self, submission_id: int, content: str) -> Dict[str, Any]:
+        """Add a comment to the published RedNote for a submission.
+
+        This searches the publish records for the submission and uses the stored
+        note URL if present.
+        """
+        try:
+            from core.database import get_db
+            from sqlalchemy import select
+            from core.models import PublishRecord
+            db = await get_db()
+            async with db.get_session() as session:
+                r = await session.execute(select(PublishRecord).order_by(PublishRecord.created_at.desc()))
+                records = r.scalars().all()
+                target = None
+                for rec in records:
+                    try:
+                        if not rec.is_success or rec.platform != self.platform.value:
+                            continue
+                        if submission_id in (rec.submission_ids or []):
+                            target = rec
+                            break
+                    except Exception:
+                        continue
+                if not target:
+                    return {"success": False, "message": "未找到该投稿的小红书发布记录"}
+                note_url = None
+                if isinstance(target.publish_result, dict):
+                    note_url = target.publish_result.get('url')
+                # Choose any available account to comment
+                account_id = target.account_id or (next(iter(self.api_clients.keys()), None))
+                api = self.api_clients.get(account_id) if account_id else None
+                if not api:
+                    return {"success": False, "message": "API客户端未初始化或账号不存在"}
+                # If URL not recorded, we cannot reliably comment; require URL
+                if not note_url:
+                    return {"success": False, "message": "发布结果缺少URL，无法定位笔记"}
+                res = await api.add_comment(note_url, content)
+                return res
+        except Exception as e:
+            self.logger.error(f"小红书同步评论失败: {e}")
+            return {"success": False, "message": str(e)}
+

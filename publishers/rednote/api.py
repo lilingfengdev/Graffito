@@ -53,12 +53,63 @@ class RedNoteAPI:
         self._browser = await self._pw.chromium.launch(headless=self.cfg.headless, slow_mo=self.cfg.slow_mo_ms)
         ua = self.cfg.user_agent or "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120 Safari/537.36"
         self._context = await self._browser.new_context(user_agent=ua)
+        # Speed-up: block analytics/ads/noise
+        try:
+            async def _route_handler(route):  # type: ignore
+                url = route.request.url
+                block_keywords = [
+                    "googletagmanager", "google-analytics", "hm.baidu", "baidustatic",
+                    "beacon", "hotjar", "sentry", "doubleclick", "umeng"]
+                if any(k in url for k in block_keywords):
+                    return await route.abort()
+                return await route.continue_()
+            await self._context.route("**/*", _route_handler)  # type: ignore
+        except Exception:
+            pass
         if self.cookies:
             try:
                 await self._context.add_cookies(self.cookies)
             except Exception as e:
                 logger.warning(f"Failed to add cookies to context: {e}")
         self._page = await self._context.new_page()
+
+    # -------- Helpers inspired by robust automation patterns --------
+    async def _goto(self, url: str, wait_until: str = "domcontentloaded", timeout: int = 20000) -> None:
+        assert self._page is not None
+        await self._page.goto(url, wait_until=wait_until, timeout=timeout)
+
+    async def _wait_any(self, selectors: List[str], timeout: int = 8000):
+        assert self._page is not None
+        last_err = None
+        for sel in selectors:
+            try:
+                return await self._page.wait_for_selector(sel, timeout=timeout)
+            except Exception as e:
+                last_err = e
+                continue
+        if last_err:
+            raise last_err
+
+    async def _click_first(self, selectors: List[str], timeout: int = 5000) -> bool:
+        assert self._page is not None
+        for sel in selectors:
+            try:
+                await self._page.click(sel, timeout=timeout)
+                return True
+            except Exception:
+                continue
+        return False
+
+    async def _fill_first(self, selectors: List[str], text: str, timeout: int = 5000) -> bool:
+        assert self._page is not None
+        for sel in selectors:
+            try:
+                loc = await self._page.wait_for_selector(sel, timeout=timeout)
+                await loc.fill(text)
+                return True
+            except Exception:
+                continue
+        return False
 
     async def close(self):
         try:
@@ -111,7 +162,7 @@ class RedNoteAPI:
         await self._ensure_browser()
         assert self._page is not None
         try:
-            await self._page.goto(PUBLISH_URL, wait_until="domcontentloaded")
+            await self._goto(PUBLISH_URL)
             # Wait editor ready: look for upload button or dropzone
             # Common selector in creator publish flow (may change, so keep fallbacks)
             upload_input = None
@@ -121,11 +172,17 @@ class RedNoteAPI:
                 pass
             if not upload_input:
                 # Try clicking an upload area to reveal input
-                try:
-                    await self._page.click("text=上传", timeout=5000)
-                    upload_input = await self._page.wait_for_selector("input[type='file']", timeout=5000)
-                except Exception:
-                    pass
+                clicked = await self._click_first([
+                    "text=上传",
+                    "button:has-text('上传')",
+                    "[data-test-id='upload-btn']",
+                    ".upload .btn, .ant-upload-select"
+                ], timeout=5000)
+                if clicked:
+                    try:
+                        upload_input = await self._page.wait_for_selector("input[type='file']", timeout=5000)
+                    except Exception:
+                        upload_input = None
             if not upload_input:
                 return {"success": False, "message": "Upload input not found"}
 
@@ -142,17 +199,17 @@ class RedNoteAPI:
 
             # Title and content selectors (best-effort, may vary)
             # Try typical placeholders
-            try:
-                title_locator = await self._page.wait_for_selector("input[placeholder*='标题'], textarea[placeholder*='标题']", timeout=5000)
-                await title_locator.fill(title[:30])
-            except Exception:
-                pass
+            _ = await self._fill_first([
+                "input[placeholder*='标题']",
+                "textarea[placeholder*='标题']",
+                "input[aria-label*='标题']"
+            ], title[:30], timeout=5000)
 
-            try:
-                content_locator = await self._page.wait_for_selector("textarea, div[contenteditable='true']", timeout=5000)
-                await content_locator.fill(content[:1000])
-            except Exception:
-                pass
+            _ = await self._fill_first([
+                "textarea[placeholder*='正文']",
+                "div[contenteditable='true']",
+                "textarea",
+            ], content[:1000], timeout=5000)
 
             # Publish button
             # Try multiple candidates
@@ -189,6 +246,67 @@ class RedNoteAPI:
                 return {"success": True, "message": "Published, but success could not be confirmed"}
         except Exception as e:
             logger.error(f"RedNote publish failed: {e}")
+            return {"success": False, "message": str(e)}
+
+    async def add_comment(self, note_url_or_id: str, comment: str) -> Dict[str, Any]:
+        """Add a comment to a note by URL or note ID using web UI.
+
+        Args:
+            note_url_or_id: Full note URL like https://www.xiaohongshu.com/explore/<id>
+                             or just the <id>.
+            comment: Text content to post.
+        Returns:
+            {'success': True} on success, otherwise {'success': False, 'message': ...}
+        """
+        await self._ensure_browser()
+        assert self._page is not None
+        try:
+            note_url = note_url_or_id
+            if not note_url_or_id.startswith("http"):
+                note_url = f"https://www.xiaohongshu.com/explore/{note_url_or_id}"
+            await self._goto(note_url, wait_until="domcontentloaded")
+            # Wait comment UI and focus input
+            # Try to open comment box if collapsed
+            _ = await self._click_first([
+                "button:has-text('写评论')",
+                "button:has-text('评论')",
+                "[data-test-id='open-comment']",
+                "[class*='comment'] button"
+            ], timeout=3000)
+
+            # Try various selectors for input area
+            filled = await self._fill_first([
+                "textarea[placeholder*='评论']",
+                "div[contenteditable='true'][data-placeholder*='评论']",
+                "textarea",
+                "div[contenteditable='true']",
+            ], comment[:500], timeout=6000)
+            if not filled:
+                return {"success": False, "message": "Comment input not found"}
+
+            # Click send/publish
+            clicked = await self._click_first([
+                "button:has-text('发送')",
+                "button:has-text('发布')",
+                "[data-test-id='send-comment']",
+                "button[type='submit']"
+            ], timeout=4000)
+            if not clicked:
+                return {"success": False, "message": "Send button not found"}
+
+            # Wait for comment to appear or success toast
+            try:
+                await self._page.wait_for_load_state("networkidle", timeout=8000)
+            except Exception:
+                pass
+            try:
+                # Heuristic: look for comment text appearing
+                await self._page.wait_for_selector(f"text={comment[:10]}", timeout=5000)
+            except Exception:
+                pass
+            return {"success": True}
+        except Exception as e:
+            logger.error(f"RedNote add_comment failed: {e}")
             return {"success": False, "message": str(e)}
 
 
