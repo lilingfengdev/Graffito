@@ -24,10 +24,10 @@ class TaskQueueBackend:
     async def enqueue(self, name: str, job: Dict[str, Any]):  # pragma: no cover
         raise NotImplementedError
 
-    async def pop(self, name: str, timeout: int = 5) -> Optional[Tuple[bytes, Dict[str, Any]]]:  # pragma: no cover
+    async def pop(self, name: str, timeout: int = 5) -> Optional[Tuple[Any, Dict[str, Any]]]:  # pragma: no cover
         raise NotImplementedError
 
-    async def ack(self, name: str, raw: bytes):  # pragma: no cover
+    async def ack(self, name: str, token: Any):  # pragma: no cover
         raise NotImplementedError
 
     async def recover_inflight(self, name: str):  # pragma: no cover
@@ -53,7 +53,7 @@ class RedisQueueBackend(TaskQueueBackend):
         payload = orjson.dumps(job)
         await self._redis.rpush(pending, payload)
 
-    async def pop(self, name: str, timeout: int = 5) -> Optional[Tuple[bytes, Dict[str, Any]]]:
+    async def pop(self, name: str, timeout: int = 5) -> Optional[Tuple[Any, Dict[str, Any]]]:
         pending, processing = self._keys(name)
         # Atomically move from pending to processing
         data = await self._redis.brpoplpush(pending, processing, timeout=timeout)
@@ -65,10 +65,10 @@ class RedisQueueBackend(TaskQueueBackend):
             job = {}
         return data, job
 
-    async def ack(self, name: str, raw: bytes):
+    async def ack(self, name: str, token: Any):
         _, processing = self._keys(name)
         # Remove one occurrence from processing list
-        await self._redis.lrem(processing, 1, raw)
+        await self._redis.lrem(processing, 1, token)
 
     async def recover_inflight(self, name: str):
         pending, processing = self._keys(name)
@@ -95,7 +95,7 @@ class MemoryQueueBackend(TaskQueueBackend):
         raw = orjson.dumps(job)
         await self._pending[name].put(raw)
 
-    async def pop(self, name: str, timeout: int = 5) -> Optional[Tuple[bytes, Dict[str, Any]]]:
+    async def pop(self, name: str, timeout: int = 5) -> Optional[Tuple[Any, Dict[str, Any]]]:
         await self.ensure_queue(name)
         try:
             raw = await asyncio.wait_for(self._pending[name].get(), timeout=timeout)
@@ -108,10 +108,10 @@ class MemoryQueueBackend(TaskQueueBackend):
             job = {}
         return raw, job
 
-    async def ack(self, name: str, raw: bytes):
+    async def ack(self, name: str, token: Any):
         await self.ensure_queue(name)
         try:
-            self._processing[name].remove(raw)
+            self._processing[name].remove(token)
         except ValueError:
             pass
 
@@ -124,9 +124,60 @@ class MemoryQueueBackend(TaskQueueBackend):
             await self._pending[name].put(raw)
 
 
+try:
+    from pathlib import Path
+    from persistqueue import SQLiteAckQueue  # type: ignore
+except Exception:  # pragma: no cover
+    SQLiteAckQueue = None  # type: ignore
+
+
+class PersistQueueBackend(TaskQueueBackend):
+    def __init__(self, base_dir: str = "data/queues"):
+        if SQLiteAckQueue is None:
+            raise RuntimeError("persist-queue not available; cannot use PersistQueueBackend")
+        self._queues: Dict[str, SQLiteAckQueue] = {}
+        self._base_dir = Path(base_dir)
+        self._base_dir.mkdir(parents=True, exist_ok=True)
+
+    def _get_queue(self, name: str) -> Any:
+        q = self._queues.get(name)
+        if q is None:
+            path = str(self._base_dir / name)
+            self._queues[name] = SQLiteAckQueue(path)
+            q = self._queues[name]
+        return q
+
+    async def ensure_queue(self, name: str):
+        self._get_queue(name)
+
+    async def enqueue(self, name: str, job: Dict[str, Any]):
+        q = self._get_queue(name)
+        q.put(job)
+
+    async def pop(self, name: str, timeout: int = 5) -> Optional[Tuple[Any, Dict[str, Any]]]:
+        q = self._get_queue(name)
+        try:
+            item = q.get(block=True, timeout=timeout)
+        except Exception:
+            return None
+        # item is the original dict we put
+        return item, (item if isinstance(item, dict) else {})
+
+    async def ack(self, name: str, token: Any):
+        q = self._get_queue(name)
+        try:
+            q.ack(token)
+        except Exception:
+            pass
+
+    async def recover_inflight(self, name: str):
+        # SQLiteAckQueue will redeliver unacked items on next get automatically
+        return None
+
+
 def build_queue_backend() -> TaskQueueBackend:
     """Create a queue backend based on settings.redis.enabled.
-    Falls back to in-memory if Redis unavailable or disabled.
+    Prefers Redis if enabled; otherwise uses persist-queue if available; falls back to in-memory.
     """
     try:
         from config import get_settings
@@ -138,6 +189,9 @@ def build_queue_backend() -> TaskQueueBackend:
             db = int(getattr(redis_cfg, 'db', 0))
             url = f"redis://{host}:{port}/{db}"
             return RedisQueueBackend(url)
+        # Redis disabled -> try persist-queue
+        if SQLiteAckQueue is not None:
+            return PersistQueueBackend()
     except Exception:
         pass
     return MemoryQueueBackend()
