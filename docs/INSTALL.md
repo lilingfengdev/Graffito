@@ -4,7 +4,7 @@
 
 - Python 3.9+
 - 4GB+ RAM（推荐）
-- Chromium/Chrome（用于渲染图片；Docker 镜像已内置）
+- Chromium（用于渲染图片；通过 Playwright 安装，Docker 镜像已内置）
 - OneBot v11 实现（推荐 NapCat）
 
 ## 快速安装
@@ -29,7 +29,8 @@ cp config/config.example.yaml config/config.yaml
 # 初始化数据库
 python cli.py db-init
 
-# 启动
+# 安装 Playwright Chromium（首次）并启动
+python -m playwright install chromium
 ./start.sh  # 或 python main.py
 ```
 
@@ -127,7 +128,7 @@ publishers:
   - 如启用鉴权，核对 Access Token；
   - 检查服务器防火墙与端口映射。
 - LLM 调用失败：核对 `llm.provider` 与 `llm.api_key`，并检查网络。
-- 图片渲染失败：安装 Chromium/Chrome 或在 Docker 环境运行（镜像已内置）。
+- 图片渲染失败：执行 `python -m playwright install chromium` 或在 Docker 环境运行（镜像已内置）。
 
 ## 升级
 

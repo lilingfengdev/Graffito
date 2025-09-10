@@ -70,7 +70,7 @@ cp config/config.example.yaml config/config.yaml
 # 编辑 config/config.yaml（账号组、NapCat 端口、LLM 等）
 ```
 
-必备环境：Python 3.9+、Chromium/Chrome（用于渲染，Docker 镜像已内置）、OneBot v11（推荐 NapCat）。
+必备环境：Python 3.9+、Chromium（通过 Playwright 安装；Docker 镜像已内置）、OneBot v11（推荐 NapCat）。
 
 ### 2) 运行
 
@@ -81,7 +81,10 @@ cp config/config.example.yaml config/config.yaml
 # Windows
 start.bat
 
-# 或直接运行（DRIVER 将在代码中自动设为 ~fastapi）
+# 首次需要安装 Playwright Chromium
+python -m playwright install chromium
+
+# 运行（DRIVER 将在代码中自动设为 ~fastapi）
 python main.py
 ```
 

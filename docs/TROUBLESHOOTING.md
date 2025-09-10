@@ -37,7 +37,7 @@
 ## LLM/渲染问题
 
 - API 失败：检查网络与 `llm.provider`、`llm.api_key`；
-- 渲染空白：检查系统是否安装 Chromium（Docker 镜像已内置）。
+- 渲染空白：确认已执行 `python -m playwright install chromium` 安装浏览器（Docker 镜像已内置）。
 
 ## 常用排查命令
 
