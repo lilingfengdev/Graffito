@@ -17,20 +17,7 @@ services:
       - LOG_LEVEL=${LOG_LEVEL:-INFO}
     networks:
       - oqqwall_net
-    depends_on:
-      - redis
-    
-  redis:
-    image: redis:7-alpine
-    container_name: oqqwall_redis
-    restart: unless-stopped
-    ports:
-      - "6379:6379"
-    volumes:
-      - redis_data:/data
-    networks:
-      - oqqwall_net
-    command: redis-server --appendonly yes
+    # no external queue service required by default
     
   # 可选：PostgreSQL数据库
   # postgres:
@@ -53,5 +40,4 @@ networks:
     driver: bridge
 
 volumes:
-  redis_data:
   # postgres_data:
