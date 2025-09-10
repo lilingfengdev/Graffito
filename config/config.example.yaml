@@ -76,21 +76,31 @@ publishers:
     include_segments: false
     # 可选：直接指定各账号的 cookie 文件位置（如未指定则默认 data/cookies/bilibili_{account_id}.json）
     accounts: {}
+  # 小红书（RedNote）发送器配置
+  # 使用 Playwright 自动化在创作平台发布图文笔记。
+  # 提示：先运行 `python rednote_login_tool.py` 获取并保存登录 Cookies。
   rednote:
-    enabled: false
-    max_attempts: 3
-    batch_size: 20
-    max_images_per_post: 9
-    send_schedule: []
-    publish_text: true
-    include_publish_id: false
-    include_at_sender: false
-    image_source: rendered
-    include_segments: false
+    enabled: false               # 是否启用小红书发送器
+    max_attempts: 3              # 单条发布失败后的最大重试次数
+    batch_size: 20               # 批量发布的批次大小（一次处理的投稿数量）
+    max_images_per_post: 9       # 单条笔记最多附带图片数量（红书上限一般为9）
+    send_schedule: []            # 定时发送时间（如 ["09:00", "12:00", "18:00", "21:00"]）
+    # 发布内容控制（与其它平台保持一致配置语义）
+    publish_text: true           # 是否发布文本（编号/@/评论/链接等）。红书主要以图文为主。
+    include_publish_id: false    # 是否包含发布编号（一般关闭，避免影响标题/正文）
+    include_at_sender: false     # 是否@投稿者（红书不支持通过QQ号@，建议关闭）
+    image_source: rendered       # 图片来源：rendered|chat|both（默认使用渲染后的图片）
+    include_segments: false      # 是否包含聊天分段文本（不建议在红书正文中附加聊天记录）
+    # 账号 Cookies 配置：可为每个账号指定 Cookie 文件；未指定时默认 data/cookies/rednote_{account_id}.json
     accounts: {}
-    headless: true
-    slow_mo_ms: 0
-    user_agent: ""
+    # 示例：
+    # accounts:
+    #   myacc:                     # 账号标识（可与 QQ 号一致，方便管理）
+    #     cookie_file: data/cookies/rednote_myacc.json
+    # Playwright 行为配置
+    headless: true               # 是否使用无头模式运行浏览器（服务器环境建议开启）
+    slow_mo_ms: 0                # 放慢自动化操作（毫秒）。调试选择较大值如 50-200
+    user_agent: ""               # 自定义 UA（留空使用默认 UA）
     
 # 审核配置
 audit:
