@@ -144,7 +144,7 @@ class AccountGroup(BaseModel):
     wall_mark: str = ""
     friend_add_message: str = "你好，欢迎投稿"
     quick_replies: Dict[str, str] = Field(default_factory=dict)
-    # 是否允许匿名评论（私聊 #评论 指令的操作者在审核日志中匿名记录）
+    # 是否启用 #评论 指令（投稿者可私聊追加评论到已发布平台）
     allow_anonymous_comment: bool = True
     
 class Settings(BaseSettings):

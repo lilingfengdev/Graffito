@@ -11,6 +11,12 @@ from loguru import logger
 # Early import of third-party bilibili_api to avoid runtime imports
 from bilibili_api import Credential  # type: ignore
 from bilibili_api import dynamic  # type: ignore
+from bilibili_api import comment as bili_comment  # type: ignore
+try:
+    # 16.x版本
+    from bilibili_api.comment import CommentResourceType  # type: ignore
+except Exception:  # pragma: no cover
+    CommentResourceType = None  # type: ignore
 
 
 class BilibiliAPI:
@@ -51,4 +57,27 @@ class BilibiliAPI:
         if isinstance(res, dict):
             return {'success': True, 'dynamic_id': res.get('dynamic_id') or res.get('data', {}).get('dynamic_id')}
         return {'success': True, 'dynamic_id': res}
+
+    async def add_comment(self, dynamic_id: int, message: str) -> Dict[str, Any]:
+        """为指定动态添加评论。"""
+        try:
+            oid = int(dynamic_id)
+        except Exception:
+            return {'success': False, 'message': '无效的动态ID'}
+
+        try:
+            if CommentResourceType is not None:
+                await bili_comment.send_comment(
+                    resource_type=CommentResourceType.DYNAMIC,
+                    oid=oid,
+                    message=message,
+                    credential=self._bili_credential
+                )
+            else:
+                # 回退：某些版本为枚举值常量 11 表示动态
+                await bili_comment.send_comment(11, oid, message, credential=self._bili_credential)  # type: ignore[arg-type]
+            return {'success': True, 'message': '已评论'}
+        except Exception as e:
+            logger.error(f"B站评论失败: {e}")
+            return {'success': False, 'message': str(e)}
 
