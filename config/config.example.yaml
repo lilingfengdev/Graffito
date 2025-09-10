@@ -43,8 +43,8 @@ processing:
 
 # 队列配置（用于定时发送任务的持久化队列）
 # backend 取值：AsyncSQLiteQueue | AsyncQueue | MySQLQueue
-# - AsyncSQLiteQueue：基于 SQLite 的带 ack 异步持久化队列（推荐，崩溃可恢复）
-# - AsyncQueue：基于文件系统的异步持久化队列（无 ack）
+# - AsyncSQLiteQueue：基于 SQLite 的异步持久化队列（推荐）
+# - AsyncQueue：基于文件系统的异步持久化队列
 # - MySQLQueue：使用 MySQL 作为后端（需提供 mysql 连接参数）
 queue:
   backend: AsyncSQLiteQueue

@@ -1,8 +1,8 @@
 """Persistent task queue abstraction for publisher scheduling (configurable).
 
 Supported backends (configured via settings.queue.backend):
-  - AsyncSQLiteQueue: backed by persist-queue SQLiteAckQueue with async wrappers
-  - AsyncQueue: backed by persist-queue file Queue with async wrappers
+  - AsyncSQLiteQueue: backed by persist-queue AsyncSQLiteQueue
+  - AsyncQueue: backed by persist-queue AsyncQueue (file-based)
   - MySQLQueue: backed by persist-queue MySQLQueue
 """
 from __future__ import annotations
@@ -21,18 +21,17 @@ class TaskQueueBackend:
     async def pop(self, name: str, timeout: int = 5) -> Optional[Tuple[Any, Dict[str, Any]]]:  # pragma: no cover
         raise NotImplementedError
 
-    async def ack(self, name: str, token: Any):  # pragma: no cover
-        raise NotImplementedError
-
     async def recover_inflight(self, name: str):  # pragma: no cover
         raise NotImplementedError
 
 
 try:
-    from persistqueue import SQLiteAckQueue, Queue as FileQueue  # type: ignore
+    # Async variants
+    from persistqueue.async_sqlite_queue import AsyncSQLiteQueue  # type: ignore
+    from persistqueue.async_queue import AsyncQueue as AsyncFileQueue  # type: ignore
 except Exception:  # pragma: no cover
-    SQLiteAckQueue = None  # type: ignore
-    FileQueue = None  # type: ignore
+    AsyncSQLiteQueue = None  # type: ignore
+    AsyncFileQueue = None  # type: ignore
 
 
 try:
@@ -50,102 +49,78 @@ except Exception:  # pragma: no cover
 
 
 class AsyncSQLiteQueueBackend(TaskQueueBackend):
-    """Async wrapper over persist-queue SQLiteAckQueue (ack-capable)."""
+    """Wrapper over persist-queue AsyncSQLiteQueue (no ack)."""
     def __init__(self, base_dir: str = "data/queues"):
         from pathlib import Path
-        if SQLiteAckQueue is None:
+        if AsyncSQLiteQueue is None:
             raise RuntimeError("persist-queue not available; cannot use AsyncSQLiteQueue")
         self._queues: Dict[str, Any] = {}
         self._base_dir = Path(base_dir)
         self._base_dir.mkdir(parents=True, exist_ok=True)
 
-    def _get_queue_sync(self, name: str) -> Any:
+    def _path(self, name: str) -> str:
+        return str(self._base_dir / name)
+
+    async def _get_queue(self, name: str) -> Any:
         q = self._queues.get(name)
         if q is None:
-            path = str(self._base_dir / name)
-            self._queues[name] = SQLiteAckQueue(path)
-            q = self._queues[name]
+            q = AsyncSQLiteQueue(self._path(name))
+            self._queues[name] = q
         return q
 
     async def ensure_queue(self, name: str):
-        await asyncio.to_thread(self._get_queue_sync, name)
+        await self._get_queue(name)
 
     async def enqueue(self, name: str, job: Dict[str, Any]):
-        def _put():
-            q = self._get_queue_sync(name)
-            q.put(job)
-        await asyncio.to_thread(_put)
+        q = await self._get_queue(name)
+        await q.put(job)
 
     async def pop(self, name: str, timeout: int = 5) -> Optional[Tuple[Any, Dict[str, Any]]]:
-        def _get():
-            q = self._get_queue_sync(name)
-            try:
-                item = q.get(block=True, timeout=timeout)
-            except Exception:
-                return None
-            return item
-        item = await asyncio.to_thread(_get)
-        if item is None:
+        q = await self._get_queue(name)
+        try:
+            item = await q.get(timeout=timeout)
+        except Exception:
             return None
         return item, (item if isinstance(item, dict) else {})
 
-    async def ack(self, name: str, token: Any):
-        def _ack():
-            q = self._get_queue_sync(name)
-            try:
-                q.ack(token)
-            except Exception:
-                pass
-        await asyncio.to_thread(_ack)
-
     async def recover_inflight(self, name: str):
-        # Unacked items will be redelivered automatically
         return None
 
 
 class AsyncFileQueueBackend(TaskQueueBackend):
-    """Async wrapper over persist-queue file Queue (no ack)."""
+    """Wrapper over persist-queue AsyncQueue (file-based, no ack)."""
     def __init__(self, base_dir: str = "data/queues"):
         from pathlib import Path
-        if FileQueue is None:
+        if AsyncFileQueue is None:
             raise RuntimeError("persist-queue not available; cannot use AsyncQueue")
         self._queues: Dict[str, Any] = {}
         self._base_dir = Path(base_dir)
         self._base_dir.mkdir(parents=True, exist_ok=True)
 
-    def _get_queue_sync(self, name: str) -> Any:
+    def _path(self, name: str) -> str:
+        return str(self._base_dir / name)
+
+    async def _get_queue(self, name: str) -> Any:
         q = self._queues.get(name)
         if q is None:
-            path = str(self._base_dir / name)
-            self._queues[name] = FileQueue(path)
-            q = self._queues[name]
+            q = AsyncFileQueue(self._path(name))
+            self._queues[name] = q
         return q
 
     async def ensure_queue(self, name: str):
-        await asyncio.to_thread(self._get_queue_sync, name)
+        await self._get_queue(name)
 
     async def enqueue(self, name: str, job: Dict[str, Any]):
-        def _put():
-            q = self._get_queue_sync(name)
-            q.put(job)
-        await asyncio.to_thread(_put)
+        q = await self._get_queue(name)
+        await q.put(job)
 
     async def pop(self, name: str, timeout: int = 5) -> Optional[Tuple[Any, Dict[str, Any]]]:
-        def _get():
-            q = self._get_queue_sync(name)
-            try:
-                item = q.get(block=True, timeout=timeout)
-            except Exception:
-                return None
-            return item
-        item = await asyncio.to_thread(_get)
-        if item is None:
+        q = await self._get_queue(name)
+        try:
+            item = await q.get(timeout=timeout)
+        except Exception:
             return None
         return item, (item if isinstance(item, dict) else {})
-
-    async def ack(self, name: str, token: Any):
-        # FileQueue 没有 ack 语义，视为立即完成
-        return None
 
     async def recover_inflight(self, name: str):
         return None
@@ -190,16 +165,6 @@ class MySQLQueueBackend(TaskQueueBackend):
         if item is None:
             return None
         return item, (item if isinstance(item, dict) else {})
-
-    async def ack(self, name: str, token: Any):
-        def _ack():
-            q = self._get_queue_sync(name)
-            # MySQLQueue may or may not support ack; ignore if not
-            try:
-                q.ack(token)
-            except Exception:
-                pass
-        await asyncio.to_thread(_ack)
 
     async def recover_inflight(self, name: str):
         return None

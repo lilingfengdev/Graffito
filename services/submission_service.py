@@ -397,9 +397,8 @@ class SubmissionService:
                 if popped is None:
                     await asyncio.sleep(0.2)
                     continue
-                raw, job = popped
+                _token, job = popped
                 if not isinstance(job, dict):
-                    await self._queue_backend.ack(pub_name, raw)
                     continue
                 jtype = job.get('type')
                 if jtype == 'flush_group':
@@ -409,7 +408,6 @@ class SubmissionService:
                         self.logger.info(f"[{pub_name}] 组 {g} 定时发送完成: {ok}")
                     except Exception as e:
                         self.logger.error(f"[{pub_name}] 组 {g} 定时发送失败: {e}")
-                await self._queue_backend.ack(pub_name, raw)
                 # 轻微等待，避免打满平台接口
                 await asyncio.sleep(0.2)
             except asyncio.CancelledError:
