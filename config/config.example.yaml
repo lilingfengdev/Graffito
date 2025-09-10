@@ -40,6 +40,22 @@ llm:
 processing:
   wait_time: 120  # 等待用户补充消息的时间（秒）
   max_concurrent: 10  # 最大并发处理数
+
+# 队列配置（用于定时发送任务的持久化队列）
+# backend 取值：AsyncSQLiteQueue | AsyncQueue | MySQLQueue
+# - AsyncSQLiteQueue：基于 SQLite 的异步持久化队列（推荐）
+# - AsyncQueue：基于文件系统的异步持久化队列
+# - MySQLQueue：使用 MySQL 作为后端（需提供 mysql 连接参数）
+queue:
+  backend: AsyncSQLiteQueue
+  path: data/queues  # 当 backend 为 Async* 时生效，队列数据目录
+  mysql:             # 当 backend 为 MySQLQueue 时生效
+    host: 127.0.0.1
+    port: 3306
+    user: root
+    password: ""
+    database: oqqqueue
+    table: oqq_tasks
   
 # 接收器配置
 receivers:

@@ -1,0 +1,11 @@
+enabled: false
+max_attempts: 3
+batch_size: 30
+max_images_per_post: 9
+send_schedule: []
+publish_text: true
+include_publish_id: true
+include_at_sender: false
+image_source: rendered
+include_segments: false
+accounts: {}

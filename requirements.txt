@@ -10,11 +10,13 @@ aiosqlite>=0.19.0
 
 # 异步支持
 asyncio-mqtt>=0.16.0
-aioredis>=2.0.0
-aiocache>=0.12.0
 
 # 任务调度
 apscheduler>=3.10.0
+orjson>=3.9.10
+persist-queue>=0.8.1
+aiosqlite>=0.19.0
+aiofiles>=23.2.1
 
 # 数据验证
 pydantic>=2.5.0

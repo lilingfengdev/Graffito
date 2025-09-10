@@ -1,4 +1,6 @@
 from typing import Iterable, List, TypeVar, Dict, Any
+from pathlib import Path
+import yaml
 
 T = TypeVar("T")
 
@@ -34,16 +36,41 @@ except Exception:  # pragma: no cover
 
 
 def get_platform_config(platform_key: str) -> Dict[str, Any]:
-    """Return publisher config dict for given platform key.
+    """Return merged publisher config dict for given platform key.
 
-    Example:
-        >>> cfg = get_platform_config("qzone")
+    Priority (later overrides earlier):
+      1) settings.publishers[platform_key] from main config
+      2) config/publishers/{platform_key}.yml if exists
     """
+    def deep_merge_dict(base: Dict[str, Any], override: Dict[str, Any]) -> Dict[str, Any]:
+        for k, v in (override or {}).items():
+            if k in base and isinstance(base[k], dict) and isinstance(v, dict):
+                base[k] = deep_merge_dict(dict(base[k]), dict(v))
+            else:
+                base[k] = v
+        return base
+
     if get_settings is None:
-        return {}
+        base: Dict[str, Any] = {}
+    else:
+        try:
+            settings = get_settings()
+            cfg = settings.publishers.get(platform_key)
+            base = to_dict(cfg)
+        except Exception:
+            base = {}
+
+    # Merge per-publisher YAML overrides
     try:
-        settings = get_settings()
-        cfg = settings.publishers.get(platform_key)
-        return to_dict(cfg)
+        override_path = Path(f"config/publishers/{platform_key}.yml")
+        if not override_path.exists():
+            override_path = Path(f"config/publishers/{platform_key}.yaml")
+        if override_path.exists():
+            with open(override_path, 'r', encoding='utf-8') as f:
+                override_data = yaml.safe_load(f) or {}
+            base = deep_merge_dict(base, override_data if isinstance(override_data, dict) else {})
     except Exception:
-        return {}
+        # best-effort merge; ignore malformed override files
+        pass
+
+    return base

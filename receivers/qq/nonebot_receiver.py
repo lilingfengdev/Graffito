@@ -808,7 +808,7 @@ class QQReceiver(BaseReceiver):
 
     async def _try_handle_private_command(self, user_id: str, self_id: str, raw_text: str) -> bool:
         """解析并处理私聊指令。目前支持：
-        - #评论 <投稿ID> <内容>  -> 投稿者本人为其投稿追加匿名评论
+        - #评论 <投稿ID> <内容>  -> 投稿者本人为其投稿追加评论（外部平台不暴露身份）
         识别到并处理返回 True；未识别返回 False。
         """
         try:
@@ -868,55 +868,57 @@ class QQReceiver(BaseReceiver):
 
                 # 仅允许对已发布的投稿同步评论
                 if submission.status != SubmissionStatus.PUBLISHED.value:
-                    await self.send_private_message(user_id, "当前投稿尚未发布，无法同步评论到QQ空间")
+                    await self.send_private_message(user_id, "当前投稿尚未发布，无法同步评论到外部平台")
                     return True
+                group_name_for_comment = submission.group_name
 
-            # 记录审核日志（若可用），根据配置决定是否匿名记录操作者
+            # 检查是否启用 #评论 指令（按投稿所属组配置）
+            try:
+                from config import get_settings
+                settings = get_settings()
+                if group_name_for_comment and group_name_for_comment in settings.account_groups:
+                    grp = settings.account_groups.get(group_name_for_comment)
+                    enable_comment_cmd = bool(getattr(grp, 'allow_anonymous_comment', True))
+                    if not enable_comment_cmd:
+                        await self.send_private_message(user_id, "本组未启用 #评论 功能")
+                        return True
+            except Exception:
+                # 若配置读取异常，则默认允许
+                pass
+
+            # 记录审核日志（始终记录操作者真实ID）
             try:
                 if self.audit_service:
-                    try:
-                        from config import get_settings
-                        settings = get_settings()
-                        # 需要 submission 的组名以判断配置
-                        group_name = None
-                        try:
-                            # 重新读取一次提交记录获取组名（上面查询的 submission 已存在于局部作用域，但作用域外不可用）
-                            db2 = await get_db()
-                            async with db2.get_session() as s2:
-                                from sqlalchemy import select as _select
-                                from core.models import Submission as _Submission
-                                rr = await s2.execute(_select(_Submission).where(_Submission.id == submission_id))
-                                sub_row = rr.scalar_one_or_none()
-                                if sub_row:
-                                    group_name = sub_row.group_name
-                        except Exception:
-                            group_name = None
-                        allow_anon = True
-                        if group_name and group_name in settings.account_groups:
-                            grp = settings.account_groups.get(group_name)
-                            allow_anon = bool(getattr(grp, 'allow_anonymous_comment', True))
-                        operator_for_log = "anonymous" if allow_anon else user_id
-                    except Exception:
-                        operator_for_log = user_id
-                    await self.audit_service.log_audit(submission_id, operator_for_log, "评论", comment_text)
+                    await self.audit_service.log_audit(submission_id, user_id, "评论", comment_text)
             except Exception:
                 pass
 
-            # 同步到QQ空间：使用对应发布账号调用API
+            # 同步到所有已注册的支持评论的发送器（不暴露操作者身份）
             try:
                 from core.plugin import plugin_manager
-                publisher = plugin_manager.get_publisher("qzone_publisher")
-                if not publisher:
+                publishers = list(plugin_manager.publishers.values())
+                if not publishers:
                     await self.send_private_message(user_id, "发送器未就绪，稍后再试")
                     return True
-                result = await publisher.add_comment_for_submission(submission_id, comment_text)
-                if result.get("success"):
-                    await self.send_private_message(user_id, f"评论成功：已同步到QQ空间（投稿 {submission_id}）")
+                results = []
+                success_any = False
+                for pub in publishers:
+                    try:
+                        if hasattr(pub, "add_comment_for_submission"):
+                            r = await getattr(pub, "add_comment_for_submission")(submission_id, comment_text)
+                            results.append((pub.name, bool(r.get("success")), r))
+                            success_any = success_any or bool(r.get("success"))
+                    except Exception as _e:
+                        results.append((pub.name, False, {"message": str(_e)}))
+                if success_any:
+                    ok_names = [n for n, ok, _ in results if ok]
+                    await self.send_private_message(user_id, f"评论成功：已同步到 {', '.join(ok_names)}（投稿 {submission_id}）")
                 else:
-                    await self.send_private_message(user_id, f"评论失败：{result.get('message','未知错误')}")
+                    msg = "；".join([f"{n}:{r.get('message','失败')}" for n, ok, r in results]) or "未知错误"
+                    await self.send_private_message(user_id, f"评论失败：{msg}")
                 return True
             except Exception as e:
-                self.logger.error(f"QQ空间评论同步失败: {e}")
+                self.logger.error(f"评论同步失败: {e}")
                 await self.send_private_message(user_id, "评论失败：系统异常")
                 return True
 

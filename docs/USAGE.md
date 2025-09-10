@@ -286,15 +286,13 @@ class BilibiliPublisher(BasePublisher):
 
 #### 启用小红书（RedNote）发送器
 
-在 `config/config.yaml` 中配置：
+在 `config/publishers/rednote.yml` 中配置（可覆盖主配置同名字段）：
 
 ```yaml
-publishers:
-  rednote:
-    enabled: true
-    accounts:
-      myacc:
-        cookie_file: data/cookies/rednote_myacc.json
+enabled: true
+accounts:
+  myacc:
+    cookie_file: data/cookies/rednote_myacc.json
 ```
 
 登录工具会将浏览器 cookies 以 Playwright 兼容格式保存到 `data/cookies/rednote_{account}.json`。

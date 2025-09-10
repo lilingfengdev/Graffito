@@ -37,6 +37,23 @@ class RedisConfig(BaseModel):
     host: str = "localhost"
     port: int = 6379
     db: int = 0
+class QueueMySQLConfig(BaseModel):
+    host: str = "localhost"
+    port: int = 3306
+    user: str = "root"
+    password: str = ""
+    database: str = "oqqqueue"
+    table: str = "oqq_tasks"
+
+class QueueConfig(BaseModel):
+    """任务队列配置
+    backend: AsyncSQLiteQueue | AsyncQueue | MySQLQueue
+    path: 本地队列目录（用于 Async* 后端）
+    mysql: MySQL 连接参数（用于 MySQLQueue）
+    """
+    backend: str = "AsyncSQLiteQueue"
+    path: str = "data/queues"
+    mysql: QueueMySQLConfig = QueueMySQLConfig()
     
 class LLMConfig(BaseModel):
     """LLM配置"""
@@ -144,7 +161,7 @@ class AccountGroup(BaseModel):
     wall_mark: str = ""
     friend_add_message: str = "你好，欢迎投稿"
     quick_replies: Dict[str, str] = Field(default_factory=dict)
-    # 是否允许匿名评论（私聊 #评论 指令的操作者在审核日志中匿名记录）
+    # 是否启用 #评论 指令（投稿者可私聊追加评论到已发布平台）
     allow_anonymous_comment: bool = True
     
 class Settings(BaseSettings):
@@ -153,6 +170,7 @@ class Settings(BaseSettings):
     server: ServerConfig = ServerConfig()
     database: DatabaseConfig = DatabaseConfig()
     redis: RedisConfig = RedisConfig()
+    queue: QueueConfig = QueueConfig()
     llm: LLMConfig = LLMConfig()
     processing: ProcessingConfig = ProcessingConfig()
     receivers: Dict[str, Any] = Field(default_factory=dict)
@@ -183,12 +201,17 @@ class Settings(BaseSettings):
                 data['receivers']['qq'] = QQReceiverConfig(**data['receivers']['qq'])
         
         if 'publishers' in data:
-            if 'qzone' in data['publishers']:
-                data['publishers']['qzone'] = QzonePublisherConfig(**data['publishers']['qzone'])
-            if 'bilibili' in data['publishers']:
-                data['publishers']['bilibili'] = BilibiliPublisherConfig(**data['publishers']['bilibili'])
-            if 'rednote' in data['publishers']:
-                data['publishers']['rednote'] = RedNotePublisherConfig(**data['publishers']['rednote'])
+            # Accept raw dict first; schema validation will happen inside each publisher if needed
+            try:
+                if 'qzone' in data['publishers']:
+                    data['publishers']['qzone'] = QzonePublisherConfig(**data['publishers']['qzone'])
+                if 'bilibili' in data['publishers']:
+                    data['publishers']['bilibili'] = BilibiliPublisherConfig(**data['publishers']['bilibili'])
+                if 'rednote' in data['publishers']:
+                    data['publishers']['rednote'] = RedNotePublisherConfig(**data['publishers']['rednote'])
+            except Exception:
+                # If per-publisher schema fails, keep raw dicts; dynamic overrides may supply valid fields
+                pass
                 
         # 处理账号组配置
         if 'account_groups' in data:

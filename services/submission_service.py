@@ -8,15 +8,15 @@ from core.database import get_db
 from core.models import Submission, MessageCache, StoredPost, PublishRecord
 from core.enums import SubmissionStatus, PublishPlatform
 from processors.pipeline import ProcessingPipeline
-from publishers.qzone import QzonePublisher
-from publishers.bilibili import BilibiliPublisher
-from publishers.rednote import RedNotePublisher
+from apscheduler.schedulers.asyncio import AsyncIOScheduler
+from apscheduler.triggers.cron import CronTrigger
 
 # Moved frequently used imports to module level to avoid runtime import overhead
 from config import get_settings
 from sqlalchemy import select, and_, delete, update, func
 from services.notification_service import NotificationService
 from utils.common import deduplicate_preserve_order, get_platform_config
+from core.task_queue import build_queue_backend, TaskQueueBackend
 
 
 class SubmissionService:
@@ -26,58 +26,43 @@ class SubmissionService:
         self.logger = logger.bind(module="submission")
         self.pipeline = ProcessingPipeline()
         self.publishers = {}
+        self.scheduler: Optional[AsyncIOScheduler] = None
+        self._queue_backend: TaskQueueBackend = build_queue_backend()
+        self._pub_workers: Dict[str, asyncio.Task] = {}
         
     async def initialize(self):
         """初始化服务"""
         await self.pipeline.initialize()
         
-        # 初始化发送器
-        settings = get_settings()
-        
-        if settings.publishers.get('qzone'):
-            qzone_config = settings.publishers['qzone']
-            if hasattr(qzone_config, 'dict'):
-                qzone_config = qzone_config.dict()
-            elif hasattr(qzone_config, '__dict__'):
-                qzone_config = qzone_config.__dict__
-                
-            if qzone_config.get('enabled'):
-                qzone_publisher = QzonePublisher(qzone_config)
-                await qzone_publisher.initialize()
-                self.publishers['qzone'] = qzone_publisher
+        # 动态获取已注册的发送器（实例及其生命周期由 PluginManager 统一管理）
+        from core.plugin import plugin_manager
+        self.publishers = dict(plugin_manager.publishers)
 
-        # 初始化B站发送器
-        if settings.publishers.get('bilibili'):
-            bili_config = settings.publishers['bilibili']
-            if hasattr(bili_config, 'dict'):
-                bili_config = bili_config.dict()
-            elif hasattr(bili_config, '__dict__'):
-                bili_config = bili_config.__dict__
-            if bili_config.get('enabled'):
-                bili_publisher = BilibiliPublisher(bili_config)
-                await bili_publisher.initialize()
-                self.publishers['bilibili'] = bili_publisher
-
-        # 初始化小红书发送器
-        if settings.publishers.get('rednote'):
-            rn_config = settings.publishers['rednote']
-            if hasattr(rn_config, 'dict'):
-                rn_config = rn_config.dict()
-            elif hasattr(rn_config, '__dict__'):
-                rn_config = rn_config.__dict__
-            if rn_config.get('enabled'):
-                rn_publisher = RedNotePublisher(rn_config)
-                await rn_publisher.initialize()
-                self.publishers['rednote'] = rn_publisher
-                
         self.logger.info("投稿服务初始化完成")
+        # 初始化定时计划
+        try:
+            self._setup_send_schedules()
+        except Exception as e:
+            self.logger.error(f"设置定时计划失败: {e}")
         
     async def shutdown(self):
         """关闭服务"""
         await self.pipeline.shutdown()
-        
-        for publisher in self.publishers.values():
-            await publisher.shutdown()
+        # 停止调度器与工作协程
+        try:
+            if self.scheduler:
+                self.scheduler.shutdown(wait=False)
+                self.scheduler = None
+        except Exception:
+            pass
+        try:
+            for name, task in list(self._pub_workers.items()):
+                if task and not task.done():
+                    task.cancel()
+            self._pub_workers.clear()
+            self._pub_queues.clear()
+        except Exception:
+            pass
             
     async def create_submission(self, sender_id: str, receiver_id: str, 
                               message: Dict[str, Any]) -> Optional[int]:
@@ -353,65 +338,152 @@ class SubmissionService:
             self.logger.error(f"发布单条投稿失败: {e}", exc_info=True)
             return False
             
-    def build_publish_text(self, submission: Submission, include_text: bool = True) -> str:
-        """构建发布文本
-        
-        Args:
-            include_text: 是否包含编号/@/评论/分段文本。无论如何都会附加 links。
-        """
-        text = ""
-        
-        # 读取配置，决定是否包含聊天分段文本
-        settings = get_settings()
-        qzone_cfg = settings.publishers.get('qzone')
-        if hasattr(qzone_cfg, 'dict'):
-            qzone_cfg = qzone_cfg.dict()
-        elif hasattr(qzone_cfg, '__dict__'):
-            qzone_cfg = qzone_cfg.__dict__
-        qzone_cfg = qzone_cfg or {}
-        include_segments = qzone_cfg.get('include_segments', True)
+    def _setup_send_schedules(self):
+        """根据各平台 send_schedule 设置定时任务，任务入队到各自发布器队列。"""
+        if not self.scheduler:
+            self.scheduler = AsyncIOScheduler()
+            self.scheduler.start()
+        # 为每个 publisher 建立队列与 worker，并注册 cron 任务
+        from utils.common import get_platform_config
+        for pub_name, publisher in self.publishers.items():
+            cfg = get_platform_config(publisher.platform.value) or {}
+            times: List[str] = cfg.get('send_schedule') or []
+            if not times:
+                continue
+            # 准备队列与 worker
+            self._ensure_publisher_worker(pub_name)
+            # 去重
+            seen = set()
+            for t in times:
+                t = (t or '').strip()
+                if not t or t in seen:
+                    continue
+                seen.add(t)
+                # 解析 HH:MM 或 HH:MM:SS
+                parts = t.split(':')
+                try:
+                    hour = int(parts[0])
+                    minute = int(parts[1]) if len(parts) > 1 else 0
+                    second = int(parts[2]) if len(parts) > 2 else 0
+                except Exception:
+                    self.logger.warning(f"无效的 send_schedule 时间格式: {t}")
+                    continue
+                trigger = CronTrigger(hour=hour, minute=minute, second=second)
+                self.scheduler.add_job(self._enqueue_scheduled_group_jobs, trigger, args=[pub_name], id=f"sched_{pub_name}_{t}", replace_existing=True)
 
-        if include_text:
-            # 添加编号
-            if submission.publish_id:
-                text = f"#{submission.publish_id}"
-            
-            # 添加@
-            if not submission.is_anonymous:
-                text += f" @{{uin:{submission.sender_id},nick:,who:1}}"
-            
-            # 添加评论
-            if submission.comment:
-                text += f" {submission.comment}"
-            
-            # 添加处理后的文本（聊天分段）
-            if include_segments and submission.processed_content:
-                segments = submission.processed_content.get('text', [])
-                if segments:
-                    text += "\n" + "\n".join(segments)
-            # 附加链接（如有）——美化展示
-            links = submission.processed_content.get('links') or []
-            if links:
-                links = deduplicate_preserve_order(links)
-                if len(links) == 1:
-                    links_block = f"链接：{links[0]}"
-                else:
-                    numbered = [f"{i+1}) {u}" for i, u in enumerate(links)]
-                    links_block = "链接：\n" + "\n".join(numbered)
-                text += ("\n\n" if text else "") + links_block
-                
-        # 链接不受 include_text 影响（兜底：若前面未附加过，再附加一次美化后的链接）
-        if submission.processed_content:
-            links = submission.processed_content.get('links') or []
-            if links and ("链接：" not in text):
-                links = deduplicate_preserve_order(links)
-                if len(links) == 1:
-                    links_block = f"链接：{links[0]}"
-                else:
-                    numbered = [f"{i+1}) {u}" for i, u in enumerate(links)]
-                    links_block = "链接：\n" + "\n".join(numbered)
-                text = (text + ("\n\n" if text else "")) + links_block
-        return text.strip()
+    def _ensure_publisher_worker(self, pub_name: str):
+        if pub_name not in self._pub_workers or self._pub_workers[pub_name].done():
+            self._pub_workers[pub_name] = asyncio.create_task(self._publisher_worker(pub_name))
+
+    async def _enqueue_scheduled_group_jobs(self, pub_name: str):
+        """按组入队执行 flush（避免一次处理过大批量）。"""
+        try:
+            settings = get_settings()
+            await self._queue_backend.ensure_queue(pub_name)
+            # 逐组入队
+            for group_name in list(settings.account_groups.keys()):
+                try:
+                    await self._queue_backend.enqueue(pub_name, {'type': 'flush_group', 'group_name': group_name})
+                except Exception as e:
+                    self.logger.error(f"入队失败 {pub_name}/{group_name}: {e}")
+        except Exception as e:
+            self.logger.error(f"定时入队失败 {pub_name}: {e}")
+
+    async def _publisher_worker(self, pub_name: str):
+        """每个发布器一个串行 worker，消费队列任务。"""
+        while True:
+            try:
+                popped = await self._queue_backend.pop(pub_name, timeout=5)
+                if popped is None:
+                    await asyncio.sleep(0.2)
+                    continue
+                _token, job = popped
+                if not isinstance(job, dict):
+                    continue
+                jtype = job.get('type')
+                if jtype == 'flush_group':
+                    g = job.get('group_name')
+                    try:
+                        ok = await self.publish_stored_posts_for_publisher(g, pub_name)
+                        self.logger.info(f"[{pub_name}] 组 {g} 定时发送完成: {ok}")
+                    except Exception as e:
+                        self.logger.error(f"[{pub_name}] 组 {g} 定时发送失败: {e}")
+                # 轻微等待，避免打满平台接口
+                await asyncio.sleep(0.2)
+            except asyncio.CancelledError:
+                break
+            except Exception as e:
+                self.logger.error(f"发布器 worker 异常 {pub_name}: {e}")
+
+    async def publish_stored_posts_for_publisher(self, group_name: str, publisher_name: str) -> bool:
+        """仅通过指定发布器发送该组的暂存投稿。
+
+        仅删除那些已被所有已注册发布器成功发布的存量记录，避免其他平台漏发。
+        """
+        try:
+            stored_posts = await self.get_stored_posts(group_name)
+            if not stored_posts:
+                return True
+            submission_ids = [p.submission_id for p in stored_posts]
+            db = await get_db()
+            async with db.get_session() as session:
+                # 加载投稿
+                stmt = select(Submission).where(Submission.id.in_(submission_ids))
+                result = await session.execute(stmt)
+                submissions = result.scalars().all()
+            if not submissions:
+                return True
+
+            publisher = self.publishers.get(publisher_name)
+            if not publisher:
+                self.logger.error(f"找不到发布器: {publisher_name}")
+                return False
+
+            # 只由该发布器发布
+            try:
+                await publisher.batch_publish_submissions([s.id for s in submissions])
+            except Exception as e:
+                self.logger.error(f"平台 {publisher_name} 批量发布失败: {e}")
+
+            # 统计各投稿是否已被所有平台成功发布
+            try:
+                async with (await get_db()).get_session() as session2:
+                    # 读取这些投稿所有发布记录
+                    pr_stmt = select(PublishRecord).where(PublishRecord.submission_ids.isnot(None)).order_by(PublishRecord.created_at.desc())
+                    r = await session2.execute(pr_stmt)
+                    records = r.scalars().all()
+                    # 构建映射 submission_id -> set(platforms_success)
+                    success_map: Dict[int, set] = {}
+                    for rec in records:
+                        try:
+                            if not rec.is_success:
+                                continue
+                            subs = rec.submission_ids or []
+                            if not isinstance(subs, list):
+                                continue
+                            for sid in subs:
+                                success_map.setdefault(int(sid), set()).add(rec.platform)
+                        except Exception:
+                            continue
+                    # 当前需要的所有平台集合
+                    need_platforms = {p.platform.value for p in self.publishers.values()}
+                    # 删除那些所有平台都已成功的暂存记录
+                    to_delete_ids: List[int] = []
+                    for sp in stored_posts:
+                        done = success_map.get(int(sp.submission_id), set())
+                        if need_platforms.issubset(done):
+                            to_delete_ids.append(sp.id)
+                    if to_delete_ids:
+                        async with (await get_db()).get_session() as session3:
+                            del_stmt = delete(StoredPost).where(StoredPost.id.in_(to_delete_ids))
+                            await session3.execute(del_stmt)
+                            await session3.commit()
+            except Exception as e:
+                self.logger.error(f"清理已完成暂存记录失败: {e}")
+            return True
+        except Exception as e:
+            self.logger.error(f"按平台发布暂存失败: {e}", exc_info=True)
+            return False
         
     async def clear_stored_posts(self, group_name: str) -> bool:
         """清空暂存区"""
