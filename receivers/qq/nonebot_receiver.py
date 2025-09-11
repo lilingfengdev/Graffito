@@ -750,9 +750,9 @@ class QQReceiver(BaseReceiver):
                 sid = int(arg1)
                 try:
                     res = await self.submission_service.delete_submission(sid)
-                    await self.send_group_message(group_id, res.get("message", "已处理"))
-                except Exception as e:
-                    await self.send_group_message(group_id, f"删除失败: {e}")
+                    await self.send_group_message(group_id, res.get("message", "操作完成"))
+                except Exception:
+                    await self.send_group_message(group_id, "未能删除，请稍后再试")
                 return True
 
             # 取消拉黑 <qq>
@@ -873,13 +873,13 @@ class QQReceiver(BaseReceiver):
                         await self.send_private_message(user_id, "错误：只能删除自己的投稿")
                         return True
                 if not self.submission_service:
-                    await self.send_private_message(user_id, "投稿服务未就绪")
+                    await self.send_private_message(user_id, "服务暂不可用，请稍后再试")
                     return True
                 try:
                     res = await self.submission_service.delete_submission(sid)
-                    await self.send_private_message(user_id, res.get("message", "已处理"))
-                except Exception as e:
-                    await self.send_private_message(user_id, f"删除失败：{e}")
+                    await self.send_private_message(user_id, res.get("message", "操作完成"))
+                except Exception:
+                    await self.send_private_message(user_id, "未能删除，请稍后再试")
                 return True
 
             # 允许前缀可选的 # -> 评论

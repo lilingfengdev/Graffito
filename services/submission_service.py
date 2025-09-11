@@ -237,7 +237,7 @@ class SubmissionService:
                     upd = update(Submission).where(Submission.id == submission_id).values(status=SubmissionStatus.DELETED.value)
                     await session2.execute(upd)
                     await session2.commit()
-                return {"success": True, "message": "投稿已删除（未发布）"}
+                return {"success": True, "message": "已删除"}
 
             # 已发布：调度到已注册发布器的删除能力
             any_success = False
@@ -272,11 +272,11 @@ class SubmissionService:
                 await session2.commit()
 
             if any_success:
-                return {"success": True, "message": "投稿已删除"}
-            return {"success": False, "message": "；".join(messages) or "删除失败"}
+                return {"success": True, "message": "已删除"}
+            return {"success": False, "message": "未能删除，请稍后再试"}
         except Exception as e:
             self.logger.error(f"删除投稿失败: {e}")
-            return {"success": False, "message": str(e)}
+            return {"success": False, "message": "未能删除，请稍后再试"}
         
     async def get_pending_submissions(self, group_name: Optional[str] = None) -> List[Submission]:
         """获取待处理的投稿"""
