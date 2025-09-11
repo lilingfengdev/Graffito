@@ -272,3 +272,25 @@ class BilibiliPublisher(BasePublisher):
             self.logger.error(f"B站删除动态失败: {e}")
             return {"success": False, "message": str(e)}
 
+    async def delete_by_publish_record(self, record) -> Dict[str, Any]:
+        try:
+            pr = record.publish_result or {}
+            did = pr.get('dynamic_id') or pr.get('dyn_id')
+            if not did:
+                return {"success": False, "message": "missing dynamic_id"}
+            dynamic_id = int(did)
+            api = None
+            if record.account_id and record.account_id in self.api_clients:
+                api = self.api_clients.get(record.account_id)
+            else:
+                for aid, client in self.api_clients.items():
+                    if await client.check_login():
+                        api = client
+                        break
+            if not api:
+                return {"success": False, "message": "api not ready"}
+            res = await api.delete_dynamic(dynamic_id)
+            return res
+        except Exception as e:
+            return {"success": False, "message": str(e)}
+

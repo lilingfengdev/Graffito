@@ -405,3 +405,20 @@ class QzonePublisher(BasePublisher):
         except Exception as e:
             self.logger.error(f"QQ空间删除失败: {e}")
             return {"success": False, "message": str(e)}
+
+    async def delete_by_publish_record(self, record) -> Dict[str, Any]:
+        try:
+            tid = None
+            if isinstance(record.publish_result, dict):
+                tid = record.publish_result.get("tid")
+            if not tid:
+                return {"success": False, "message": "missing tid"}
+            api = self.api_clients.get(record.account_id)
+            if not api:
+                return {"success": False, "message": "account not ready"}
+            res = await api.delete_mood(str(tid))
+            if res.get("success"):
+                return {"success": True, "message": "已删除"}
+            return {"success": False, "message": res.get("message", "failed")}
+        except Exception as e:
+            return {"success": False, "message": str(e)}

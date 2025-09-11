@@ -239,31 +239,40 @@ class SubmissionService:
                     await session2.commit()
                 return {"success": True, "message": "已删除"}
 
-            # 已发布：调度到已注册发布器的删除能力
+            # 已发布：按发布记录逐平台分发，调用 publishser.delete_by_publish_record
             any_success = False
-            messages: List[str] = []
-            # Qzone
-            qz = self.publishers.get('qzone_publisher')
-            if qz and hasattr(qz, 'delete_submission'):
+            try:
+                async with (await get_db()).get_session() as session2:
+                    pr_stmt = select(PublishRecord).where(PublishRecord.submission_ids.isnot(None)).order_by(PublishRecord.created_at.desc())
+                    r2 = await session2.execute(pr_stmt)
+                    records = r2.scalars().all()
+            except Exception:
+                records = []
+
+            # 根据平台键映射到具体 publisher 实例
+            platform_to_publisher: Dict[str, Any] = {}
+            for name, pub in self.publishers.items():
                 try:
-                    res = await qz.delete_submission(submission_id)  # type: ignore[attr-defined]
-                    if res.get('success'):
-                        any_success = True
-                    else:
-                        messages.append(f"Qzone:{res.get('message','失败')}")
-                except Exception as e:
-                    messages.append(f"Qzone:{e}")
-            # Bilibili
-            bili = self.publishers.get('bilibili_publisher')
-            if bili and hasattr(bili, 'delete_submission'):
+                    key = getattr(pub.platform, 'value', None)
+                    if key:
+                        platform_to_publisher[key] = pub
+                except Exception:
+                    continue
+
+            for rec in records:
                 try:
-                    res = await bili.delete_submission(submission_id)  # type: ignore[attr-defined]
-                    if res.get('success'):
-                        any_success = True
-                    else:
-                        messages.append(f"Bilibili:{res.get('message','失败')}")
-                except Exception as e:
-                    messages.append(f"Bilibili:{e}")
+                    subs = rec.submission_ids or []
+                    if submission_id not in subs:
+                        continue
+                    publisher = platform_to_publisher.get(rec.platform)
+                    if not publisher:
+                        continue
+                    if hasattr(publisher, 'delete_by_publish_record'):
+                        res = await publisher.delete_by_publish_record(rec)
+                        if res and res.get('success'):
+                            any_success = True
+                except Exception:
+                    continue
 
             # 更新数据库状态
             async with (await get_db()).get_session() as session2:
