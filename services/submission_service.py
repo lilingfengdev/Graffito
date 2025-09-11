@@ -215,6 +215,68 @@ class SubmissionService:
                     return group_name
                     
         return None
+
+    async def delete_submission(self, submission_id: int) -> Dict[str, Any]:
+        """删除投稿：同步删除外部平台内容并将投稿状态置为 DELETED。
+        
+        - 查找该投稿在各平台的发布记录；对支持的平台（qzone、bilibili）尝试删除
+        - 至少一个平台删除成功即视为成功；若均失败，返回最后错误
+        """
+        try:
+            db = await get_db()
+            async with db.get_session() as session:
+                stmt = select(Submission).where(Submission.id == submission_id)
+                r = await session.execute(stmt)
+                submission = r.scalar_one_or_none()
+                if not submission:
+                    return {"success": False, "message": "投稿不存在"}
+
+            # 若尚未发布，则直接置为删除并返回成功
+            if submission.status != SubmissionStatus.PUBLISHED.value:
+                async with (await get_db()).get_session() as session2:
+                    upd = update(Submission).where(Submission.id == submission_id).values(status=SubmissionStatus.DELETED.value)
+                    await session2.execute(upd)
+                    await session2.commit()
+                return {"success": True, "message": "投稿已删除（未发布）"}
+
+            # 已发布：调度到已注册发布器的删除能力
+            any_success = False
+            messages: List[str] = []
+            # Qzone
+            qz = self.publishers.get('qzone_publisher')
+            if qz and hasattr(qz, 'delete_submission'):
+                try:
+                    res = await qz.delete_submission(submission_id)  # type: ignore[attr-defined]
+                    if res.get('success'):
+                        any_success = True
+                    else:
+                        messages.append(f"Qzone:{res.get('message','失败')}")
+                except Exception as e:
+                    messages.append(f"Qzone:{e}")
+            # Bilibili
+            bili = self.publishers.get('bilibili_publisher')
+            if bili and hasattr(bili, 'delete_submission'):
+                try:
+                    res = await bili.delete_submission(submission_id)  # type: ignore[attr-defined]
+                    if res.get('success'):
+                        any_success = True
+                    else:
+                        messages.append(f"Bilibili:{res.get('message','失败')}")
+                except Exception as e:
+                    messages.append(f"Bilibili:{e}")
+
+            # 更新数据库状态
+            async with (await get_db()).get_session() as session2:
+                upd = update(Submission).where(Submission.id == submission_id).values(status=SubmissionStatus.DELETED.value)
+                await session2.execute(upd)
+                await session2.commit()
+
+            if any_success:
+                return {"success": True, "message": "投稿已删除"}
+            return {"success": False, "message": "；".join(messages) or "删除失败"}
+        except Exception as e:
+            self.logger.error(f"删除投稿失败: {e}")
+            return {"success": False, "message": str(e)}
         
     async def get_pending_submissions(self, group_name: Optional[str] = None) -> List[Submission]:
         """获取待处理的投稿"""

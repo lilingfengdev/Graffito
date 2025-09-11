@@ -221,3 +221,54 @@ class BilibiliPublisher(BasePublisher):
             self.logger.error(f"B站追加评论失败: {e}")
             return {"success": False, "message": str(e)}
 
+    async def delete_submission(self, submission_id: int) -> Dict[str, Any]:
+        """删除已发布到B站的投稿（动态）。
+        
+        通过 PublishRecord 查找 dynamic_id 与账号，再调用 BilibiliAPI.delete_dynamic。
+        """
+        try:
+            from core.database import get_db
+            from sqlalchemy import select
+            from core.models import PublishRecord
+            from core.enums import PublishPlatform
+
+            db = await get_db()
+            async with db.get_session() as session:
+                r = await session.execute(select(PublishRecord).order_by(PublishRecord.created_at.desc()))
+                records = r.scalars().all()
+                dynamic_id: Optional[int] = None
+                account_id: Optional[str] = None
+                for rec in records:
+                    try:
+                        if not rec.is_success or rec.platform != PublishPlatform.BILIBILI.value:
+                            continue
+                        if submission_id in (rec.submission_ids or []):
+                            pr = rec.publish_result or {}
+                            did = pr.get('dynamic_id') or pr.get('dyn_id')
+                            if did:
+                                dynamic_id = int(did)
+                                account_id = rec.account_id or None
+                                break
+                    except Exception:
+                        continue
+
+                if dynamic_id is None:
+                    return {"success": False, "message": "未找到B站发布记录或缺少dynamic_id"}
+
+                api = None
+                if account_id and account_id in self.api_clients:
+                    api = self.api_clients.get(account_id)
+                else:
+                    for aid, client in self.api_clients.items():
+                        if await client.check_login():
+                            api = client
+                            break
+                if not api:
+                    return {"success": False, "message": "B站API未初始化或无可用账号"}
+
+                res = await api.delete_dynamic(dynamic_id)
+                return res
+        except Exception as e:
+            self.logger.error(f"B站删除动态失败: {e}")
+            return {"success": False, "message": str(e)}
+

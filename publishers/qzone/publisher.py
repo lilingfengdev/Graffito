@@ -360,3 +360,48 @@ class QzonePublisher(BasePublisher):
         except Exception as e:
             self.logger.error(f"同步QQ空间评论失败: {e}")
             return {"success": False, "message": str(e)}
+
+    async def delete_submission(self, submission_id: int) -> Dict[str, Any]:
+        """删除已发布到QQ空间的投稿。
+        
+        通过 PublishRecord 查找 tid 与使用的账号，再调用 QzoneAPI.delete_mood。
+        """
+        try:
+            from core.database import get_db
+            from sqlalchemy import select
+            from core.models import PublishRecord
+            from core.enums import PublishPlatform
+
+            db = await get_db()
+            async with db.get_session() as session:
+                r = await session.execute(select(PublishRecord).order_by(PublishRecord.created_at.desc()))
+                records = r.scalars().all()
+                target = None
+                for rec in records:
+                    try:
+                        if not rec.is_success or rec.platform != PublishPlatform.QZONE.value:
+                            continue
+                        subs = rec.submission_ids or []
+                        if isinstance(subs, list) and submission_id in subs:
+                            if isinstance(rec.publish_result, dict) and rec.publish_result.get("tid"):
+                                target = rec
+                                break
+                    except Exception:
+                        continue
+
+                if not target:
+                    return {"success": False, "message": "未找到QQ空间发布记录"}
+
+                account_id = target.account_id
+                tid = str(target.publish_result.get("tid"))
+                api = self.api_clients.get(account_id)
+                if not api:
+                    return {"success": False, "message": "对应账号未登录或API未初始化"}
+
+                res = await api.delete_mood(tid)
+                if res.get("success"):
+                    return {"success": True, "message": "QQ空间已删除"}
+                return {"success": False, "message": res.get("message", "删除失败")}
+        except Exception as e:
+            self.logger.error(f"QQ空间删除失败: {e}")
+            return {"success": False, "message": str(e)}
