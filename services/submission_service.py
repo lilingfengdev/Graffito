@@ -215,6 +215,77 @@ class SubmissionService:
                     return group_name
                     
         return None
+
+    async def delete_submission(self, submission_id: int) -> Dict[str, Any]:
+        """删除投稿：同步删除外部平台内容并将投稿状态置为 DELETED。
+        
+        - 查找该投稿在各平台的发布记录；对支持的平台（qzone、bilibili）尝试删除
+        - 至少一个平台删除成功即视为成功；若均失败，返回最后错误
+        """
+        try:
+            db = await get_db()
+            async with db.get_session() as session:
+                stmt = select(Submission).where(Submission.id == submission_id)
+                r = await session.execute(stmt)
+                submission = r.scalar_one_or_none()
+                if not submission:
+                    return {"success": False, "message": "投稿不存在"}
+
+            # 若尚未发布，则直接置为删除并返回成功
+            if submission.status != SubmissionStatus.PUBLISHED.value:
+                async with (await get_db()).get_session() as session2:
+                    upd = update(Submission).where(Submission.id == submission_id).values(status=SubmissionStatus.DELETED.value)
+                    await session2.execute(upd)
+                    await session2.commit()
+                return {"success": True, "message": "已删除"}
+
+            # 已发布：按发布记录逐平台分发，调用 publishser.delete_by_publish_record
+            any_success = False
+            try:
+                async with (await get_db()).get_session() as session2:
+                    pr_stmt = select(PublishRecord).where(PublishRecord.submission_ids.isnot(None)).order_by(PublishRecord.created_at.desc())
+                    r2 = await session2.execute(pr_stmt)
+                    records = r2.scalars().all()
+            except Exception:
+                records = []
+
+            # 根据平台键映射到具体 publisher 实例
+            platform_to_publisher: Dict[str, Any] = {}
+            for name, pub in self.publishers.items():
+                try:
+                    key = getattr(pub.platform, 'value', None)
+                    if key:
+                        platform_to_publisher[key] = pub
+                except Exception:
+                    continue
+
+            for rec in records:
+                try:
+                    subs = rec.submission_ids or []
+                    if submission_id not in subs:
+                        continue
+                    publisher = platform_to_publisher.get(rec.platform)
+                    if not publisher:
+                        continue
+                    if hasattr(publisher, 'delete_by_publish_record'):
+                        res = await publisher.delete_by_publish_record(rec)
+                        if res and res.get('success'):
+                            any_success = True
+                except Exception:
+                    continue
+
+            # 更新数据库状态
+            async with (await get_db()).get_session() as session2:
+                upd = update(Submission).where(Submission.id == submission_id).values(status=SubmissionStatus.DELETED.value)
+                await session2.execute(upd)
+                await session2.commit()
+
+            if any_success:
+                return {"success": True, "message": "已删除"}
+            return {"success": False, "message": "未能删除，请稍后再试"}
+        except Exception as e:
+            self.logger.error(f"删除投稿失败: {e}")
+            return {"success": False, "message": "未能删除，请稍后再试"}
         
     async def get_pending_submissions(self, group_name: Optional[str] = None) -> List[Submission]:
         """获取待处理的投稿"""

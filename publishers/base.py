@@ -332,3 +332,10 @@ class BasePublisher(PublisherPlugin):
     async def check_login_status(self) -> bool:
         """检查登录状态（子类实现）"""
         pass
+
+    async def delete_by_publish_record(self, record: PublishRecord) -> Dict[str, Any]:
+        """根据发布记录执行平台删除。
+
+        默认不支持，由具体平台子类按需覆盖实现。
+        """
+        return {"success": False, "message": "not supported"}

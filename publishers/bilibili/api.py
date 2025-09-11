@@ -81,3 +81,29 @@ class BilibiliAPI:
             logger.error(f"B站评论失败: {e}")
             return {'success': False, 'message': str(e)}
 
+    async def delete_dynamic(self, dynamic_id: int) -> Dict[str, Any]:
+        """删除一条动态。
+
+        依赖 bilibili_api 的 dynamic.delete 动态删除接口；不同版本 API 可能差异，做必要的兼容。
+        """
+        try:
+            oid = int(dynamic_id)
+        except Exception:
+            return {'success': False, 'message': '无效的动态ID'}
+
+        try:
+            # 新版 bilibili_api 提供 dynamic.delete_dynamic / delete
+            delete_fn = getattr(self._bili_dynamic, 'delete_dynamic', None)
+            if callable(delete_fn):
+                await delete_fn(oid, credential=self._bili_credential)  # type: ignore[arg-type]
+                return {'success': True, 'message': '已删除'}
+            # 回退：某些版本为 delete
+            delete_fn2 = getattr(self._bili_dynamic, 'delete', None)
+            if callable(delete_fn2):
+                await delete_fn2(oid, credential=self._bili_credential)  # type: ignore[arg-type]
+                return {'success': True, 'message': '已删除'}
+            return {'success': False, 'message': '当前 bilibili_api 版本不支持删除动态'}
+        except Exception as e:
+            logger.error(f"B站删除动态失败: {e}")
+            return {'success': False, 'message': str(e)}
+

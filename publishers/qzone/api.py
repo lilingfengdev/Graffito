@@ -85,3 +85,19 @@ class QzoneAPI:
         except Exception as e:
             logger.error(f"评论失败: {e}")
             return {"success": False, "message": str(e)}
+
+    async def delete_mood(self, tid: str) -> Dict[str, Any]:
+        """删除一条说说（兼容多版本 aioqzone 方法路径）。"""
+        try:
+            try:
+                res = await self._aioqzone.delete_mood(tid=tid)  # type: ignore
+            except Exception:
+                res = await self._aioqzone.mood.delete(tid)  # type: ignore
+            if isinstance(res, dict):
+                if res.get('success') or res.get('code') == 0 or res.get('ret') == 0:
+                    return {"success": True, "message": "已删除"}
+                return {"success": False, "message": res.get('errmsg') or res.get('message') or '删除失败'}
+            return {"success": True, "message": "已删除"}
+        except Exception as e:
+            logger.error(f"删除说说失败: {e}")
+            return {"success": False, "message": str(e)}

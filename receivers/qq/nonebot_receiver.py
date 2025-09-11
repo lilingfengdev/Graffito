@@ -742,6 +742,19 @@ class QQReceiver(BaseReceiver):
                 await self.send_group_message(group_id, msg)
                 return True
 
+            # 删除 <id> （管理员群任意投稿）
+            if cmd == "删除" and arg1 and arg1.isdigit():
+                if not self.submission_service:
+                    await self.send_group_message(group_id, "投稿服务未就绪")
+                    return True
+                sid = int(arg1)
+                try:
+                    res = await self.submission_service.delete_submission(sid)
+                    await self.send_group_message(group_id, res.get("message", "操作完成"))
+                except Exception:
+                    await self.send_group_message(group_id, "未能删除，请稍后再试")
+                return True
+
             # 取消拉黑 <qq>
             if cmd == "取消拉黑" and arg1:
                 try:
@@ -809,6 +822,7 @@ class QQReceiver(BaseReceiver):
     async def _try_handle_private_command(self, user_id: str, self_id: str, raw_text: str) -> bool:
         """解析并处理私聊指令。目前支持：
         - #评论 <投稿ID> <内容>  -> 投稿者本人为其投稿追加评论（外部平台不暴露身份）
+        - #删除 <投稿ID>         -> 投稿者本人删除自己的投稿（未发布或已发布平台删除）
         识别到并处理返回 True；未识别返回 False。
         """
         try:
@@ -840,7 +854,35 @@ class QQReceiver(BaseReceiver):
                     self.logger.error(f"保存反馈失败: {e}", exc_info=True)
                     await self.send_private_message(user_id, "反馈保存失败，请稍后重试")
                 return True
-            # 允许前缀可选的 #
+            # 私聊删除：#删除 <id>
+            m_del = re.match(r"^#?删除\s+(\d+)$", text)
+            if m_del:
+                sid = int(m_del.group(1))
+                # 校验归属：仅允许删除自己的投稿
+                from core.database import get_db
+                from sqlalchemy import select
+                from core.models import Submission
+                db = await get_db()
+                async with db.get_session() as session:
+                    r = await session.execute(select(Submission).where(Submission.id == sid))
+                    sub = r.scalar_one_or_none()
+                    if not sub:
+                        await self.send_private_message(user_id, "错误：投稿不存在")
+                        return True
+                    if str(sub.sender_id) != str(user_id):
+                        await self.send_private_message(user_id, "错误：只能删除自己的投稿")
+                        return True
+                if not self.submission_service:
+                    await self.send_private_message(user_id, "服务暂不可用，请稍后再试")
+                    return True
+                try:
+                    res = await self.submission_service.delete_submission(sid)
+                    await self.send_private_message(user_id, res.get("message", "操作完成"))
+                except Exception:
+                    await self.send_private_message(user_id, "未能删除，请稍后再试")
+                return True
+
+            # 允许前缀可选的 # -> 评论
             m = re.match(r"^#?评论\s+(\d+)\s+(.+)$", text)
             if not m:
                 return False
@@ -976,11 +1018,12 @@ class QQReceiver(BaseReceiver):
         return (
             "全局指令:\n"
             "语法: @本账号 指令\n\n"
-            "调出 <编号>\n信息 <编号>\n待处理\n删除待处理\n删除暂存区\n发送暂存区\n"
+            "调出 <编号>\n信息 <编号>\n待处理\n删除 <编号>\n删除待处理\n删除暂存区\n发送暂存区\n"
             "取消拉黑 <QQ>\n列出拉黑\n设定编号 <数字>\n快捷回复 [添加 指令=内容|删除 指令]\n自检\n\n"
             "审核指令:\n语法: @本账号 <内部编号> 指令 或 回复审核消息 指令\n"
             "是/否/匿/等/删/拒/立即/刷新/重渲染/扩列审查/评论 <内容>/回复 <内容>/展示/拉黑 [理由]\n"
-            "也可使用已配置的快捷回复键"
+            "也可使用已配置的快捷回复键\n\n"
+            "私聊指令:\n#删除 <投稿ID>（仅能删除自己的投稿）\n#评论 <投稿ID> <内容>"
         )
 
 
