@@ -1,103 +1,118 @@
-"""QQ空间API接口（纯 aioqzone 实现）
+"""QQ空间API接口（基于 aioqzone + qqqr 的 H5 实现）
 
 职责：
-- 仅使用 aioqzone 执行发布说说与评论
-- 基于 aioqzone 的 gtk 与必要 cookie 字段进行轻量登录有效性检查
+- 使用 aioqzone.h5 API 完成图片上传、预上传和发表说说
+- 基于 aioqzone.login 的 gtk 计算做轻量登录有效性检查
 """
-import hashlib
-from typing import Dict, Any, List
+from typing import Any, Dict, List, Optional, Sequence, Union
+from tenacity import RetryError
 
 from loguru import logger
 
+from qqqr.utils.net import ClientAdapter
+from aioqzone.exception import QzoneError
+from aioqzone.api.h5.model import QzoneH5API
+from aioqzone.api.login import ConstLoginMan
+from aioqzone.model.api.request import PhotoData
+
 
 class QzoneAPI:
-    """QQ空间API客户端（仅 aioqzone）"""
-    
+    """QQ空间API客户端（aioqzone H5 直连）"""
+
     def __init__(self, cookies: Dict[str, str]):
-        self.cookies = cookies
-        self.gtk = self._generate_gtk(cookies.get('p_skey', ''))
-        self.uin = cookies.get('uin', '').lstrip('o')
-        # aioqzone 客户端
-        from aioqzone import Qzone as AioQzone  # type: ignore
+        self.cookies: Dict[str, str] = cookies
+        uin_str = cookies.get("uin") or cookies.get("p_uin") or ""
+        uin_str = uin_str.lstrip("oO")
         try:
-            self._aioqzone = AioQzone(cookies=cookies)  # type: ignore
+            self.uin: int = int(uin_str) if uin_str else 0
         except Exception:
-            self._aioqzone = AioQzone(
-                uin=self.uin,
-                p_skey=cookies.get('p_skey'),
-                skey=cookies.get('skey'),
-                cookies=cookies
-            )  # type: ignore
-        
-    def _generate_gtk(self, skey: str) -> str:
-        """生成gtk参数"""
-        hash_val = 5381
-        for char in skey:
-            hash_val += (hash_val << 5) + ord(char)
-        return str(hash_val & 2147483647)
-        
+            self.uin = 0
+
+        self._client = ClientAdapter()
+        self._login = ConstLoginMan(uin=self.uin, cookie=self.cookies)
+        self._api = QzoneH5API(client=self._client, loginman=self._login)
+
     async def check_login(self) -> bool:
-        """检查登录状态（基于 aioqzone 的 gtk 与必要字段）"""
+        """检查登录状态：
+        - 必须存在 `p_skey` 且能计算出 gtk
+        - 通过调用需要登录态的接口进行校验（`mfeeds_get_count`）
+        """
         try:
-            if not (self.cookies.get('p_skey') and self.uin):
+            if not (self.cookies.get("p_skey") and self.uin):
                 return False
-            gtk_val = str(getattr(self._aioqzone, 'gtk', '') or '')
-            return bool(gtk_val)
+            if self._login.gtk == 0:
+                return False
+            # 通过需要登录态的接口校验；遇到登录失效相关错误视为未登录
+            try:
+                await self._api.mfeeds_get_count()
+            except (RetryError, QzoneError):
+                return False
+            except Exception:
+                # 网络或解析问题时回退轻触发 index 刷新 qzonetoken，但不强制失败
+                try:
+                    await self._api.index()
+                except Exception:
+                    pass
+            return True
         except Exception:
             return False
-        
-    async def upload_image(self, image_data: bytes) -> Dict[str, Any]:
-        """上传图片（由 aioqzone 处理，返回 aioqzone 的结构）"""
-        return await self._aioqzone.upload_image(image_data)  # type: ignore
-        
-    async def publish_emotion(self, content: str, images: List[bytes] = None) -> Dict[str, Any]:
-        """发布说说（仅 aioqzone）"""
-        if images:
-            try:
-                result = await self._aioqzone.publish_mood(content=content, images=images)  # type: ignore
-            except TypeError:
-                result = await self._aioqzone.publish_mood(content=content, pictures=images)  # type: ignore
-        else:
-            result = await self._aioqzone.publish_mood(content=content)  # type: ignore
-        # 标准化：尽量返回 {'success': True, 'tid': ...}
-        if isinstance(result, dict):
-            tid = result.get('tid') or result.get('id') or result.get('data', {}).get('tid')
-            return {'success': True, 'tid': tid}
-        return {'success': True, 'tid': result}
-            
-    async def close(self):
-        """关闭客户端（aioqzone 若需要可在此处关闭）"""
-        close_fn = getattr(self._aioqzone, "close", None)
-        if callable(close_fn):
-            await close_fn()
 
-    async def add_comment(self, host_uin: str, tid: str, content: str) -> Dict[str, Any]:
-        """为说说添加评论（仅 aioqzone）"""
+    async def publish_emotion(self, content: str, images: Optional[List[bytes]] = None) -> Dict[str, Any]:
+        """发布说说，支持可选图片（bytes 列表）。"""
         try:
-            try:
-                res = await self._aioqzone.add_comment(tid=tid, content=content)  # type: ignore
-            except Exception:
-                # 某些版本的方法路径不同
-                res = await self._aioqzone.mood.comment(tid, content)  # type: ignore
-            if isinstance(res, dict) and (res.get('success') or res.get('code') == 0):
-                return {"success": True, "message": "评论成功"}
-            return {"success": True, "message": "评论已提交"}
+            photos: Sequence[PhotoData] = []
+            if images:
+                # 1) 上传图片，获得 UploadPicResponse 列表
+                upload_results = []
+                for img in images:
+                    try:
+                        r = await self._api.upload_pic(img)
+                        upload_results.append(r)
+                    except QzoneError as e:
+                        # 对登录失效类错误直接抛出，由上层处理重登
+                        if int(getattr(e, "code", 0)) in (-100, -3000, -10000):
+                            raise
+                        logger.error(f"上传图片失败，跳过一张: {e}")
+                    except RetryError as e:
+                        # 自动重试已失败（通常因登录问题），交由上层处理
+                        raise
+                    except Exception as e:
+                        logger.error(f"上传图片失败，跳过一张: {e}")
+
+                # 2) 预上传，获得 PicInfo 列表
+                if upload_results:
+                    pre = await self._api.preupload_photos(upload_results)
+                    photos = [PhotoData.from_PicInfo(p) for p in pre.photos]
+
+            # 3) 发表说说
+            resp = await self._api.publish_mood(content=content, photos=list(photos) if photos else None)
+            tid = getattr(resp, "fid", None) or getattr(resp, "tid", None) or None
+            return {"success": True, "tid": tid}
+        except Exception as e:
+            logger.error(f"发布失败: {e}")
+            return {"success": False, "message": str(e)}
+
+    async def add_comment(self, host_uin: Union[str, int], tid: str, content: str) -> Dict[str, Any]:
+        """为说说添加评论（H5 接口）。"""
+        try:
+            ownuin = int(host_uin) if not isinstance(host_uin, int) else host_uin
+            res = await self._api.add_comment(ownuin=ownuin, fid=tid, appid=311, content=content, private=False)
+            return {"success": True, "message": "评论成功"}
         except Exception as e:
             logger.error(f"评论失败: {e}")
             return {"success": False, "message": str(e)}
 
     async def delete_mood(self, tid: str) -> Dict[str, Any]:
-        """删除一条说说（兼容多版本 aioqzone 方法路径）。"""
+        """删除一条说说（H5 接口）。"""
         try:
-            try:
-                res = await self._aioqzone.delete_mood(tid=tid)  # type: ignore
-            except Exception:
-                res = await self._aioqzone.mood.delete(tid)  # type: ignore
-            if isinstance(res, dict):
-                if res.get('success') or res.get('code') == 0 or res.get('ret') == 0:
-                    return {"success": True, "message": "已删除"}
-                return {"success": False, "message": res.get('errmsg') or res.get('message') or '删除失败'}
+            res = await self._api.delete_ugc(fid=tid, appid=311)
             return {"success": True, "message": "已删除"}
         except Exception as e:
             logger.error(f"删除说说失败: {e}")
             return {"success": False, "message": str(e)}
+
+    async def close(self):
+        """关闭底层客户端（若有需要）。"""
+        close_fn = getattr(self._client, "close", None)
+        if callable(close_fn):
+            await close_fn()

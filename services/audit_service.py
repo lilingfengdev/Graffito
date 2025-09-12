@@ -11,7 +11,7 @@ from processors.pipeline import ProcessingPipeline
 
 # module-level commonly used imports to avoid repeated runtime imports
 from config import get_settings
-from sqlalchemy import update, delete, func
+from sqlalchemy import update, delete, func, select
 from services.notification_service import NotificationService
 from utils.common import get_platform_config
 

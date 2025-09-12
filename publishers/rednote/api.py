@@ -17,7 +17,7 @@ from typing import Any, Dict, List, Optional
 import asyncio
 from loguru import logger
 
-from utils import json_util as json
+import orjson
 
 
 CREATOR_HOME_URL = "https://creator.xiaohongshu.com/"
@@ -315,8 +315,9 @@ def load_cookie_file(path: str) -> List[Dict[str, Any]]:
     if not p.exists():
         return []
     try:
-        with open(p, 'r', encoding='utf-8') as f:
-            data = json.loads(f.read())
+        if p.stat().st_size == 0:
+            return []
+        data = orjson.loads(p.read_bytes())
         # Support list format or Netscape export style transformed to list of dicts
         if isinstance(data, list):
             return data
@@ -335,6 +336,5 @@ def load_cookie_file(path: str) -> List[Dict[str, Any]]:
 def save_cookie_file(path: str, cookies: List[Dict[str, Any]]):
     p = Path(path)
     p.parent.mkdir(parents=True, exist_ok=True)
-    with open(p, 'w', encoding='utf-8') as f:
-        f.write(json.dumps(cookies))
+    p.write_bytes(orjson.dumps(cookies))
 

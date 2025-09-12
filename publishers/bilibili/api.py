@@ -1,26 +1,24 @@
-"""Bilibili 动态 API 接口（纯 bilibili_api 实现）
+"""Bilibili 动态 API 接口（基于 nemo2011/bilibili-api v17）
 
 职责：
-- 使用 nemo2011 的 bilibili_api 完成图文动态所需的图片上传和发布
-- 仅依赖 Credential，不保留任何 HTTP 回退逻辑
+- 使用 bilibili_api 的 BuildDynamic/send_dynamic 流程完成图文动态发布
+- 统一封装评论与删除动态行为
 """
 from typing import Any, Dict, List, Optional
 
+from io import BytesIO
 from loguru import logger
 
 # Early import of third-party bilibili_api to avoid runtime imports
 from bilibili_api import Credential  # type: ignore
 from bilibili_api import dynamic  # type: ignore
 from bilibili_api import comment as bili_comment  # type: ignore
-try:
-    # 16.x版本
-    from bilibili_api.comment import CommentResourceType  # type: ignore
-except Exception:  # pragma: no cover
-    CommentResourceType = None  # type: ignore
+from bilibili_api.comment import CommentResourceType  # type: ignore
+from bilibili_api.utils.picture import Picture  # type: ignore
 
 
 class BilibiliAPI:
-    """Bilibili API 客户端（仅使用 bilibili_api）"""
+    """Bilibili API 客户端（bilibili_api v17）"""
 
     def __init__(self, cookies: Dict[str, str]):
         self.cookies = cookies
@@ -41,68 +39,105 @@ class BilibiliAPI:
         # 轻量检查：存在关键 cookie 即视为登录
         return bool(self.cookies.get('SESSDATA') and self._get_csrf())
 
-    async def upload_image(self, image_bytes: bytes, category: str = 'daily') -> Dict[str, Any]:
-        """上传图片到B站（bilibili_api）。"""
-        # dynamic.upload_image
-        up_res = await self._bili_dynamic.upload_image(image_bytes, credential=self._bili_credential)
-        return up_res if isinstance(up_res, dict) else {'img_src': up_res}
+    async def upload_image(self, image_bytes: bytes) -> Dict[str, Any]:
+        """上传图片至 B 站，返回标准化结构。
 
-    async def create_draw_dynamic(self, content: str, pictures: List[Dict[str, Any]]) -> Dict[str, Any]:
-        """发布图文动态。pictures: [{img_src,width,height}...]（bilibili_api）。"""
-        res = await self._bili_dynamic.create_draw_dynamic(
-            content=content or '',
-            pictures=pictures,
-            credential=self._bili_credential
-        )
+        注意：v17 推荐通过 BuildDynamic 传入 Picture 列表，send_dynamic 内部会执行上传。
+        此函数提供给少量需要单独上传的场景。
+        """
+        try:
+            # 尝试用 Pillow 推断格式
+            from PIL import Image  # type: ignore
+            with Image.open(BytesIO(image_bytes)) as img:
+                fmt = (img.format or 'JPEG').lower().replace('jpeg', 'jpg')
+        except Exception:
+            fmt = 'jpg'
+
+        pic = Picture.from_content(image_bytes, fmt)
+        res = await self._bili_dynamic.upload_image(pic, credential=self._bili_credential)
+        # 返回统一字段
         if isinstance(res, dict):
-            return {'success': True, 'dynamic_id': res.get('dynamic_id') or res.get('data', {}).get('dynamic_id')}
-        return {'success': True, 'dynamic_id': res}
+            return {
+                'image_url': res.get('image_url') or res.get('img_src') or res.get('url'),
+                'image_width': res.get('image_width') or res.get('width'),
+                'image_height': res.get('image_height') or res.get('height'),
+            }
+        return {'image_url': res}
+
+    async def create_draw_dynamic(self, content: str, images_bytes: List[bytes]) -> Dict[str, Any]:
+        """发布图文动态（使用 BuildDynamic + send_dynamic）。
+
+        Args:
+            content: 文本内容
+            images_bytes: 图片字节列表
+        Returns:
+            {'success': True, 'dynamic_id': int} 或 {'success': False, 'message': str}
+        """
+        try:
+            pics: List[Picture] = []
+            for b in images_bytes or []:
+                try:
+                    from PIL import Image  # type: ignore
+                    with Image.open(BytesIO(b)) as img:
+                        fmt = (img.format or 'JPEG').lower().replace('jpeg', 'jpg')
+                except Exception:
+                    fmt = 'jpg'
+                pics.append(Picture.from_content(b, fmt))
+
+            # 让 send_dynamic 自行完成图片上传
+            builder = dynamic.BuildDynamic.create_by_args(text=content or '', pics=pics)
+            res = await dynamic.send_dynamic(builder, credential=self._bili_credential)
+            # 兼容多种返回结构
+            if isinstance(res, dict):
+                dyn_id = (
+                    res.get('dyn_id')
+                    or res.get('dynamic_id')
+                    or (res.get('data', {}) if isinstance(res.get('data'), dict) else {}).get('dynamic_id')
+                )
+                if dyn_id:
+                    return {'success': True, 'dynamic_id': int(dyn_id)}
+                # 某些情况下返回 {code:0,...}
+                code = res.get('code')
+                if code == 0:
+                    # 无法直接取到 ID，但也视为成功
+                    return {'success': True}
+                return {'success': False, 'message': res.get('message') or res.get('msg') or '发布失败'}
+            # 其他返回，视作成功但无 ID
+            return {'success': True}
+        except Exception as e:
+            logger.error(f"B站发布失败: {e}")
+            return {'success': False, 'message': str(e)}
 
     async def add_comment(self, dynamic_id: int, message: str) -> Dict[str, Any]:
-        """为指定动态添加评论。"""
-        try:
-            oid = int(dynamic_id)
-        except Exception:
-            return {'success': False, 'message': '无效的动态ID'}
+        """为指定动态添加评论。
 
+        在 v17 中，评论动态通常需要将 dynamic_id 映射为评论所需的 rid。
+        """
         try:
-            if CommentResourceType is not None:
-                await bili_comment.send_comment(
-                    resource_type=CommentResourceType.DYNAMIC,
-                    oid=oid,
-                    message=message,
-                    credential=self._bili_credential
-                )
-            else:
-                # 回退：某些版本为枚举值常量 11 表示动态
-                await bili_comment.send_comment(11, oid, message, credential=self._bili_credential)  # type: ignore[arg-type]
+            dyn = dynamic.Dynamic(int(dynamic_id), credential=self._bili_credential)
+            rid = await dyn.get_rid()
+            await bili_comment.send_comment(
+                text=message,
+                oid=int(rid),
+                type_=CommentResourceType.DYNAMIC,
+                credential=self._bili_credential,
+            )
             return {'success': True, 'message': '已评论'}
         except Exception as e:
             logger.error(f"B站评论失败: {e}")
             return {'success': False, 'message': str(e)}
 
     async def delete_dynamic(self, dynamic_id: int) -> Dict[str, Any]:
-        """删除一条动态。
-
-        依赖 bilibili_api 的 dynamic.delete 动态删除接口；不同版本 API 可能差异，做必要的兼容。
-        """
+        """删除一条动态（使用 Dynamic.delete）。"""
         try:
-            oid = int(dynamic_id)
-        except Exception:
-            return {'success': False, 'message': '无效的动态ID'}
-
-        try:
-            # 新版 bilibili_api 提供 dynamic.delete_dynamic / delete
-            delete_fn = getattr(self._bili_dynamic, 'delete_dynamic', None)
-            if callable(delete_fn):
-                await delete_fn(oid, credential=self._bili_credential)  # type: ignore[arg-type]
-                return {'success': True, 'message': '已删除'}
-            # 回退：某些版本为 delete
-            delete_fn2 = getattr(self._bili_dynamic, 'delete', None)
-            if callable(delete_fn2):
-                await delete_fn2(oid, credential=self._bili_credential)  # type: ignore[arg-type]
-                return {'success': True, 'message': '已删除'}
-            return {'success': False, 'message': '当前 bilibili_api 版本不支持删除动态'}
+            dyn = dynamic.Dynamic(int(dynamic_id), credential=self._bili_credential)
+            res = await dyn.delete()
+            if isinstance(res, dict):
+                code = res.get('code')
+                if code is None or code == 0:
+                    return {'success': True, 'message': '已删除'}
+                return {'success': False, 'message': res.get('message') or res.get('msg') or '删除失败'}
+            return {'success': True, 'message': '已删除'}
         except Exception as e:
             logger.error(f"B站删除动态失败: {e}")
             return {'success': False, 'message': str(e)}

@@ -455,20 +455,16 @@ class HTMLRenderer(ProcessorPlugin):
             sender_id = '10000'
             nickname = '匿名'
             user_id_display = ''
-            show_avatar = False
+            show_avatar = True
         else:
             user_id_display = sender_id
             show_avatar = True
             
         # 生成头像URL：匿名时使用透明占位，且不渲染头像元素
         if is_anonymous:
-            transparent_png = (
-                'iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAA'
-                'AAC0lEQVR42mP8/x8AAwMCAO2e4eYAAAAASUVORK5CYII='
-            )
-            avatar_url = f"data:image/png;base64,{transparent_png}"
+            avatar_url = f"https://q.qlogo.cn/headimg_dl?dst_uin=100000&spec=640&img_type=jpg"
         else:
-            avatar_url = f"http://q.qlogo.cn/headimg_dl?dst_uin={sender_id}&spec=640&img_type=jpg"
+            avatar_url = f"https://q.qlogo.cn/headimg_dl?dst_uin={sender_id}&spec=640&img_type=jpg"
         
         # 渲染消息内容
         content_html = self.render_messages(data.get('messages', []))
@@ -598,7 +594,7 @@ class HTMLRenderer(ProcessorPlugin):
         
     def render_poke(self, msg: Dict[str, Any]) -> str:
         """渲染戳一戳"""
-        return '<img class="poke-icon" src="/static/poke.png" alt="戳一戳">'
+        return '<img class="poke-icon" src="/static/source/poke.png" alt="戳一戳">'
         
     def render_forward(self, msg: Dict[str, Any]) -> str:
         """渲染合并转发"""
@@ -682,7 +678,7 @@ class HTMLRenderer(ProcessorPlugin):
         }
         
         icon = icon_map.get(ext, 'unknown.png')
-        return f"/static/icons/{icon}"
+        return f"/static/file/{icon}"
 
     # ===== 工具方法 =====
     def _anchor(self, url: str) -> str:
@@ -700,7 +696,8 @@ class HTMLRenderer(ProcessorPlugin):
         def _repl(match: re.Match) -> str:
             url = match.group(1)
             # 规范化并去除末尾中英文标点
-            url_clean = url.rstrip('.,;:!?)\]}>，。；：！）』」》]')
+            # 使用原始字符串以避免无效的转义序列警告
+            url_clean = url.rstrip(r".,;:!?)\]}>，。；：！）』」》]")
             collected.append(url_clean)
             return self._anchor(url_clean)
 
@@ -750,7 +747,7 @@ class HTMLRenderer(ProcessorPlugin):
 
         # 候选目录与文件名模式
         candidate_dirs = [
-            Path('data/qlottie'),
+            Path('static/qlottie'),
             Path('qlottie'),
         ]
         name_patterns = [

@@ -173,7 +173,7 @@ class BasePublisher(PublisherPlugin):
                 content = f"#{submission.publish_id}"
             
             # 添加@
-            if not submission.is_anonymous and include_at_sender and kwargs.get('at_sender', True):
+            if not submission.is_anonymous and include_at_sender:
                 at_text = self.format_at(submission)
                 if at_text:
                     content += f" {at_text}"
@@ -277,12 +277,12 @@ class BasePublisher(PublisherPlugin):
             record = PublishRecord(
                 submission_ids=submission_ids,
                 platform=self.platform.value,
-                account_id=account_id or '',
+                account_id=(account_id or result.get('account_id') or ''),
                 publish_content=content,
                 publish_images=images,
                 publish_result=result,
                 is_success=result.get('success', False),
-                error_message=result.get('error')
+                error_message=(result.get('error') or result.get('message'))
             )
             session.add(record)
             
@@ -297,6 +297,9 @@ class BasePublisher(PublisherPlugin):
                     published_at=datetime.now()
                 )
                 await session.execute(stmt)
+            
+            # 提交事务，确保发布记录与状态更新被持久化
+            await session.commit()
                 
     async def get_stored_posts(self, group_name: str) -> List[StoredPost]:
         """获取暂存的投稿"""

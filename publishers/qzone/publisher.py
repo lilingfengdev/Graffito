@@ -6,7 +6,7 @@
 - 通过 NapCat 本地接口获取/刷新 cookies（仅当无效或缺失时）
 - 发布说说与追加评论
 """
-from utils import json_util as json
+import orjson
 import asyncio
 import base64
 from pathlib import Path
@@ -17,10 +17,12 @@ import httpx
 from loguru import logger
 from io import BytesIO
 from PIL import Image
+from tenacity import RetryError
 
 from publishers.base import BasePublisher
 from core.enums import PublishPlatform
 from .api import QzoneAPI
+from aioqzone.exception import QzoneError
 
 
 class QzonePublisher(BasePublisher):
@@ -51,14 +53,14 @@ class QzonePublisher(BasePublisher):
         """加载账号cookies"""
         cookie_file = Path(f"data/cookies/qzone_{account_id}.json")
         
-        if cookie_file.exists():
+        if cookie_file.exists() and cookie_file.stat().st_size > 0:
             try:
-                with open(cookie_file, 'r') as f:
-                    cookies = json.load(f)
-                    self.cookies[account_id] = cookies
-                    self.api_clients[account_id] = QzoneAPI(cookies)
-                    self.logger.info(f"加载cookies成功: {account_id}")
-                    return True
+                data = cookie_file.read_bytes()
+                cookies = orjson.loads(data)
+                self.cookies[account_id] = cookies
+                self.api_clients[account_id] = QzoneAPI(cookies)
+                self.logger.info(f"加载cookies成功: {account_id}")
+                return True
             except Exception as e:
                 self.logger.error(f"加载cookies失败 {account_id}: {e}")
                 
@@ -69,8 +71,7 @@ class QzonePublisher(BasePublisher):
         cookie_file = Path(f"data/cookies/qzone_{account_id}.json")
         cookie_file.parent.mkdir(parents=True, exist_ok=True)
         
-        with open(cookie_file, 'w') as f:
-            json.dump(cookies, f)
+        cookie_file.write_bytes(orjson.dumps(cookies))
             
         self.cookies[account_id] = cookies
         self.api_clients[account_id] = QzoneAPI(cookies)
@@ -92,44 +93,81 @@ class QzonePublisher(BasePublisher):
                 headers['Authorization'] = f'Bearer {http_token}'
 
             async with httpx.AsyncClient(headers=headers, timeout=20) as client:
-                # 参考脚本：从 NapCat 获取指定域 Cookie 字符串
-                resp = await client.get(
-                    f"http://127.0.0.1:{port}/get_cookies",
-                    params={"domain": "qzone.qq.com"}
-                )
-                if resp.status_code != 200:
-                    self.logger.error(f"NapCat get_cookies HTTP {resp.status_code}: {account_id}")
+                # 参考脚本：从 NapCat 获取指定域 Cookie
+                url = f"http://127.0.0.1:{port}/get_cookies"
+                try:
+                    resp = await client.get(url, params={"domain": "qzone.qq.com"})
+                except httpx.HTTPError as e:
+                    self.logger.error(f"NapCat get_cookies 请求失败: {type(e).__name__}: {e}")
                     return False
-                data = resp.json()
-                if data.get('status') != 'ok':
+
+                if resp.status_code != 200:
+                    body_snippet = (resp.text or "")[:300]
+                    self.logger.error(
+                        f"NapCat get_cookies HTTP {resp.status_code}: {account_id}, body: {body_snippet}"
+                    )
+                    return False
+
+                try:
+                    data = resp.json()
+                except Exception:
+                    self.logger.error(
+                        f"NapCat get_cookies 返回非JSON: {(resp.text or '')[:300]}"
+                    )
+                    return False
+
+                if (data.get('status') or '').lower() != 'ok':
                     self.logger.error(f"NapCat get_cookies 返回异常: {data}")
                     return False
-                cookies_str = data['data'].get('cookies') or ''
-                if not cookies_str:
-                    self.logger.error("NapCat 未返回 cookies 字符串")
-                    return False
-                # 解析 cookies
+
+                # 兼容不同返回格式
                 cookies: Dict[str, Any] = {}
-                for item in cookies_str.split('; '):
-                    if '=' in item:
-                        k, v = item.split('=', 1)
-                        cookies[k] = v
+                payload = data.get('data') or {}
+                cookies_str = payload.get('cookies') or payload.get('cookie') or ''
+                if isinstance(cookies_str, str) and cookies_str:
+                    for item in cookies_str.split('; '):
+                        if '=' in item:
+                            k, v = item.split('=', 1)
+                            cookies[k] = v
+                else:
+                    # 可能返回为数组形式 [{name, value, domain, ...}]
+                    cookie_list = payload.get('cookies') or payload.get('cookie_list') or []
+                    if isinstance(cookie_list, list):
+                        for c in cookie_list:
+                            try:
+                                name = c.get('name')
+                                value = c.get('value')
+                                if name and (value is not None):
+                                    cookies[name] = str(value)
+                            except Exception:
+                                continue
+                if not cookies:
+                    self.logger.error("NapCat 未返回 cookies 字段或为空")
+                    return False
                 # 补充必要字段：uin/p_uin
                 qq_id = str(account_info.get('qq_id') or '')
                 if qq_id and not cookies.get('uin'):
                     cookies['uin'] = f"o{qq_id}"
                 if qq_id and not cookies.get('p_uin'):
                     cookies['p_uin'] = f"o{qq_id}"
-                if not cookies.get('p_skey'):
-                    self.logger.error("缺少 p_skey，登录失败")
-                    return False
+                # 基础检查：关键字段
+                missing_keys = [k for k in ['p_skey', 'uin', 'p_uin'] if not cookies.get(k)]
+                if missing_keys:
+                    self.logger.warning(f"NapCat cookies 缺少字段: {missing_keys}")
                 await self.save_cookies(account_id, cookies)
                 # 验证 gtk 可用
                 api = self.api_clients.get(account_id)
                 ok = await api.check_login() if api else False
                 if not ok:
-                    self.logger.error("登录后 gtk 检查失败")
-                    return False
+                    # 某些场景 NapCat 返回的 cookie 需要带上 qzone 子域
+                    # 尝试再次调用 index 拉取 qzonetoken 作为二次验证
+                    try:
+                        if api:
+                            await api._api.index()
+                            ok = True
+                    except Exception as e2:
+                        self.logger.error(f"登录后校验失败: {e2}")
+                        return False
                 self.logger.info(f"NapCat 登录成功: {account_id}")
                 return True
         except Exception as e:
@@ -174,6 +212,23 @@ class QzonePublisher(BasePublisher):
         
     # 移除 refresh_login：使用外部提供的 cookies 文件
             
+    def format_at(self, submission) -> str:
+        """Qzone 专用 @ 文本格式（兼容历史脚本）。
+
+        使用形如 "@{uin:123456,nick:,who:1}" 的格式：
+        - 去掉 uin 前缀 o/O
+        - nick 留空（与既有脚本一致）
+        - 携带 who:1 提示为用户提及
+        """
+        try:
+            raw_uin = str(submission.sender_id or "").lstrip("oO")
+            uin_int = int(raw_uin) if raw_uin else 0
+            if not uin_int:
+                return ""
+            return f"@{{uin:{uin_int},nick:,who:1}}"
+        except Exception:
+            return ""
+
     async def publish(self, content: str, images: List[str] = None, **kwargs) -> Dict[str, Any]:
         """发布到QQ空间"""
         account_id = kwargs.get('account_id')
@@ -208,22 +263,57 @@ class QzonePublisher(BasePublisher):
                     img_bytes = await self._load_image(img_path)
                     if img_bytes:
                         image_data.append(img_bytes)
-                        
-            # 发布说说
+
+            # 发布说说（带登录失效自动重试）
             result = await api.publish_emotion(content, image_data)
-            
+
             if result.get('tid'):
                 return {
                     'success': True,
                     'tid': result['tid'],
                     'account_id': account_id
                 }
-            else:
+
+            # 如返回失败信息涉及登录问题，尝试一次 NapCat 续登并重试
+            err_msg = (result.get('message') or '').lower()
+            if any(k in err_msg for k in ['登录失败', 'relogin', 'login', 'cookie', 'p_skey']):
+                self.logger.info(f"检测到登录异常，尝试NapCat重登后重试: {account_id}")
+                if await self.login_via_napcat(account_id):
+                    api2 = self.api_clients.get(account_id)
+                    result2 = await api2.publish_emotion(content, image_data)
+                    if result2.get('tid'):
+                        return {
+                            'success': True,
+                            'tid': result2['tid'],
+                            'account_id': account_id
+                        }
+                    return {
+                        'success': False,
+                        'error': result2.get('message', '发布失败')
+                    }
+
+            return {
+                'success': False,
+                'error': result.get('message', '发布失败')
+            }
+
+        except (QzoneError, RetryError) as e:
+            # QzoneError -100/-3000/-10000 或自动重试失败
+            self.logger.warning(f"Qzone 登录异常，尝试NapCat重登后重试: {account_id}, {e}")
+            if await self.login_via_napcat(account_id):
+                api2 = self.api_clients.get(account_id)
+                result2 = await api2.publish_emotion(content, image_data)
+                if result2.get('tid'):
+                    return {
+                        'success': True,
+                        'tid': result2['tid'],
+                        'account_id': account_id
+                    }
                 return {
                     'success': False,
-                    'error': result.get('message', '发布失败')
+                    'error': result2.get('message', '发布失败')
                 }
-                
+            return {'success': False, 'error': str(e)}
         except Exception as e:
             self.logger.error(f"发布失败: {e}")
             return {'success': False, 'error': str(e)}
@@ -394,7 +484,18 @@ class QzonePublisher(BasePublisher):
 
                 account_id = target.account_id
                 tid = str(target.publish_result.get("tid"))
-                api = self.api_clients.get(account_id)
+                api = None
+                if account_id and account_id in self.api_clients:
+                    api = self.api_clients.get(account_id)
+                if not api:
+                    # 回退：任选一个登录有效的账号
+                    for aid, client in self.api_clients.items():
+                        try:
+                            if await client.check_login():
+                                api = client
+                                break
+                        except Exception:
+                            continue
                 if not api:
                     return {"success": False, "message": "对应账号未登录或API未初始化"}
 
@@ -413,7 +514,18 @@ class QzonePublisher(BasePublisher):
                 tid = record.publish_result.get("tid")
             if not tid:
                 return {"success": False, "message": "missing tid"}
-            api = self.api_clients.get(record.account_id)
+            api = None
+            if record.account_id and record.account_id in self.api_clients:
+                api = self.api_clients.get(record.account_id)
+            if not api:
+                # 回退：任选一个登录有效的账号
+                for aid, client in self.api_clients.items():
+                    try:
+                        if await client.check_login():
+                            api = client
+                            break
+                    except Exception:
+                        continue
             if not api:
                 return {"success": False, "message": "account not ready"}
             res = await api.delete_mood(str(tid))

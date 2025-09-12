@@ -5,7 +5,7 @@ from datetime import datetime, timedelta
 from loguru import logger
 
 from core.database import get_db
-from core.models import Submission, MessageCache, StoredPost, PublishRecord
+from core.models import Submission, MessageCache, StoredPost, PublishRecord, BlackList
 from core.enums import SubmissionStatus, PublishPlatform
 from processors.pipeline import ProcessingPipeline
 from apscheduler.schedulers.asyncio import AsyncIOScheduler
@@ -274,15 +274,15 @@ class SubmissionService:
                 except Exception:
                     continue
 
-            # 更新数据库状态
-            async with (await get_db()).get_session() as session2:
-                upd = update(Submission).where(Submission.id == submission_id).values(status=SubmissionStatus.DELETED.value)
-                await session2.execute(upd)
-                await session2.commit()
-
+            # 仅当外部平台至少一个删除成功时，才更新状态为 DELETED
             if any_success:
+                async with (await get_db()).get_session() as session2:
+                    upd = update(Submission).where(Submission.id == submission_id).values(status=SubmissionStatus.DELETED.value)
+                    await session2.execute(upd)
+                    await session2.commit()
                 return {"success": True, "message": "已删除"}
-            return {"success": False, "message": "未能删除，请稍后再试"}
+            else:
+                return {"success": False, "message": "未能删除，请稍后再试"}
         except Exception as e:
             self.logger.error(f"删除投稿失败: {e}")
             return {"success": False, "message": "未能删除，请稍后再试"}
@@ -386,14 +386,18 @@ class SubmissionService:
         """
         try:
             # 所有平台尝试发布，任一成功即视为成功
+            if not self.publishers:
+                self.logger.error("发布失败: 未找到可用发送器（请检查 config/publishers/*.yml 的 enabled）")
+                return False
             any_success = False
-            last_error: Optional[str] = None
+            error_details: List[str] = []
             for name, publisher in self.publishers.items():
                 result = await publisher.publish_submission(submission_id)
                 if result.get('success'):
                     any_success = True
                 else:
-                    last_error = result.get('error') or result.get('message')
+                    detail = result.get('error') or result.get('message') or str(result)
+                    error_details.append(f"{name}: {detail}")
 
             if any_success:
                 db = await get_db()
@@ -403,7 +407,8 @@ class SubmissionService:
                     await session.commit()
                 return True
             else:
-                self.logger.error(f"发布失败: {last_error}")
+                msg = "; ".join(error_details) if error_details else '未知错误'
+                self.logger.error(f"发布失败: {msg}")
                 return False
         except Exception as e:
             self.logger.error(f"发布单条投稿失败: {e}", exc_info=True)

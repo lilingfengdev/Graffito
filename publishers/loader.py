@@ -32,38 +32,52 @@ def _derive_platform_key_from_module(module_name: str) -> Optional[str]:
 
 
 def discover_publisher_classes() -> Dict[str, Type[BasePublisher]]:
-    """Discover all BasePublisher subclasses under the publishers package.
+    """Discover BasePublisher subclasses that are enabled by config.
 
-    Returns a mapping of platform_key -> Publisher class.
+    Priority:
+      1) For each known platform in PublishPlatform, if config says enabled,
+         import 'publishers.<key>.publisher' directly and collect classes.
+      2) Fallback to pkgutil walk if nothing found (best-effort).
+
+    Returns mapping of platform_key -> Publisher class.
     """
-    import publishers as publishers_pkg  # local import to ensure package is available
-
     discovered: Dict[str, Type[BasePublisher]] = {}
-    for finder, name, ispkg in pkgutil.walk_packages(publishers_pkg.__path__, publishers_pkg.__name__ + "."):
-        # Skip utility modules
+
+    # Prefer explicit import of enabled platforms to avoid importing unrelated/heavy modules
+    for p in PublishPlatform:
+        key = p.value
+        cfg = get_platform_config(key) or {}
+        if not bool(cfg.get('enabled', False)):
+            continue
+        try:
+            module: ModuleType = importlib.import_module(f"publishers.{key}.publisher")
+            for _, obj in inspect.getmembers(module, inspect.isclass):
+                if issubclass(obj, BasePublisher) and obj is not BasePublisher:
+                    discovered[key] = obj  # type: ignore[assignment]
+                    break
+        except Exception:
+            # Skip modules that fail to import; continue discovering others
+            continue
+
+    if discovered:
+        return discovered
+
+    # Fallback: generic walk (may import disabled or heavy modules; kept for backward compatibility)
+    import publishers as publishers_pkg  # local import to ensure package is available
+    for _, name, ispkg in pkgutil.walk_packages(publishers_pkg.__path__, publishers_pkg.__name__ + "."):
         if name.endswith('.base') or name.endswith('.loader'):
             continue
         try:
             module: ModuleType = importlib.import_module(name)
         except Exception:
-            # Best-effort discovery: ignore modules that fail to import
             continue
-
         platform_key = _derive_platform_key_from_module(name)
         if not platform_key:
             continue
-
-        # Validate against known platforms if possible
-        known_values = {p.value for p in PublishPlatform}
-        if platform_key not in known_values:
-            # Allow unknown for forward compatibility but prefer known values
-            pass
-
         for _, obj in inspect.getmembers(module, inspect.isclass):
-            if not issubclass(obj, BasePublisher) or obj is BasePublisher:
-                continue
-            # If multiple classes found under same platform, the last one wins (usually only one)
-            discovered[platform_key] = obj  # type: ignore[assignment]
+            if issubclass(obj, BasePublisher) and obj is not BasePublisher:
+                discovered[platform_key] = obj  # type: ignore[assignment]
+                break
     return discovered
 
 

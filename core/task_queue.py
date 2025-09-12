@@ -27,8 +27,8 @@ class TaskQueueBackend:
 
 try:
     # Async variants
-    from persistqueue.async_sqlite_queue import AsyncSQLiteQueue  # type: ignore
-    from persistqueue.async_queue import AsyncQueue as AsyncFileQueue  # type: ignore
+    from persistqueue import AsyncSQLiteQueue  # type: ignore
+    from persistqueue import AsyncQueue as AsyncFileQueue  # type: ignore
 except Exception:  # pragma: no cover
     AsyncSQLiteQueue = None  # type: ignore
     AsyncFileQueue = None  # type: ignore
@@ -78,7 +78,9 @@ class AsyncSQLiteQueueBackend(TaskQueueBackend):
     async def pop(self, name: str, timeout: int = 5) -> Optional[Tuple[Any, Dict[str, Any]]]:
         q = await self._get_queue(name)
         try:
-            item = await q.get(timeout=timeout)
+            item = await asyncio.wait_for(q.get(), timeout=timeout)
+        except asyncio.TimeoutError:
+            return None
         except Exception:
             return None
         return item, (item if isinstance(item, dict) else {})
@@ -117,7 +119,9 @@ class AsyncFileQueueBackend(TaskQueueBackend):
     async def pop(self, name: str, timeout: int = 5) -> Optional[Tuple[Any, Dict[str, Any]]]:
         q = await self._get_queue(name)
         try:
-            item = await q.get(timeout=timeout)
+            item = await asyncio.wait_for(q.get(), timeout=timeout)
+        except asyncio.TimeoutError:
+            return None
         except Exception:
             return None
         return item, (item if isinstance(item, dict) else {})

@@ -16,7 +16,7 @@ from typing import Any, Dict, List, Optional
 
 import sys
 
-from utils import json_util as json
+import orjson
 
 
 def prompt(msg: str) -> str:
@@ -62,8 +62,7 @@ async def login_and_save(account_id: str, headless: bool = False, user_agent: Op
 
         cookies = await context.cookies()
         cookie_path = ensure_cookie_dir() / f"rednote_{account_id}.json"
-        with open(cookie_path, "w", encoding="utf-8") as f:
-            f.write(json.dumps(cookies))
+        cookie_path.write_bytes(orjson.dumps(cookies))
         print(f"Cookies 已保存至: {cookie_path}")
         await browser.close()
         return ok
@@ -92,7 +91,8 @@ def parse_cookie_input(raw: str) -> List[Dict[str, Any]]:
         return []
     # Try JSON first
     try:
-        obj = json.loads(raw)
+        import json as _json
+        obj = _json.loads(raw)
         if isinstance(obj, list):
             # Expect list of cookie dicts
             return _standardize_domain_path(obj)
@@ -155,8 +155,7 @@ async def import_cookie_and_save(account_id: str, validate: bool = True) -> bool
                     cookies = await context.cookies()
                     await browser.close()
                     cookie_path = ensure_cookie_dir() / f"rednote_{account_id}.json"
-                    with open(cookie_path, "w", encoding="utf-8") as f:
-                        f.write(json.dumps(cookies))
+                    cookie_path.write_bytes(orjson.dumps(cookies))
                     print(f"Cookies 已保存至: {cookie_path}")
                     return ok
                 except Exception as e:
@@ -165,8 +164,7 @@ async def import_cookie_and_save(account_id: str, validate: bool = True) -> bool
 
     # Save as-is (unverified)
     cookie_path = ensure_cookie_dir() / f"rednote_{account_id}.json"
-    with open(cookie_path, "w", encoding="utf-8") as f:
-        f.write(json.dumps(cookies))
+    cookie_path.write_bytes(orjson.dumps(cookies))
     print(f"Cookies 已保存至: {cookie_path}")
     return True
 

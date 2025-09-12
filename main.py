@@ -101,7 +101,7 @@ class OQQWallApp:
             plugin_manager.register(qq_receiver)
             logger.info("已注册 QQ 接收器")
             
-        # 动态注册所有启用的发送器
+        # 动态注册所有启用的发送器（仅依赖配置启用的目标模块）
         registered = register_publishers_from_configs()
         if registered:
             logger.info(f"已动态注册发送器: {list(registered.keys())}")

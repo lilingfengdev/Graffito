@@ -14,7 +14,7 @@ from loguru import logger
 from publishers.base import BasePublisher
 from core.enums import PublishPlatform
 from .api import BilibiliAPI
-from utils import json_util as json
+import orjson
 
 
 class BilibiliPublisher(BasePublisher):
@@ -57,8 +57,10 @@ class BilibiliPublisher(BasePublisher):
             self.logger.warning(f"B站 cookie 文件不存在: {cookie_file_path}")
             return False
         try:
-            with open(p, 'r', encoding='utf-8') as f:
-                cookies = json.load(f)
+            if p.stat().st_size == 0:
+                self.logger.error(f"B站 cookie 文件为空: {cookie_file_path}")
+                return False
+            cookies = orjson.loads(p.read_bytes())
             # 支持两种格式：{'SESSDATA': '...', 'bili_jct': '...'} 或 [{name, value}...]
             if isinstance(cookies, dict):
                 normalized = cookies
@@ -131,25 +133,15 @@ class BilibiliPublisher(BasePublisher):
             return {'success': False, 'error': 'B站账号未登录或Cookie无效'}
 
         try:
-            pictures_meta: List[Dict[str, Any]] = []
+            images_bytes: List[bytes] = []
             if images:
                 cfg = self._get_platform_config()
-                category = 'daily'
                 for img in images[: cfg.get('max_images_per_post', 9)]:
                     img_bytes = await self._load_image_bytes(img)
-                    if not img_bytes:
-                        continue
-                    up = await api.upload_image(img_bytes, category=category)
-                    # B站返回字段可能为 {image_url, width, height}
-                    image_url = up.get('image_url') or up.get('img_src') or up.get('url')
-                    if image_url:
-                        pictures_meta.append({
-                            'img_src': image_url,
-                            'width': up.get('image_width') or up.get('width') or 0,
-                            'height': up.get('image_height') or up.get('height') or 0
-                        })
+                    if img_bytes:
+                        images_bytes.append(img_bytes)
 
-            result = await api.create_draw_dynamic(content or '', pictures_meta)
+            result = await api.create_draw_dynamic(content or '', images_bytes)
             if result.get('success'):
                 return {'success': True, 'dynamic_id': result.get('dynamic_id'), 'account_id': account_id}
             return {'success': False, 'error': result.get('message', '发布失败'), 'code': result.get('code')}

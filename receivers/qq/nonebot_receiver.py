@@ -195,6 +195,7 @@ class QQReceiver(BaseReceiver):
                 # 自动同意
                 if self.config.get("auto_accept_friend", True) and flag:
                     try:
+                        await asyncio.sleep(180)
                         await bot.call_api("set_friend_add_request", flag=flag, approve=True)
                         self.logger.info(f"已同意好友请求: {flag}")
                     except Exception as e:
@@ -215,29 +216,49 @@ class QQReceiver(BaseReceiver):
             except Exception as e:
                 self.logger.error(f"处理好友请求失败: {e}", exc_info=True)
 
-        # 撤回事件（好友撤回）
+        # 通知事件（好友撤回、好友添加等）
         try:
             from nonebot.adapters.onebot.v11 import NoticeEvent
-            recall_matcher = nonebot.on_notice(priority=50, block=False)  # type: ignore
+            notice_matcher = nonebot.on_notice(priority=50, block=False)  # type: ignore
 
-            @recall_matcher.handle()  # type: ignore
+            @notice_matcher.handle()  # type: ignore
             async def _(bot: Bot, event: NoticeEvent):
                 try:
-                    # 只处理好友撤回
-                    if getattr(event, "notice_type", None) != "friend_recall":
-                        return
-                    if not self.enable_recall_delete:
-                        return
+                    notice_type = getattr(event, "notice_type", None)
                     user_id = str(getattr(event, "user_id", ""))
                     self_id = str(getattr(bot, "self_id", ""))
-                    message_id = str(getattr(event, "message_id", ""))
-                    if not (user_id and self_id and message_id):
-                        return
-                    ok = await self.remove_cached_message(user_id, self_id, message_id)
-                    if ok:
-                        self.logger.info(f"已根据撤回事件删除缓存消息: uid={user_id}, sid={self_id}, mid={message_id}")
+
+                    # 处理好友撤回
+                    if notice_type == "friend_recall":
+                        if not self.enable_recall_delete:
+                            return
+                        message_id = str(getattr(event, "message_id", ""))
+                        if not (user_id and self_id and message_id):
+                            return
+                        ok = await self.remove_cached_message(user_id, self_id, message_id)
+                        if ok:
+                            self.logger.info(f"已根据撤回事件删除缓存消息: uid={user_id}, sid={self_id}, mid={message_id}")
+
+                    # 处理好友添加成功
+                    elif notice_type == "friend_add":
+                        if not user_id or not self_id:
+                            return
+                        # 获取配置的欢迎消息
+                        try:
+                            from config import get_settings
+                            settings = get_settings()
+                            group_name = self._resolve_group_name_by_self_id(self_id)
+                            if group_name and group_name in settings.account_groups:
+                                group_config = settings.account_groups[group_name]
+                                welcome_msg = getattr(group_config, 'friend_add_message', '')
+                                if welcome_msg and welcome_msg.strip():
+                                    await self.send_private_message(user_id, welcome_msg)
+                                    self.logger.info(f"已发送好友添加欢迎消息: uid={user_id}, sid={self_id}, group={group_name}")
+                        except Exception as e:
+                            self.logger.error(f"发送好友欢迎消息失败: {e}")
+
                 except Exception as e:
-                    self.logger.error(f"处理撤回事件失败: {e}")
+                    self.logger.error(f"处理通知事件失败: {e}")
         except Exception:
             pass
 
@@ -742,12 +763,16 @@ class QQReceiver(BaseReceiver):
                 await self.send_group_message(group_id, msg)
                 return True
 
-            # 删除 <id> （管理员群任意投稿）
+            # 删除 <编号或投稿ID> （管理员群任意投稿）
             if cmd == "删除" and arg1 and arg1.isdigit():
                 if not self.submission_service:
                     await self.send_group_message(group_id, "投稿服务未就绪")
                     return True
-                sid = int(arg1)
+                # 允许使用外部发布编号 publish_id 或内部投稿ID
+                sid = await self._resolve_submission_id_by_any(arg1)
+                if sid is None:
+                    await self.send_group_message(group_id, "未找到该编号对应的投稿")
+                    return True
                 try:
                     res = await self.submission_service.delete_submission(sid)
                     await self.send_group_message(group_id, res.get("message", "操作完成"))
@@ -854,10 +879,14 @@ class QQReceiver(BaseReceiver):
                     self.logger.error(f"保存反馈失败: {e}", exc_info=True)
                     await self.send_private_message(user_id, "反馈保存失败，请稍后重试")
                 return True
-            # 私聊删除：#删除 <id>
+            # 私聊删除：#删除 <编号或投稿ID>
             m_del = re.match(r"^#?删除\s+(\d+)$", text)
             if m_del:
-                sid = int(m_del.group(1))
+                raw_id = m_del.group(1)
+                sid = await self._resolve_submission_id_by_any(raw_id)
+                if sid is None:
+                    await self.send_private_message(user_id, "错误：未找到该编号对应的投稿")
+                    return True
                 # 校验归属：仅允许删除自己的投稿
                 from core.database import get_db
                 from sqlalchemy import select
@@ -882,12 +911,16 @@ class QQReceiver(BaseReceiver):
                     await self.send_private_message(user_id, "未能删除，请稍后再试")
                 return True
 
-            # 允许前缀可选的 # -> 评论
+            # 允许前缀可选的 # -> 评论（编号或投稿ID）
             m = re.match(r"^#?评论\s+(\d+)\s+(.+)$", text)
             if not m:
                 return False
 
-            submission_id = int(m.group(1))
+            raw_id = m.group(1)
+            submission_id = await self._resolve_submission_id_by_any(raw_id)
+            if submission_id is None:
+                await self.send_private_message(user_id, "错误：未找到该编号对应的投稿")
+                return True
             comment_text = m.group(2).strip()
             if not comment_text:
                 await self.send_private_message(user_id, "错误：评论内容不能为空")
@@ -953,8 +986,7 @@ class QQReceiver(BaseReceiver):
                     except Exception as _e:
                         results.append((pub.name, False, {"message": str(_e)}))
                 if success_any:
-                    ok_names = [n for n, ok, _ in results if ok]
-                    await self.send_private_message(user_id, f"评论成功：已同步到 {', '.join(ok_names)}（投稿 {submission_id}）")
+                    await self.send_private_message(user_id, "评论成功")
                 else:
                     msg = "；".join([f"{n}:{r.get('message','失败')}" for n, ok, r in results]) or "未知错误"
                     await self.send_private_message(user_id, f"评论失败：{msg}")
@@ -1018,12 +1050,45 @@ class QQReceiver(BaseReceiver):
         return (
             "全局指令:\n"
             "语法: @本账号 指令\n\n"
-            "调出 <编号>\n信息 <编号>\n待处理\n删除 <编号>\n删除待处理\n删除暂存区\n发送暂存区\n"
+            "调出 <编号>\n信息 <编号>\n待处理\n删除 <编号或投稿ID>\n删除待处理\n删除暂存区\n发送暂存区\n"
             "取消拉黑 <QQ>\n列出拉黑\n设定编号 <数字>\n快捷回复 [添加 指令=内容|删除 指令]\n自检\n\n"
             "审核指令:\n语法: @本账号 <内部编号> 指令 或 回复审核消息 指令\n"
             "是/否/匿/等/删/拒/立即/刷新/重渲染/扩列审查/评论 <内容>/回复 <内容>/展示/拉黑 [理由]\n"
             "也可使用已配置的快捷回复键\n\n"
-            "私聊指令:\n#删除 <投稿ID>（仅能删除自己的投稿）\n#评论 <投稿ID> <内容>"
+            "私聊指令:\n#删除 <编号或投稿ID>（仅能删除自己的投稿）\n#评论 <编号或投稿ID> <内容>"
         )
+
+    async def _resolve_submission_id_by_any(self, raw_id: str) -> Optional[int]:
+        """根据用户提供的编号解析到内部 Submission.id。
+
+        支持两种输入：
+        - 投稿ID（submissions.id）
+        - 发布编号（submissions.publish_id）
+        优先按投稿ID匹配，其次按发布编号匹配最近创建的一条。
+        """
+        try:
+            num = int(str(raw_id).strip())
+        except Exception:
+            return None
+
+        from core.database import get_db
+        from sqlalchemy import select
+        from core.models import Submission
+        db = await get_db()
+        async with db.get_session() as session:
+            # 先按内部ID匹配
+            r = await session.execute(select(Submission).where(Submission.id == num))
+            sub = r.scalar_one_or_none()
+            if sub:
+                return int(sub.id)
+            # 再按发布编号匹配，若多条则取最新创建
+            try:
+                r2 = await session.execute(select(Submission).where(Submission.publish_id == num).order_by(Submission.created_at.desc()))
+                subs = r2.scalars().all()
+                if subs:
+                    return int(subs[0].id)
+            except Exception:
+                pass
+        return None
 
 
