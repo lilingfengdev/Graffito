@@ -536,9 +536,9 @@ class HTMLRenderer(ProcessorPlugin):
             
         # 生成头像URL：匿名时使用透明占位，且不渲染头像元素
         if is_anonymous:
-            avatar_url = f"https://qlogo2.store.qq.com/qzone/100000/100000/50"
+            avatar_url = f"https://qlogo2.store.qq.com/qzone/100000/100000/100"
         else:
-            avatar_url = f"https://qlogo2.store.qq.com/qzone/{sender_id}/{sender_id}/50"
+            avatar_url = f"https://qlogo2.store.qq.com/qzone/{sender_id}/{sender_id}/640"
         
         # 渲染消息内容
         content_html = self.render_messages(data.get('messages', []))
