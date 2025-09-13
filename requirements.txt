@@ -39,11 +39,9 @@ humanfriendly>=10.0
 
 # AI/LLM
 dashscope>=1.14.0  # 阿里云通义千问
-openai>=1.0.0  # 备用
 
 # High-performance libraries
 orjson>=3.9.10
-regex>=2023.10.28
 
 # CLI工具
 click>=8.1.0
@@ -55,5 +53,5 @@ nonebot2>=2.2.0
 nonebot-adapter-onebot>=2.4.3
 
 # External platform SDKs
-aioqzone>=0.5.0
+aioqzone
 bilibili-api-python>=17.3.0
