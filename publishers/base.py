@@ -90,6 +90,13 @@ class BasePublisher(PublisherPlugin):
             
             # 发布
             result = await self.publish(content, images, **kwargs)
+            try:
+                if result.get('success'):
+                    self.logger.info(f"发布成功: sid={submission_id} platform={self.platform.value} account={result.get('account_id')} tid={result.get('tid')}")
+                else:
+                    self.logger.error(f"发布失败: sid={submission_id} platform={self.platform.value} detail={result}")
+            except Exception:
+                pass
             
             # 记录发布结果
             await self.record_publish(
@@ -138,6 +145,11 @@ class BasePublisher(PublisherPlugin):
                 
             # 批量发布
             results = await self.batch_publish(items)
+            try:
+                ok_cnt = sum(1 for r in results if r and r.get('success'))
+                self.logger.info(f"批量发布完成: platform={self.platform.value} ok={ok_cnt}/{len(items)}")
+            except Exception:
+                pass
             
             # 记录发布结果
             for i, result in enumerate(results):

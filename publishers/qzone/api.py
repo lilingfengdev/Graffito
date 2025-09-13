@@ -58,7 +58,10 @@ class QzoneAPI:
             return False
 
     async def publish_emotion(self, content: str, images: Optional[List[bytes]] = None) -> Dict[str, Any]:
-        """发布说说，支持可选图片（bytes 列表）。"""
+        """发布说说，支持可选图片（bytes 列表）。
+
+        仅当返回包含有效 tid/fid 时才视为成功。
+        """
         try:
             photos: Sequence[PhotoData] = []
             if images:
@@ -73,7 +76,7 @@ class QzoneAPI:
                         if int(getattr(e, "code", 0)) in (-100, -3000, -10000):
                             raise
                         logger.error(f"上传图片失败，跳过一张: {e}")
-                    except RetryError as e:
+                    except RetryError:
                         # 自动重试已失败（通常因登录问题），交由上层处理
                         raise
                     except Exception as e:
@@ -86,8 +89,20 @@ class QzoneAPI:
 
             # 3) 发表说说
             resp = await self._api.publish_mood(content=content, photos=list(photos) if photos else None)
-            tid = getattr(resp, "fid", None) or getattr(resp, "tid", None) or None
-            return {"success": True, "tid": tid}
+            tid = getattr(resp, "fid", None) or getattr(resp, "tid", None)
+            if tid:
+                try:
+                    logger.info(f"Qzone 发布成功: tid={tid} uin={self.uin}")
+                except Exception:
+                    pass
+                return {"success": True, "tid": str(tid)}
+            # 无 tid 视为失败
+            try:
+                snippet = str(resp)[:200]
+            except Exception:
+                snippet = "<unknown>"
+            logger.error(f"Qzone 发布失败：未返回tid，响应片段: {snippet}")
+            return {"success": False, "message": "未返回tid，发布失败"}
         except Exception as e:
             logger.error(f"发布失败: {e}")
             return {"success": False, "message": str(e)}
