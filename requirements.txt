@@ -13,10 +13,10 @@ asyncio-mqtt>=0.16.0
 
 # 任务调度
 apscheduler>=3.10.0
-orjson>=3.9.10
 persist-queue>=0.8.1
 aiosqlite>=0.19.0
 aiofiles>=23.2.1
+tzlocal>=5.2
 
 # 数据验证
 pydantic>=2.5.0
@@ -34,6 +34,8 @@ playwright>=1.40.0
 qrcode>=7.4.2
 httpx>=0.25.0
 beautifulsoup4>=4.12.0
+linkify-it-py>=2.0.3
+humanfriendly>=10.0
 
 # AI/LLM
 dashscope>=1.14.0  # 阿里云通义千问

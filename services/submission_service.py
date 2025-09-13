@@ -60,7 +60,6 @@ class SubmissionService:
                 if task and not task.done():
                     task.cancel()
             self._pub_workers.clear()
-            self._pub_queues.clear()
         except Exception:
             pass
             
@@ -417,8 +416,18 @@ class SubmissionService:
     def _setup_send_schedules(self):
         """根据各平台 send_schedule 设置定时任务，任务入队到各自发布器队列。"""
         if not self.scheduler:
-            self.scheduler = AsyncIOScheduler()
+            # 显式设置为本地时区，避免默认 UTC 造成触发时间偏移
+            try:
+                from tzlocal import get_localzone  # 延迟导入，避免环境缺失导致启动失败
+                tz = get_localzone()
+            except Exception:
+                tz = None
+            self.scheduler = AsyncIOScheduler(timezone=tz) if tz else AsyncIOScheduler()
             self.scheduler.start()
+            try:
+                self.logger.info(f"启动定时调度器，timezone={getattr(self.scheduler, 'timezone', None)}")
+            except Exception:
+                pass
         # 为每个 publisher 建立队列与 worker，并注册 cron 任务
         from utils.common import get_platform_config
         for pub_name, publisher in self.publishers.items():
@@ -444,8 +453,26 @@ class SubmissionService:
                 except Exception:
                     self.logger.warning(f"无效的 send_schedule 时间格式: {t}")
                     continue
-                trigger = CronTrigger(hour=hour, minute=minute, second=second)
-                self.scheduler.add_job(self._enqueue_scheduled_group_jobs, trigger, args=[pub_name], id=f"sched_{pub_name}_{t}", replace_existing=True)
+                # 与调度器使用相同时区
+                _tz = getattr(self.scheduler, 'timezone', None)
+                if _tz:
+                    trigger = CronTrigger(hour=hour, minute=minute, second=second, timezone=_tz)
+                else:
+                    trigger = CronTrigger(hour=hour, minute=minute, second=second)
+                # 允许小范围延迟（例如程序刚恢复）仍然触发；合并积压任务
+                self.scheduler.add_job(
+                    self._enqueue_scheduled_group_jobs,
+                    trigger,
+                    args=[pub_name],
+                    id=f"sched_{pub_name}_{t}",
+                    replace_existing=True,
+                    misfire_grace_time=300,
+                    coalesce=True,
+                )
+                try:
+                    self.logger.info(f"注册定时任务[{pub_name}] {t} -> h={hour},m={minute},s={second}")
+                except Exception:
+                    pass
 
     def _ensure_publisher_worker(self, pub_name: str):
         if pub_name not in self._pub_workers or self._pub_workers[pub_name].done():
@@ -455,6 +482,11 @@ class SubmissionService:
         """按组入队执行 flush（避免一次处理过大批量）。"""
         try:
             settings = get_settings()
+            try:
+                now_str = datetime.now(getattr(self.scheduler, 'timezone', None)).strftime('%Y-%m-%d %H:%M:%S %Z') if self.scheduler else ''
+                self.logger.info(f"定时触发[{pub_name}] at {now_str}; groups={list(settings.account_groups.keys())}")
+            except Exception:
+                pass
             await self._queue_backend.ensure_queue(pub_name)
             # 逐组入队
             for group_name in list(settings.account_groups.keys()):
@@ -499,6 +531,10 @@ class SubmissionService:
         try:
             stored_posts = await self.get_stored_posts(group_name)
             if not stored_posts:
+                try:
+                    self.logger.info(f"[{publisher_name}] 组 {group_name} 暂无待发送投稿")
+                except Exception:
+                    pass
                 return True
             submission_ids = [p.submission_id for p in stored_posts]
             db = await get_db()
@@ -508,6 +544,10 @@ class SubmissionService:
                 result = await session.execute(stmt)
                 submissions = result.scalars().all()
             if not submissions:
+                try:
+                    self.logger.info(f"[{publisher_name}] 组 {group_name} 暂无有效投稿记录")
+                except Exception:
+                    pass
                 return True
 
             publisher = self.publishers.get(publisher_name)
@@ -517,9 +557,18 @@ class SubmissionService:
 
             # 只由该发布器发布
             try:
-                await publisher.batch_publish_submissions([s.id for s in submissions])
+                results = await publisher.batch_publish_submissions([s.id for s in submissions])
+                # 统计本轮发布结果
+                try:
+                    total = len(results)
+                    success_count = sum(1 for r in results if r and r.get('success')) if isinstance(results, list) else 0
+                    fail_count = total - success_count
+                    self.logger.info(f"[{publisher_name}] 组 {group_name} 本轮发布：成功 {success_count} / 失败 {fail_count} / 总计 {total}")
+                except Exception:
+                    pass
             except Exception as e:
                 self.logger.error(f"平台 {publisher_name} 批量发布失败: {e}")
+                return False
 
             # 统计各投稿是否已被所有平台成功发布
             try:
@@ -556,7 +605,17 @@ class SubmissionService:
                             await session3.commit()
             except Exception as e:
                 self.logger.error(f"清理已完成暂存记录失败: {e}")
-            return True
+            # 返回是否至少有一条成功（若前面统计失败则保守返回 True 表示流程完成）
+            try:
+                success_any = False
+                try:
+                    # results 作用域在上方 try 块内，防御性处理
+                    success_any = any(r and r.get('success') for r in (results or []))  # type: ignore[name-defined]
+                except Exception:
+                    success_any = True
+                return success_any
+            except Exception:
+                return True
         except Exception as e:
             self.logger.error(f"按平台发布暂存失败: {e}", exc_info=True)
             return False

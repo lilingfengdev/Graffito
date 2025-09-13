@@ -374,6 +374,124 @@ class QzonePublisher(BasePublisher):
             
         return None
 
+    async def batch_publish_submissions(self, submission_ids: List[int], **kwargs) -> List[Dict[str, Any]]:
+        """按组“合并发送”投稿：
+        - 文本采用发布编号区间：#min～#max
+        - 聚合去重 @ 投稿人（非匿名）
+        - 聚合图片并按平台上限分片多次发送
+        - 每次发送记录覆盖全部 submission_ids，便于后续清理暂存
+        返回值与输入等长，统一标记整体是否成功，兼容调用方统计。
+        """
+        try:
+            # 读取投稿（保持与传入ID顺序一致）
+            from core.database import get_db
+            from sqlalchemy import select
+            from core.models import Submission
+            db = await get_db()
+            async with db.get_session() as session:
+                r = await session.execute(select(Submission).where(Submission.id.in_(submission_ids)))
+                subs_all = r.scalars().all()
+            if not subs_all:
+                return [{'success': False, 'error': '没有找到投稿'}]
+            id_to_sub = {int(s.id): s for s in subs_all}
+            submissions: List[Submission] = [id_to_sub[sid] for sid in submission_ids if sid in id_to_sub]
+
+            # 读取平台配置
+            cfg = self._get_platform_config()
+            include_publish_id = bool(cfg.get('include_publish_id', True))
+            include_at_sender = bool(cfg.get('include_at_sender', True))
+            image_source = str(cfg.get('image_source', 'rendered') or 'rendered')
+            max_images = int(cfg.get('max_images_per_post', 9) or 9)
+
+            # 1) 组装文本：#min～#max + @列表
+            header = ""
+            if include_publish_id:
+                nums = [int(s.publish_id) for s in submissions if isinstance(getattr(s, 'publish_id', None), int)]
+                if nums:
+                    try:
+                        nmin, nmax = min(nums), max(nums)
+                        header = f"#{nmin}" if nmin == nmax else f"#{nmin}～{nmax}"
+                    except Exception:
+                        header = f"#{nums[0]}"
+            at_block = ""
+            if include_at_sender:
+                try:
+                    # 聚合@文本，过滤匿名与空
+                    seen: set[str] = set()
+                    at_list: List[str] = []
+                    for s in submissions:
+                        try:
+                            if getattr(s, 'is_anonymous', False):
+                                continue
+                            at = self.format_at(s)
+                            if at and at not in seen:
+                                seen.add(at)
+                                at_list.append(at)
+                        except Exception:
+                            continue
+                    if at_list:
+                        at_block = " ".join(at_list)
+                except Exception:
+                    at_block = ""
+            content_parts = [p for p in [header, at_block] if p]
+            content = " ".join(content_parts).strip()
+
+            # 2) 聚合图片
+            from utils.common import deduplicate_preserve_order
+            images: List[str] = []
+            for s in submissions:
+                try:
+                    if image_source in ('rendered', 'both'):
+                        images.extend((s.rendered_images or []))
+                    if image_source in ('chat', 'both'):
+                        images.extend(self._extract_chat_images(s))
+                except Exception:
+                    continue
+            if images:
+                images = deduplicate_preserve_order(images)
+
+            # 3) 按上限切片发送（允许纯文本发送）
+            chunks: List[List[str]] = []
+            if images:
+                for i in range(0, len(images), max(1, max_images)):
+                    chunks.append(images[i:i + max(1, max_images)])
+            else:
+                chunks.append([])  # 纯文本
+
+            overall_success = False
+            last_account: Optional[str] = None
+            last_error: Optional[str] = None
+            for idx, chunk in enumerate(chunks):
+                try:
+                    publish_kwargs = dict(kwargs)
+                    # 账号选择：默认让 publish() 选择主账号
+                    result = await self.publish(content or "", chunk or None, **publish_kwargs)
+                    last_account = result.get('account_id') or last_account
+                    overall_success = overall_success or bool(result.get('success'))
+                    # 记录发布（覆盖全部 submission_ids）
+                    await self.record_publish(
+                        submission_ids=list(submission_ids),
+                        content=content or "",
+                        images=chunk or [],
+                        result=result,
+                        account_id=publish_kwargs.get('account_id') or last_account,
+                    )
+                    # 轻微间隔，避免接口压力
+                    if idx < len(chunks) - 1:
+                        await asyncio.sleep(1.2)
+                except Exception as e:
+                    last_error = str(e)
+                    self.logger.error(f"聚合发布失败: {e}")
+
+            # 4) 返回与输入等长的统一结果，兼容上层统计（后续以 PublishRecord 做精确清理）
+            res: Dict[str, Any] = {'success': overall_success}
+            if not overall_success and last_error:
+                res['error'] = last_error
+            return [dict(res) for _ in submission_ids]
+        except Exception as e:
+            self.logger.error(f"批量聚合发送异常: {e}")
+            return [{'success': False, 'error': str(e)} for _ in submission_ids]
+
     async def _convert_to_jpeg(self, content: bytes) -> bytes:
         """将任意图片内容转换为JPEG，避免QQ空间WebP等不支持格式"""
         try:

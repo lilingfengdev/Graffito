@@ -142,12 +142,21 @@ class QQReceiver(BaseReceiver):
                 segments: List[Dict[str, Any]] = []
                 try:
                     for seg in event.get_message():
+                        seg_type = getattr(seg, "type", None)
                         try:
                             seg_data = dict(getattr(seg, "data", {}))
                         except Exception:
                             seg_data = {}
+
+                        # 展开 OneBot v11 合并转发：forward 段 -> 调 get_forward_msg
+                        if seg_type == "forward":
+                            expanded = await self._expand_forward_segment(bot, seg_data)
+                            if expanded is not None:
+                                segments.append({"type": "forward", "data": expanded})
+                                continue
+
                         segments.append({
-                            "type": getattr(seg, "type", None),
+                            "type": seg_type,
                             "data": seg_data,
                         })
                 except Exception:
@@ -195,7 +204,6 @@ class QQReceiver(BaseReceiver):
                 # 自动同意
                 if self.config.get("auto_accept_friend", True) and flag:
                     try:
-                        await asyncio.sleep(180)
                         await bot.call_api("set_friend_add_request", flag=flag, approve=True)
                         self.logger.info(f"已同意好友请求: {flag}")
                     except Exception as e:
@@ -261,6 +269,66 @@ class QQReceiver(BaseReceiver):
                     self.logger.error(f"处理通知事件失败: {e}")
         except Exception:
             pass
+
+    async def _expand_forward_segment(self, bot: Bot, seg_data: Dict[str, Any]) -> Optional[Dict[str, Any]]:
+        """展开合并转发段：调用 get_forward_msg，转换成 data.messages 结构。
+
+        目标结构：
+        {
+          "messages": [
+            { "message": [ {"type": ..., "data": {...}}, ... ] },
+            ...
+          ]
+        }
+        """
+        try:
+            forward_id = (
+                seg_data.get("id")
+                or seg_data.get("forward_id")
+                or seg_data.get("res_id")
+                or seg_data.get("resource_id")
+                or seg_data.get("resId")
+            )
+            if not forward_id:
+                return None
+            # OneBot v11: get_forward_msg
+            resp = await bot.call_api("get_forward_msg", id=forward_id)
+            # 兼容不同实现的返回层级
+            ob_msgs = (
+                resp.get("messages")
+                or (resp.get("data") or {}).get("messages")
+                or []
+            )
+            items: List[Dict[str, Any]] = []
+            for ob in ob_msgs:
+                # 有的返回用 content（可能是 list 或 str），有的直接用 message（list）
+                inner: List[Dict[str, Any]] = []
+                content = ob.get("content")
+                if isinstance(content, list):
+                    for c in content:
+                        if isinstance(c, dict) and "type" in c:
+                            ctype = c.get("type")
+                            cdata = c.get("data") if isinstance(c.get("data"), dict) else {}
+                            inner.append({"type": ctype, "data": dict(cdata)})
+                        else:
+                            inner.append({"type": "text", "data": {"text": str(c)}})
+                elif isinstance(content, str):
+                    inner.append({"type": "text", "data": {"text": content}})
+                else:
+                    msg_list = ob.get("message") or []
+                    if isinstance(msg_list, list):
+                        for c in msg_list:
+                            if isinstance(c, dict) and "type" in c:
+                                ctype = c.get("type")
+                                cdata = c.get("data") if isinstance(c.get("data"), dict) else {}
+                                inner.append({"type": ctype, "data": dict(cdata)})
+                            else:
+                                inner.append({"type": "text", "data": {"text": str(c)}})
+                if inner:
+                    items.append({"message": inner})
+            return {"messages": items}
+        except Exception:
+            return None
 
     def _should_process_friend_request(self, user_id: str) -> bool:
         now = time.time()
@@ -561,16 +629,10 @@ class QQReceiver(BaseReceiver):
             # 将未知指令作为快捷回复键交给审核服务 quick_reply 兜底
             result = await self.audit_service.handle_command(submission_id, cmd, operator_id, extra)
 
-            # 审核通过：触发发布并通知投稿者（解耦地调用服务层）
+            # 审核通过：仅通知投稿者；发送留待定时任务处理
             pub_ok = None
             notif_ok = None
             if cmd == "是":
-                try:
-                    if self.submission_service:
-                        pub_ok = await self.submission_service.publish_single_submission(submission_id)
-                except Exception as e:
-                    self.logger.error(f"审核通过后发布失败: {e}")
-                    pub_ok = False
                 try:
                     if self.notification_service:
                         notif_ok = await self.notification_service.send_submission_approved(submission_id)
@@ -591,13 +653,11 @@ class QQReceiver(BaseReceiver):
             msg = result.get("message") if isinstance(result, dict) else str(result)
             if cmd == "是":
                 parts = []
-                if pub_ok is not None:
-                    parts.append("已发布到QQ空间" if pub_ok else "发布到QQ空间失败")
+                # 仅通知投稿者，发布将由定时任务执行
                 if notif_ok is not None:
                     parts.append("已私聊通知投稿者" if notif_ok else "通知投稿者失败")
-                if parts:
-                    extra_line = "；".join(parts)
-                    msg = (msg or "") + ("\n" + extra_line if extra_line else "")
+                extra_line = "；".join(parts + ["已加入暂存区，等待定时发送"]) if parts is not None else "已加入暂存区，等待定时发送"
+                msg = (msg or "") + ("\n" + extra_line if extra_line else "")
             if result.get("need_reaudit"):
                 msg = (msg or "") + "\n请继续发送审核指令"
             await self.send_group_message(group_id, msg or "已处理")
@@ -670,15 +730,7 @@ class QQReceiver(BaseReceiver):
                     if not sub:
                         await self.send_group_message(group_id, "投稿不存在")
                         return True
-                    llm = sub.llm_result or {}
-                    msg = (
-                        f"接收者：{sub.receiver_id}\n"
-                        f"发送者：{sub.sender_id}\n"
-                        f"所属组：{sub.group_name}\n"
-                        f"处理后json：{llm if llm else '无'}\n"
-                        f"状态：{sub.status} 匿名：{ '是' if sub.is_anonymous else '否'}"
-                    )
-                    await self.send_group_message(group_id, msg)
+                    await self.send_group_message(group_id, self._format_submission_info(sub))
                 return True
 
             # 待处理
@@ -728,14 +780,62 @@ class QQReceiver(BaseReceiver):
                 await self.send_group_message(group_id, "已清空暂存区" if ok else "清空暂存区失败")
                 return True
 
-            # 发送暂存区
+            # 发送暂存区 [平台]
             if cmd == "发送暂存区":
                 if not self.submission_service:
                     await self.send_group_message(group_id, "投稿服务未就绪")
                     return True
-                ok = await self.submission_service.publish_stored_posts(group_name)
-                await self.send_group_message(group_id, "投稿已发送" if ok else "发送失败")
-                return True
+                # 可选平台参数：qzone/bilibili/rednote ...
+                target_platform = (arg1 or "").strip().lower() if arg1 else None
+                # 若带平台，则仅该平台按发布器路径发送；否则对所有已注册发布器发送
+                try:
+                    from core.plugin import plugin_manager
+                    publishers = list(plugin_manager.publishers.values())
+                except Exception:
+                    publishers = []
+                if target_platform:
+                    # 按平台键匹配发布器（优先用 platform.value == 平台键）
+                    target_pub_names = []
+                    for name, pub in plugin_manager.publishers.items():  # type: ignore[attr-defined]
+                        try:
+                            if str(getattr(pub, 'platform', None).value) == target_platform:
+                                target_pub_names.append(name)
+                        except Exception:
+                            continue
+                    if not target_pub_names:
+                        await self.send_group_message(group_id, f"未找到平台：{target_platform}")
+                        return True
+                    all_ok = True
+                    for pub_name in target_pub_names:
+                        try:
+                            ok = await self.submission_service.publish_stored_posts_for_publisher(group_name, pub_name)
+                            all_ok = all_ok and bool(ok)
+                        except Exception:
+                            all_ok = False
+                    await self.send_group_message(group_id, (f"[{target_platform}] 投稿已发送" if all_ok else f"[{target_platform}] 发送失败"))
+                    return True
+                else:
+                    # 无平台参数：对所有已注册发布器逐一发送
+                    if not publishers:
+                        await self.send_group_message(group_id, "没有可用的发送器")
+                        return True
+                    results = []
+                    all_ok = True
+                    for pub in publishers:
+                        try:
+                            ok = await self.submission_service.publish_stored_posts_for_publisher(group_name, pub.name)
+                            results.append((pub.name, bool(ok)))
+                            all_ok = all_ok and bool(ok)
+                        except Exception:
+                            results.append((pub.name, False))
+                            all_ok = False
+                    # 总结消息
+                    parts = []
+                    for name, ok in results:
+                        parts.append(f"{name}:{'OK' if ok else 'FAIL'}")
+                    msg = "；".join(parts) if parts else ("无可用发送器" if not publishers else "未知")
+                    await self.send_group_message(group_id, ("投稿已发送\n" + msg) if all_ok else ("发送完成（部分失败）\n" + msg))
+                    return True
 
             # 自检
             if cmd == "自检":
@@ -1039,24 +1139,86 @@ class QQReceiver(BaseReceiver):
             qrs = (group.quick_replies if group else {}) or {}
             if not qrs:
                 return True, "当前账户组未配置快捷回复"
-            lines = ["当前账户组快捷回复列表："]
+            lines = ["== 快捷回复列表 =="]
             for k, v in qrs.items():
-                lines.append(f"指令: {k}\n内容: {v}")
+                vv = (v or "")
+                if len(vv) > 120:
+                    vv = vv[:120] + "…"
+                lines.append(f"- {k}：{vv}")
             return True, "\n".join(lines)
         except Exception as e:
             return False, f"获取快捷回复失败: {e}"
 
     def _build_help_text(self) -> str:
         return (
-            "全局指令:\n"
-            "语法: @本账号 指令\n\n"
-            "调出 <编号>\n信息 <编号>\n待处理\n删除 <编号或投稿ID>\n删除待处理\n删除暂存区\n发送暂存区\n"
-            "取消拉黑 <QQ>\n列出拉黑\n设定编号 <数字>\n快捷回复 [添加 指令=内容|删除 指令]\n自检\n\n"
-            "审核指令:\n语法: @本账号 <内部编号> 指令 或 回复审核消息 指令\n"
-            "是/否/匿/等/删/拒/立即/刷新/重渲染/扩列审查/评论 <内容>/回复 <内容>/展示/拉黑 [理由]\n"
-            "也可使用已配置的快捷回复键\n\n"
-            "私聊指令:\n#删除 <编号或投稿ID>（仅能删除自己的投稿）\n#评论 <编号或投稿ID> <内容>"
+            "== 指令帮助 ==\n"
+            "语法：@本账号 指令\n\n"
+            "[全局]\n"
+            "- 调出 <编号>\n"
+            "- 信息 <编号>\n"
+            "- 待处理\n"
+            "- 删除 <编号或投稿ID>\n"
+            "- 删除待处理\n"
+            "- 删除暂存区\n"
+            "- 发送暂存区 [平台]\n"
+            "- 设定编号 <数字>\n"
+            "- 快捷回复 [添加 指令=内容|删除 指令]\n"
+            "- 取消拉黑 <QQ>\n"
+            "- 列出拉黑\n"
+            "- 自检\n\n"
+            "[审核]（在管理群，仅管理员）\n"
+            "语法：@本账号 <内部编号> 指令 或 回复审核消息 指令\n"
+            "可用：是/否/匿/等/删/拒/立即/刷新/重渲染/扩列审查/评论 <内容>/回复 <内容>/展示/拉黑 [理由]\n"
+            "说明：'是' 加入暂存区等待定时发送；'立即' 立刻发送当前条\n\n"
+            "[私聊]\n"
+            "#删除 <编号或投稿ID>（仅能删除自己的投稿）\n"
+            "#评论 <编号或投稿ID> <内容>\n"
+            "提示：可配置快捷回复，详见“快捷回复”"
         )
+
+    def _format_submission_info(self, sub) -> str:
+        """将投稿信息格式化为更易读的文本。"""
+        try:
+            import json
+
+            def yn(flag: bool) -> str:
+                return "是" if flag else "否"
+
+            llm = getattr(sub, "llm_result", None) or {}
+            if llm:
+                llm_text = json.dumps(llm, ensure_ascii=False, separators=(",", ":"))
+                if len(llm_text) > 600:
+                    llm_text = llm_text[:600] + "…"
+            else:
+                llm_text = "无"
+
+            created = sub.created_at.strftime("%Y-%m-%d %H:%M:%S") if getattr(sub, "created_at", None) else "-"
+            updated = sub.updated_at.strftime("%Y-%m-%d %H:%M:%S") if getattr(sub, "updated_at", None) else "-"
+            published = sub.published_at.strftime("%Y-%m-%d %H:%M:%S") if getattr(sub, "published_at", None) else "-"
+
+            nickname = getattr(sub, "sender_nickname", None)
+            sender_line = f"发送者：{sub.sender_id}" + (f"（{nickname}）" if nickname else "")
+
+            lines = [
+                "== 投稿信息 ==",
+                f"投稿ID：{sub.id}",
+                f"内部编号：{getattr(sub, 'internal_id', None) or '-'}    发布编号：{getattr(sub, 'publish_id', None) or '-'}",
+                f"状态：{sub.status}    匿名：{yn(getattr(sub, 'is_anonymous', False))}    安全：{yn(getattr(sub, 'is_safe', True))}    完整：{yn(getattr(sub, 'is_complete', False))}",
+                f"所属组：{getattr(sub, 'group_name', None) or '-'}",
+                sender_line,
+                f"接收者：{getattr(sub, 'receiver_id', None) or '-'}",
+                f"创建时间：{created}    更新时间：{updated}    发布时间：{published}",
+                f"LLM结果：{llm_text}",
+            ]
+            return "\n".join(lines)
+        except Exception:
+            return (
+                f"投稿ID：{getattr(sub,'id','-')}\n"
+                f"接收者：{getattr(sub,'receiver_id','-')}\n"
+                f"发送者：{getattr(sub,'sender_id','-')}\n"
+                f"所属组：{getattr(sub,'group_name','-')}\n"
+                f"状态：{'未知' if not getattr(sub,'status',None) else sub.status}"
+            )
 
     async def _resolve_submission_id_by_any(self, raw_id: str) -> Optional[int]:
         """根据用户提供的编号解析到内部 Submission.id。

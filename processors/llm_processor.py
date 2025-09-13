@@ -1,11 +1,25 @@
 """LLM处理器"""
-import json
+import orjson
 import asyncio
-from typing import Dict, Any, List, Optional
-from loguru import logger
-import httpx
+from typing import Dict, Any, List, Optional, Tuple
+import os
+import time
+import ssl
 import dashscope
 from dashscope import Generation, MultiModalConversation
+import urllib3
+
+urllib3.disable_warnings(urllib3.exceptions.InsecureRequestWarning)
+ssl._create_default_https_context = ssl._create_unverified_context
+
+try:
+    from PIL import Image, ImageFile, UnidentifiedImageError, ImageOps
+
+    ImageFile.LOAD_TRUNCATED_IMAGES = True
+except Exception:
+    Image = None
+    UnidentifiedImageError = Exception
+    ImageOps = None
 
 from config import get_settings
 from core.plugin import ProcessorPlugin
@@ -13,305 +27,499 @@ from core.plugin import ProcessorPlugin
 
 class LLMProcessor(ProcessorPlugin):
     """LLM处理器，用于处理投稿内容"""
-    
+
     def __init__(self):
         settings = get_settings()
         config = settings.llm.dict() if hasattr(settings.llm, 'dict') else settings.llm.__dict__
         super().__init__("llm_processor", config)
-        
+
         # 设置API密钥
         dashscope.api_key = self.config.get('api_key')
         self.text_model = self.config.get('text_model', 'qwen-plus-latest')
         self.vision_model = self.config.get('vision_model', 'qwen-vl-max-latest')
         self.timeout = self.config.get('timeout', 30)
         self.max_retry = self.config.get('max_retry', 3)
-        
+
+        self.per_type_rules = {
+            "image": {
+                "remove_in_data": ["file_id", "file_size"],
+                "remove_msg": ["summary"],
+                "remove_event": [],
+                "hide_from_LM_only": ["data"]
+            },
+            "video": {
+                "remove_in_data": ["file_id", "file_size"],
+                "remove_msg": [],
+                "remove_event": [],
+                "hide_from_LM_only": ["data.file", "data.file_id", "data.file_size"]
+            },
+            "audio": {
+                "remove_in_data": ["file_id", "file_size"],
+                "remove_msg": [],
+                "remove_event": [],
+                "hide_from_LM_only": ["data.file", "data.file_id", "data.file_size"]
+            },
+            "json": {
+                "remove_in_data": [],
+                "remove_msg": [],
+                "remove_event": [],
+                "hide_from_LM_only": []
+            },
+            "text": {
+                "remove_in_data": [],
+                "remove_msg": [],
+                "remove_event": [],
+                "hide_from_LM_only": []
+            },
+            "file": {
+                "remove_in_data": ["file_id"],
+                "remove_msg": [],
+                "remove_event": [],
+                "hide_from_LM_only": ["data.file_size"]
+            },
+            "poke": {
+                "remove_in_data": [],
+                "remove_msg": [],
+                "remove_event": [],
+                "hide_from_LM_only": ["data"]
+            },
+            "forward": {
+                "remove_in_data": ["id"],
+                "remove_msg": [],
+                "remove_event": [],
+                "hide_from_LM_only": []
+            },
+        }
+        self.default_rules = {
+            "remove_in_data": ["file", "file_id", "file_size"],
+            "remove_msg": [],
+            "remove_event": [],
+            "hide_from_LM_only": []
+        }
+        self.global_event_rules = {
+            "remove_event": ["file", "file_id", "file_size"],
+            "hide_from_LM_only": []
+        }
+
     async def initialize(self):
         """初始化处理器"""
         self.logger.info("LLM处理器初始化完成")
-        
+
     async def shutdown(self):
         """关闭处理器"""
         pass
-        
+
     async def process(self, data: Dict[str, Any]) -> Dict[str, Any]:
-        """处理数据"""
-        # 这是入口方法，根据数据类型选择不同的处理方式
-        messages = data.get('messages', [])
-        
-        if not messages:
+        """处理数据（对齐 sendtoLM.py 的流程：图片处理 -> 裁剪 -> 文本LLM分组 -> 生成最终消息集）"""
+        messages_root = data.get('messages', [])
+        if not isinstance(messages_root, List) or not messages_root:
             return data
-            
-        # 检查是否有图片
-        has_images = any(
-            msg.get('type') == 'image' or 
-            (msg.get('message') and any(m.get('type') == 'image' for m in msg.get('message', [])))
-            for msg in messages
-        )
-        
-        if has_images:
-            # 使用视觉模型
-            result = await self.process_with_vision(messages)
-        else:
-            # 使用文本模型
-            result = await self.process_text_only(messages)
-            
-        data['llm_result'] = result
-        return data
-        
-    async def process_text_only(self, messages: List[Dict[str, Any]]) -> Dict[str, Any]:
-        """处理纯文本投稿"""
-        # 提取文本内容
-        text_content = self.extract_text(messages)
-        
-        if not text_content:
-            return {
+
+        # 1) 处理图片（压缩/安全/描述）
+        pictures_safe = True
+        try:
+            pictures_safe = await self._process_images_in_messages(messages_root)
+        except Exception as e:
+            self.logger.error(f"图片处理失败: {e}")
+
+        # 2) 生成 LM 输入（按规则隐藏/裁剪）
+        lm_messages, origin_messages = self._make_lm_sanitized_and_original({"messages": messages_root})
+        lm_input = {"notregular": data.get("notregular"), "messages": lm_messages}
+        input_content = orjson.dumps(lm_input, option=orjson.OPT_INDENT_2 | orjson.OPT_NON_STR_KEYS).decode("utf-8")
+        timenow = time.time()
+
+        prompt = f"""当前时间 {timenow}
+以下内容是一组按时间顺序排列的校园墙投稿聊天记录：
+
+{input_content}
+
+请根据以下标准，提取出这些消息中属于**最后一组投稿**的信息：
+
+### 分组标准
+- 通常以关键词"在吗"、"投稿"、"墙"等开始，但这些关键词可能出现在中途或根本不出现。
+- 属于同一组投稿的消息，时间间隔一般较近（通常小于 600 秒），但也存在例外。
+- 投稿内容可能包含文本、图片（image）、视频（video）、文件（file）、戳一戳（poke）、合并转发的聊天记录（forward）等多种类型。
+- 大多数情况下该记录只包含一组投稿，这种情况下认为所有消息都在组中，偶尔可能有多组，需要你自己判断。
+- 信息只可能包含多个完整的投稿，户可能出现半个投稿+一个投稿的情况，如果真的出现了，说明你判断错误，前面那个"半个投稿"，是后面投稿的一部分。
+
+### 你需要给出的判断
+
+- `needpriv`（是否需要匿名）  
+- 如果信息中明确表达"匿名"意图或使用谐音字（如："匿"、"腻"、"拟"、"逆"、"🐎"、"🐴"、"马" 等），则为 `true`。  
+- 当信息仅包含单个含义模糊的字或 emoji 时，也应考虑匿名的可能性。  
+- 否则为 `false`。
+- 如果用户明确说了不匿(也可能是不腻，不码，不马之类的谐音内容)，那么一定为`false`
+
+- `safemsg`（投稿是否安全）  
+- 投稿若包含攻击性言论、辱骂内容、敏感政治信息，应判定为 `false`。  
+- 否则为 `true`。
+
+- `isover`（投稿是否完整）  
+- 若投稿者明确表示"发完了"、"没了"、"完毕"等；或投稿语义完整且最后一条消息距离当前时间较远，则为 `true`。  
+- 若存在"没发完"之类的未结束迹象，或最后消息距当前时间较近且不明确，则为 `false`。
+
+- `notregular`（投稿是否异常）  
+- 若投稿者明确表示"不合常规"或你主观判断此内容异常，则为 `true`。  
+- 否则为 `false`。
+
+### 输出格式
+
+严格按照下面的 JSON 格式输出，仅填写最后一组投稿的 `message_id`，不要输出任何额外的文字或说明：
+
+```json
+{{
+"needpriv": "true" 或 "false",
+"safemsg": "true" 或 "false",
+"isover": "true" 或 "false",
+"notregular": "true" 或 "false",
+"messages": [
+    "message_id1",
+    "message_id2",
+    ...
+]
+}}
+```
+"""
+
+        # 3) 调用文本 LLM（一次性 JSON 返回）
+        final_obj = await self._call_llm_json(prompt)
+        if not isinstance(final_obj, dict):
+            # 失败时回退默认
+            final_obj = {
                 'needpriv': 'false',
-                'safemsg': 'true',
+                'safemsg': 'true' if pictures_safe else 'false',
                 'isover': 'true',
                 'notregular': 'false',
-                'messages': messages
+                'messages': []
             }
-            
-        # 构建提示词
-        prompt = self.build_text_prompt(text_content)
-        
-        # 调用LLM
-        for attempt in range(self.max_retry):
-            try:
-                response = await self.call_text_llm(prompt)
-                result = self.parse_llm_response(response)
-                result['messages'] = messages
-                return result
-            except Exception as e:
-                self.logger.error(f"LLM调用失败 (尝试 {attempt+1}/{self.max_retry}): {e}")
-                if attempt == self.max_retry - 1:
-                    # 返回默认结果
-                    return {
-                        'needpriv': 'false',
-                        'safemsg': 'true',
-                        'isover': 'true',
-                        'notregular': 'false',
-                        'messages': messages
-                    }
-                await asyncio.sleep(1)
-                
-    async def process_with_vision(self, messages: List[Dict[str, Any]]) -> Dict[str, Any]:
-        """处理包含图片的投稿"""
-        # 提取文本和图片
-        text_content = self.extract_text(messages)
-        images = self.extract_images(messages)
-        
-        # 构建多模态提示
-        prompt = self.build_vision_prompt(text_content, images)
-        
-        # 调用视觉LLM
-        for attempt in range(self.max_retry):
-            try:
-                response = await self.call_vision_llm(prompt, images)
-                result = self.parse_llm_response(response)
-                result['messages'] = messages
-                return result
-            except Exception as e:
-                self.logger.error(f"视觉LLM调用失败 (尝试 {attempt+1}/{self.max_retry}): {e}")
-                if attempt == self.max_retry - 1:
-                    return {
-                        'needpriv': 'false',
-                        'safemsg': 'true',
-                        'isover': 'true',
-                        'notregular': 'false',
-                        'messages': messages
-                    }
-                await asyncio.sleep(1)
-                
-    def extract_text(self, messages: List[Dict[str, Any]]) -> str:
-        """提取消息中的文本"""
-        texts = []
-        
-        for msg in messages:
-            if msg.get('type') == 'text':
-                texts.append(msg.get('data', {}).get('text', ''))
-            elif msg.get('message'):
-                for m in msg.get('message', []):
-                    if m.get('type') == 'text':
-                        texts.append(m.get('data', {}).get('text', ''))
-                        
-        return '\n'.join(texts)
-        
-    def extract_images(self, messages: List[Dict[str, Any]]) -> List[str]:
-        """提取消息中的图片URL"""
-        images = []
-        
-        for msg in messages:
-            if msg.get('type') == 'image':
-                url = msg.get('data', {}).get('url')
-                if url:
-                    images.append(url)
-            elif msg.get('message'):
-                for m in msg.get('message', []):
-                    if m.get('type') == 'image':
-                        url = m.get('data', {}).get('url')
-                        if url:
-                            images.append(url)
-                            
-        return images
-        
-    def build_text_prompt(self, text: str) -> str:
-        """构建文本处理提示词"""
-        return f"""你是一个校园墙投稿处理助手。请分析以下投稿内容，并返回JSON格式的结果。
 
-投稿内容：
-{text}
+        origin_lookup: Dict[str, Dict[str, Any]] = {}
+        for it in origin_messages:
+            mid = it.get('message_id')
+            if mid is not None:
+                origin_lookup[str(mid)] = it
 
-请分析并返回以下信息（JSON格式）：
-1. needpriv: 是否需要匿名（"true"或"false"）。如果内容包含"匿名"、"匿"、"不要暴露"等词汇，或涉及隐私敏感话题，返回"true"
-2. safemsg: 内容是否安全（"true"或"false"）。如果包含不当言论、人身攻击、违法信息等，返回"false"
-3. isover: 投稿是否完整（"true"或"false"）。如果看起来话没说完或明显未结束，返回"false"
-4. segments: 内容分段（数组）。将长内容合理分段，每段不超过200字
+        final_list: List[Dict[str, Any]] = []
+        for mid in final_obj.get('messages', []) or []:
+            key = str(mid)
+            if key in origin_lookup:
+                final_list.append(self._finalize_item_for_output(origin_lookup[key]))
 
-示例返回格式：
-{{
-    "needpriv": "false",
-    "safemsg": "true", 
-    "isover": "true",
-    "segments": ["第一段内容", "第二段内容"]
-}}
+        if not final_list:
+            # 如果没有选中，默认全部
+            final_list = [self._finalize_item_for_output(it) for it in origin_messages]
 
-请直接返回JSON，不要有其他说明。"""
-
-    def build_vision_prompt(self, text: str, images: List[str]) -> str:
-        """构建视觉处理提示词"""
-        image_count = len(images)
-        return f"""你是一个校园墙投稿处理助手。请分析以下包含{image_count}张图片的投稿内容。
-
-文字内容：
-{text if text else "（无文字描述）"}
-
-请分析文字和图片内容，返回JSON格式的结果：
-1. needpriv: 是否需要匿名（"true"或"false"）
-2. safemsg: 内容和图片是否安全（"true"或"false"）
-3. isover: 投稿是否完整（"true"或"false"）
-4. image_desc: 图片内容描述（简要说明图片展示了什么）
-5. segments: 内容分段（如有文字）
-
-请确保图片内容符合校园墙发布规范，不包含不当内容。
-直接返回JSON格式结果。"""
-
-    async def call_text_llm(self, prompt: str) -> str:
-        """调用文本LLM"""
-        try:
-            response = Generation.call(
-                model=self.text_model,
-                prompt=prompt,
-                temperature=0.7,
-                top_p=0.8,
-                max_tokens=1000
-            )
-            
-            if response.status_code == 200:
-                return response.output.text
+        # 规范化布尔字段
+        for k in ['needpriv', 'safemsg', 'isover', 'notregular']:
+            v = final_obj.get(k)
+            if isinstance(v, bool):
+                final_obj[k] = 'true' if v else 'false'
+            elif isinstance(v, str):
+                final_obj[k] = 'true' if v.strip().lower() == 'true' else 'false'
             else:
-                raise Exception(f"LLM调用失败: {response.message}")
-                
-        except Exception as e:
-            self.logger.error(f"文本LLM调用异常: {e}")
-            raise
-            
-    async def call_vision_llm(self, prompt: str, images: List[str]) -> str:
-        """调用视觉LLM"""
+                final_obj[k] = 'false' if k in ('needpriv', 'notregular') else 'true'
+
+        if not pictures_safe:
+            final_obj['safemsg'] = 'false'
+
+        final_obj['messages'] = final_list
+
+        # 覆盖 data.messages 以用于后续渲染
+        data['messages'] = final_list
+        # 生成文本段落供后续使用（如渲染/发布说明），上限每段200字
         try:
-            # 构建消息内容
-            content = [{"text": prompt}]
-            
-            # 添加图片
-            for img_url in images[:9]:  # 最多9张图片
-                if img_url.startswith('http'):
-                    content.append({"image": img_url})
-                elif img_url.startswith('file://'):
-                    # 本地文件需要特殊处理
-                    file_path = img_url.replace('file://', '')
-                    content.append({"image": f"file://{file_path}"})
-                    
-            messages = [{
-                'role': 'user',
-                'content': content
-            }]
-            
+            segments = self._extract_text_segments_from_messages(final_list, limit=200)
+            if segments:
+                final_obj['segments'] = segments
+        except Exception:
+            pass
+        data['llm_result'] = final_obj
+        data['is_anonymous'] = final_obj.get('needpriv') == 'true'
+        return data
+
+
+    # ==================== 图片处理 ====================
+    async def _process_images_in_messages(self, messages_root: List[Dict[str, Any]]) -> bool:
+        """压缩本地图片、进行安全检查并为图片生成描述，返回全局安全性。"""
+        if Image is None:
+            return True
+        overall_safe = True
+        for msg in self._iter_all_message_nodes(messages_root):
+            if not isinstance(msg, dict) or msg.get('type') != 'image':
+                continue
+            data = msg.get('data') or {}
+            url = data.get('url') or data.get('file') or ''
+            if not isinstance(url, str):
+                continue
+            if url.startswith('file://'):
+                image_path = url[7:]
+            else:
+                # 非本地文件不处理压缩与安全
+                continue
+            try:
+                with Image.open(image_path) as im:
+                    im.thumbnail((2048, 2048))
+                    im.save(image_path)
+            except Exception as e:
+                self.logger.warning(f"压缩失败: {image_path}, {e}")
+            try:
+                is_safe, description = self._process_image_safety_and_description(image_path)
+                if not is_safe:
+                    overall_safe = False
+                if description:
+                    msg['describe'] = description.strip()
+            except Exception as e:
+                self.logger.warning(f"安全/描述失败: {image_path}, {e}")
+        return overall_safe
+
+
+    # _compress_image 已移除：直接在 _process_images_in_messages 中使用 Pillow 进行缩放与保存
+
+    def _process_image_safety_and_description(self, path: str) -> Tuple[bool, str]:
+        if not path or not os.path.exists(path):
+            return True, ""
+        messages = [{
+            'role': 'user',
+            'content': [
+                {'image': 'file://' + os.path.abspath(path)},
+                {'text': (
+                    '请分析这张图片并回答以下两个问题：\n\n'
+                    '1. 安全性检查：这张图片是否含有暴力、血腥、色情、政治敏感，人生攻击或其他敏感内容(发到国内平台，被举报后会导致处罚的都算)？如果安全请回答"safe"，否则回答"unsafe"。\n\n'
+                    '2. 图片描述：请详细描述这张图片的内容，包括图片中的主要元素、场景、颜色、风格等。描述要准确、详细，但不要过于冗长。\n\n'
+                    '请按以下格式回答：\n安全性：[safe/unsafe]\n描述：[详细描述内容]'
+                )}
+            ]
+        }]
+        try:
             response = MultiModalConversation.call(
                 model=self.vision_model,
                 messages=messages,
-                temperature=0.7,
-                top_p=0.8,
-                max_tokens=1000
+                api_key=self.config.get('api_key'),
+                timeout=self.timeout
             )
-            
-            if response.status_code == 200:
+            if getattr(response, 'status_code', None) == 200:
                 content = response.output.choices[0].message.content
-                # content 可能是 list[{'text': '...'}, {'image': '...'}]
                 if isinstance(content, list):
-                    texts = []
-                    for item in content:
-                        try:
-                            if isinstance(item, dict) and 'text' in item:
-                                texts.append(str(item.get('text') or ''))
-                        except Exception:
+                    content = " ".join(map(str, content))
+                txt = str(content or "")
+                is_safe = 'unsafe' not in txt.lower()
+                description = ""
+                idx = txt.find('描述：')
+                if idx != -1:
+                    description = txt[idx + 3:].strip()
+                else:
+                    # 退化提取第一行非 safe/unsafe 的文本
+                    for line in txt.splitlines():
+                        l = line.strip()
+                        if not l:
                             continue
-                    if texts:
-                        return "\n".join(texts)
-                    # 若没有 text 段，回退为 JSON 文本
-                    import json as _json
-                    try:
-                        return _json.dumps(content, ensure_ascii=False)
-                    except Exception:
-                        return str(content)
-                # 若已是字符串
-                if isinstance(content, str):
-                    return content
-                # 其他类型回退
-                return str(content)
+                        lower = l.lower()
+                        if 'safe' in lower or 'unsafe' in lower or l.startswith('安全性'):
+                            continue
+                        description = l
+                        break
+                return is_safe, description
+            if getattr(response, 'status_code', None) == 400:
+                return False, ""
+            return True, ""
+        except Exception:
+            return True, ""
+
+    def _iter_all_message_nodes(self, messages_root: List[Dict[str, Any]]):
+        for item in messages_root:
+            if not isinstance(item, dict):
+                continue
+            if 'message' in item and isinstance(item['message'], list):
+                for msg in item['message']:
+                    if isinstance(msg, dict):
+                        yield msg
             else:
-                raise Exception(f"视觉LLM调用失败: {response.message}")
-                
-        except Exception as e:
-            self.logger.error(f"视觉LLM调用异常: {e}")
-            raise
-            
-    def parse_llm_response(self, response: Any) -> Dict[str, Any]:
-        """解析LLM响应"""
+                if 'type' in item:
+                    yield item
+
+    def _extract_text_segments_from_messages(self, items: List[Dict[str, Any]], limit: int = 200) -> List[str]:
+        """从最终消息中提取可读文本段：
+        - 聚合文本消息内容
+        - 对图片带有 describe 的，作为一个段落
+        - 每段不超过 limit 字
+        """
+
+        def _walk_and_collect_text(msgs: List[Dict[str, Any]]) -> List[str]:
+            out: List[str] = []
+            for m in msgs:
+                if not isinstance(m, dict):
+                    continue
+                mtype = m.get('type')
+                if mtype == 'text':
+                    txt = (m.get('data') or {}).get('text')
+                    if isinstance(txt, str) and txt.strip():
+                        out.append(txt.strip())
+                elif mtype == 'image':
+                    desc = m.get('describe')
+                    if isinstance(desc, str) and desc.strip():
+                        out.append(desc.strip())
+                elif 'message' in m and isinstance(m['message'], list):
+                    out.extend(_walk_and_collect_text(m['message']))
+            return out
+
+        collected: List[str] = []
+        # items 为事件列表（每个事件可能包含 message 数组）
+        for it in items:
+            if not isinstance(it, dict):
+                continue
+            if 'message' in it and isinstance(it['message'], list):
+                collected.extend(_walk_and_collect_text(it['message']))
+            else:
+                # 兼容直接消息
+                collected.extend(_walk_and_collect_text([it]))
+
+        # 合并并按长度切段
+        merged = '\n'.join(collected)
+        merged = merged.strip()
+        if not merged:
+            return []
+        # 简单按 limit 切分
+        segments: List[str] = []
+        start = 0
+        while start < len(merged):
+            end = min(len(merged), start + max(1, int(limit)))
+            segments.append(merged[start:end])
+            start = end
+        return segments
+
+    # ==================== LM 输入裁剪/恢复 ====================
+    def _pop_path(self, obj: Dict[str, Any], dotted: str):
+        if not dotted:
+            return
+        parts = dotted.split('.')
+        cur = obj
+        for i, k in enumerate(parts):
+            if not isinstance(cur, dict) or k not in cur:
+                return
+            if i == len(parts) - 1:
+                cur.pop(k, None)
+            else:
+                cur = cur.get(k)
+
+    def _remove_many(self, obj: Dict[str, Any], paths: List[str]):
+        for p in paths:
+            self._pop_path(obj, p)
+
+    def _clean_forward_content(self, content_list: Any) -> Any:
+        if not isinstance(content_list, list):
+            return content_list
+        cleaned_content: List[Any] = []
+        for item in content_list:
+            if not isinstance(item, dict):
+                cleaned_content.append(item)
+                continue
+            cleaned_item: Dict[str, Any] = {}
+            if "message" in item and isinstance(item["message"], list):
+                cleaned_item["message"] = []
+                for msg in item["message"]:
+                    if isinstance(msg, dict):
+                        cleaned_msg = msg.copy()
+                        if msg.get("type") == "forward" and "data" in msg:
+                            cleaned_msg["data"] = msg["data"].copy()
+                            if "content" in msg["data"]:
+                                cleaned_msg["data"]["content"] = self._clean_forward_content(msg["data"]["content"])
+                            elif "messages" in msg["data"]:
+                                cleaned_msg["data"]["messages"] = self._clean_forward_content(msg["data"]["messages"])
+                        cleaned_item["message"].append(cleaned_msg)
+                    else:
+                        cleaned_item["message"].append(msg)
+            if cleaned_item:
+                cleaned_content.append(cleaned_item)
+        return cleaned_content
+
+    def _make_lm_sanitized_and_original(self, data_root: Dict[str, Any]) -> Tuple[
+        List[Dict[str, Any]], List[Dict[str, Any]]]:
+        origin_messages = orjson.loads(orjson.dumps(data_root.get("messages", []) ))
+        lm_messages = orjson.loads(orjson.dumps(origin_messages))
+        for item in lm_messages:
+            self._remove_many(item, self.global_event_rules.get('remove_event', []))
+            self._remove_many(item, self.global_event_rules.get('hide_from_LM_only', []))
+            if "message" in item and isinstance(item["message"], list):
+                for msg in item["message"]:
+                    mtype = msg.get("type")
+                    rules = self.per_type_rules.get(mtype, self.default_rules)
+                    if mtype == "forward" and "data" in msg:
+                        if "content" in msg["data"]:
+                            msg["data"]["content"] = self._clean_forward_content(msg["data"]["content"])
+                        elif "messages" in msg["data"]:
+                            msg["data"]["messages"] = self._clean_forward_content(msg["data"]["messages"])
+                    self._remove_many(msg, rules.get('remove_msg', []))
+                    self._remove_many(msg, rules.get('hide_from_LM_only', []))
+                    if isinstance(msg.get("data"), dict):
+                        self._remove_many(msg, [f"data.{k}" for k in rules.get('remove_in_data', [])])
+        return lm_messages, origin_messages
+
+    def _finalize_item_for_output(self, item_origin: Dict[str, Any]) -> Dict[str, Any]:
+        out_item = orjson.loads(orjson.dumps(item_origin))
+        for key in self.global_event_rules.get('remove_event', []):
+            if key not in self.global_event_rules.get('hide_from_LM_only', []):
+                self._pop_path(out_item, key)
+        if "message" in out_item and isinstance(out_item["message"], list):
+            for msg in out_item["message"]:
+                mtype = msg.get("type")
+                rules = self.per_type_rules.get(mtype, self.default_rules)
+                hide_set = set(rules.get('hide_from_LM_only', []))
+                for p in rules.get('remove_msg', []):
+                    if p not in hide_set:
+                        self._pop_path(msg, p)
+                if isinstance(msg.get('data'), dict):
+                    for k in rules.get('remove_in_data', []):
+                        dotted = f"data.{k}"
+                        if dotted not in hide_set:
+                            self._pop_path(msg, dotted)
+        return out_item
+
+    # ==================== 文本模型：一次性 JSON 调用 ====================
+    async def _call_llm_json(self, prompt: str) -> Optional[Dict[str, Any]]:
+        if not prompt:
+            return None
+        messages = [
+            {'role': 'system', 'content': '你是一个校园墙投稿管理员，只能返回规范 JSON 对象'},
+            {'role': 'user', 'content': prompt}
+        ]
         try:
-            # 统一将响应转换为字符串
-            if not isinstance(response, str):
-                try:
-                    import json as _json
-                    response = _json.dumps(response, ensure_ascii=False)
-                except Exception:
-                    response = str(response)
-            # 尝试提取JSON
-            import re
-            json_match = re.search(r'\{.*\}', response, re.DOTALL)
-            if json_match:
-                result = json.loads(json_match.group())
-            else:
-                result = json.loads(response)
-                
-            # 确保必要字段存在
-            result.setdefault('needpriv', 'false')
-            result.setdefault('safemsg', 'true')
-            result.setdefault('isover', 'true')
-            result.setdefault('notregular', 'false')
-            
-            # 将布尔值转换为字符串
-            for key in ['needpriv', 'safemsg', 'isover', 'notregular']:
-                if isinstance(result.get(key), bool):
-                    result[key] = 'true' if result[key] else 'false'
-                    
-            return result
-            
-        except Exception as e:
-            self.logger.error(f"解析LLM响应失败: {e}, 原始响应: {response}")
-            return {
-                'needpriv': 'false',
-                'safemsg': 'true',
-                'isover': 'true',
-                'notregular': 'false'
-            }
+            response = Generation.call(
+                model=self.text_model,
+                messages=messages,
+                # 尝试强制 JSON 对象返回；如果 SDK 不支持，则由提示词保证
+                response_format={'type': 'json_object'},  # 兼容新版 SDK
+                result_format='message',
+                stream=False,
+                max_tokens=2048,
+                temperature=0.3,
+                repetition_penalty=1.0,
+                timeout=self.timeout
+            )
+        except Exception as exc:
+            self.logger.error(f"调用文本模型失败: {exc}")
+            return None
+
+        try:
+            if getattr(response, 'status_code', None) != 200:
+                return None
+            # 优先使用 output_text
+            raw_text = getattr(response, 'output_text', None)
+            if not raw_text:
+                # 兼容 message 结构
+                content = response.output.choices[0].message.content
+                if isinstance(content, list):
+                    parts: List[str] = []
+                    for c in content:
+                        # 兼容 {"text": "..."} 或 直接字符串
+                        if isinstance(c, dict) and 'text' in c:
+                            parts.append(str(c['text']))
+                        else:
+                            parts.append(str(c))
+                    raw_text = ''.join(parts)
+                else:
+                    raw_text = str(content)
+            # 直接尝试解析 JSON
+            raw_text = raw_text.strip()
+            return orjson.loads(raw_text)
+        except Exception:
+            return None

@@ -1,14 +1,17 @@
 """HTML渲染器"""
-import json
-import asyncio
+import orjson as json
 from pathlib import Path
 from typing import Dict, Any, List, Optional
 from datetime import datetime
-from loguru import logger
 from jinja2 import Template
 import re
 import base64
-import re
+from io import BytesIO
+from urllib.parse import quote
+from linkify_it import LinkifyIt
+from humanfriendly import format_size
+
+import qrcode
 
 from core.plugin import ProcessorPlugin
 
@@ -19,6 +22,8 @@ class HTMLRenderer(ProcessorPlugin):
     def __init__(self):
         super().__init__("html_renderer", {})
         self.template = self.load_template()
+        # 初始化 LinkifyIt
+        self._linkify = LinkifyIt()
         
     async def initialize(self):
         """初始化渲染器"""
@@ -143,7 +148,8 @@ class HTMLRenderer(ProcessorPlugin):
             line-height: 1.5;
         }
 
-        .content img:not(.cqface), .content video {
+        .content img:not(.thumb):not(.qr-code):not(.brand-icon):not(.card-tag-icon):not(.cqface),
+        .content video:not(.thumb):not(.qr-code):not(.brand-icon):not(.card-tag-icon) {
             display: block;
             border-radius: var(--radius-lg);
             margin-bottom: var(--spacing-lg);
@@ -233,6 +239,32 @@ class HTMLRenderer(ProcessorPlugin):
             box-shadow: var(--shadow-sm);
         }
 
+        /* 联系人卡片：横向布局 */
+        .card-contact { display: flex; align-items: center; gap: 8px; }
+        .card-media img { width: 48px !important; height: 48px !important; border-radius: 4px !important; object-fit: cover; display: block; margin: 0 !important; }
+        .card-body { margin-top: 0; display: flex; flex-direction: column; }
+        .card-vertical .card-preview img { width: 100% !important; height: auto !important; object-fit: cover; border-radius: 0 !important; display: block; margin: 0 !important; }
+        .card-tag-row { display: flex; align-items: center; gap: 4px; margin-top: 6px; font-size: 11px; color: var(--text-muted); }
+        .card-tag-icon { width: 14px !important; height: 14px !important; border-radius: 3px !important; object-fit: contain; margin: 0 !important; }
+        .card-tag { display: block; font-size: 11px; color: var(--text-muted); }
+
+        /* QQ 官方风格头部：thumb 左，标题中，二维码最右 */
+        .card-header { display: flex; align-items: center; justify-content: flex-start; gap: 8px; margin-bottom: 6px; }
+        .card-header-left { min-width: 0; display: flex; flex-direction: column; gap: 6px; flex: 1 1 auto; }
+        .card-header-right { display: flex; align-items: flex-start; gap: 8px; }
+        .card-header .thumb { width: 48px !important; height: 48px !important; border-radius: 4px !important; object-fit: cover; margin: 0 !important; }
+        .qr-code { width: 48px !important; height: 48px !important; border-radius: 0 !important; margin: 0 !important; flex: 0 0 48px; }
+        .brand-inline { display: inline-flex; align-items: center; gap: 6px; }
+        .brand-inline .brand-icon { width: 12px !important; height: 12px !important; border-radius: 0 !important; object-fit: contain; margin: 0 !important; }
+        .brand-inline .brand-text { font-size: 12px; color: var(--text-secondary); }
+        .card-header .card-title { margin: 0; white-space: normal; overflow: hidden; display: -webkit-box; -webkit-box-orient: vertical; -webkit-line-clamp: 2; line-clamp: 2; word-break: break-word; }
+        .card.card-vertical { width: 100%; max-width: 276px; }
+        .card.card-vertical .card-header { width: 100%; display: flex; align-items: center; gap: 8px; }
+        .card.card-vertical .qr-code { margin-left: auto; flex: 0 0 48px; }
+
+        /* Forward 嵌套缩进 */
+        .forward .forward { margin-left: 6px; }
+
         .card-title {
             font-size: var(--font-size-md);
             font-weight: 600;
@@ -316,6 +348,7 @@ class HTMLRenderer(ProcessorPlugin):
             line-height: 1;
             mix-blend-mode: multiply;
         }
+        @media print { .wm-item { mix-blend-mode: normal; } }
 
         .footer {
             margin-top: var(--spacing-xxl);
@@ -360,7 +393,7 @@ class HTMLRenderer(ProcessorPlugin):
         window.onload = function () {
             const container = document.querySelector('.container');
             const contentHeight = container.scrollHeight;
-            const pageHeight4in = 364;
+            const pageHeight4in = 364; // 4 inches = 96px * 4
 
             let pageSize = '';
             if (contentHeight <= pageHeight4in) {
@@ -376,65 +409,105 @@ class HTMLRenderer(ProcessorPlugin):
             style.innerHTML = '@page { size: ' + pageSize + '; margin: 0 !important; }';
             document.head.appendChild(style);
 
-            // 添加水印（如果配置了）
             const watermarkText = "{{ watermark_text }}";
             if (watermarkText && watermarkText.trim() !== '') {
-                addWatermark({
-                    text: watermarkText,
-                    opacity: 0.12,
-                    angle: 24,
-                    fontSize: 40,
-                    tile: 480,
-                    jitter: 10
-                });
-            }
-        };
-
-        function addWatermark(opts) {
-            const container = document.querySelector('.container');
-            let overlay = container.querySelector('.wm-overlay');
-            
-            if (!overlay) {
-                overlay = document.createElement('div');
-                overlay.className = 'wm-overlay';
-                container.appendChild(overlay);
-            } else {
-                overlay.innerHTML = '';
+              addWatermark({
+                text: watermarkText,
+                opacity: 0.12,
+                angle: 24,
+                fontSize: 40,
+                tile: 480,
+                jitter: 10
+              });
             }
 
-            const W = container.clientWidth;
-            const H = container.scrollHeight;
-            overlay.style.width = W + 'px';
-            overlay.style.height = H + 'px';
+            function addWatermark(opts) {
+                const container = document.querySelector('.container');
 
-            const text = String(opts.text);
-            const opacity = opts.opacity || 0.12;
-            const angle = opts.angle || 24;
-            const fontSize = opts.fontSize || 40;
-            const tile = opts.tile || 480;
-            const jitter = opts.jitter || 10;
+                let overlay = container.querySelector('.wm-overlay');
+                if (!overlay) {
+                    overlay = document.createElement('div');
+                    overlay.className = 'wm-overlay';
+                    container.appendChild(overlay);
+                } else {
+                    overlay.innerHTML = '';
+                }
 
-            // 创建水印元素
-            const cols = Math.max(1, Math.floor(W / tile));
-            const rows = Math.max(1, Math.floor(H / tile));
+                const W = container.clientWidth;
+                const H = container.scrollHeight; // 高度按内容
+                overlay.style.width = W + 'px';
+                overlay.style.height = H + 'px';
 
-            for (let r = 0; r < rows; r++) {
-                for (let c = 0; c < cols; c++) {
+                const text = String(opts.text);
+                const opacity = (typeof opts.opacity === 'number') ? opts.opacity : 0.12;
+                const angle = Number.isFinite(opts.angle) ? opts.angle : 24;
+                const fontSize = Number.isFinite(opts.fontSize) ? opts.fontSize : 40;
+                const tile = Number.isFinite(opts.tile) ? opts.tile : 480;
+                const jitter = Number.isFinite(opts.jitter) ? opts.jitter : 10;
+
+                // 先创建一个隐藏样本元素，量出旋转后的包围盒尺寸
+                const probe = document.createElement('span');
+                probe.className = 'wm-item';
+                probe.textContent = text;
+                probe.style.fontSize = fontSize + 'px';
+                probe.style.opacity = opacity.toString();
+                probe.style.transform = `rotate(-${angle}deg)`;
+                probe.style.visibility = 'hidden';
+                probe.style.left = '-9999px';
+                probe.style.top = '-9999px';
+                overlay.appendChild(probe);
+                const rect = probe.getBoundingClientRect();
+                const stampW = rect.width;
+                const stampH = rect.height;
+                overlay.removeChild(probe);
+
+                // 计算网格：仅在容器内布点，保证任何抖动后也不会越界
+                const padX = Math.ceil(stampW * 0.5);
+                const padY = Math.ceil(stampH * 0.5);
+                const cols = Math.max(1, Math.floor((W - 2*padX) / tile) + 1);
+                const rows = Math.max(1, Math.floor((H - 2*padY) / tile) + 1);
+
+                // —— 水平居中 ——
+                const centerX = W / 2;
+                const gridSpanX = (cols - 1) * tile;
+                const firstCX = centerX - gridSpanX / 2;
+
+                const centerVertical = false;
+                const baseCY0 = centerVertical ? (H/2 - ((rows - 1) * tile) / 2) : (padY + stampH/2);
+
+                for (let r = 0; r < rows; r++) {
+                  for (let c = 0; c < cols; c++) {
                     const span = document.createElement('span');
                     span.className = 'wm-item';
                     span.textContent = text;
                     span.style.fontSize = fontSize + 'px';
-                    span.style.opacity = opacity.toString();
-                    
-                    const x = c * tile + (Math.random() * 2 - 1) * jitter;
-                    const y = r * tile + (Math.random() * 2 - 1) * jitter;
-                    
+                    span.style.opacity  = opacity.toString();
+                    span.style.transform = `rotate(-${angle}deg)`;
+
+                    // 交错排布（可选，让视觉更满）
+                    const stagger = (r % 2) ? tile / 2 : 0;
+
+                    // 以“中心点”定位
+                    const cx = firstCX + c * tile + stagger;
+                    const cy = baseCY0 + r * tile;
+
+                    // 轻微抖动
+                    const jx = jitter ? (Math.random()*2-1)*jitter : 0;
+                    const jy = jitter ? (Math.random()*2-1)*jitter : 0;
+
+                    // 转成左上角坐标并限界
+                    let x = Math.round(cx + jx - stampW / 2);
+                    let y = Math.round(cy + jy - stampH / 2);
+                    x = Math.max(0, Math.min(W - stampW, x));
+                    y = Math.max(0, Math.min(H - stampH, y));
+
                     span.style.left = x + 'px';
-                    span.style.top = y + 'px';
+                    span.style.top  = y + 'px';
                     overlay.appendChild(span);
+                  }
                 }
             }
-        }
+        };
     </script>
 </body>
 </html>'''
@@ -447,7 +520,8 @@ class HTMLRenderer(ProcessorPlugin):
         # 获取基本信息
         sender_id = data.get('sender_id', '10000')
         nickname = data.get('nickname', '匿名用户')
-        is_anonymous = data.get('is_anonymous', False)
+        # 兼容 needpriv=true 的匿名逻辑
+        is_anonymous = data.get('is_anonymous', False) or str(data.get('needpriv', '')).lower() == 'true'
         watermark_text = data.get('watermark_text', '')
         
         # 如果匿名，修改显示信息
@@ -462,9 +536,9 @@ class HTMLRenderer(ProcessorPlugin):
             
         # 生成头像URL：匿名时使用透明占位，且不渲染头像元素
         if is_anonymous:
-            avatar_url = f"https://q.qlogo.cn/headimg_dl?dst_uin=100000&spec=640&img_type=jpg"
+            avatar_url = f"https://qlogo2.store.qq.com/qzone/100000/100000/50"
         else:
-            avatar_url = f"https://q.qlogo.cn/headimg_dl?dst_uin={sender_id}&spec=640&img_type=jpg"
+            avatar_url = f"https://qlogo2.store.qq.com/qzone/{sender_id}/{sender_id}/50"
         
         # 渲染消息内容
         content_html = self.render_messages(data.get('messages', []))
@@ -537,7 +611,8 @@ class HTMLRenderer(ProcessorPlugin):
         
     def render_video(self, msg: Dict[str, Any]) -> str:
         """渲染视频消息"""
-        url = msg.get('data', {}).get('url', '')
+        data = msg.get('data', {})
+        url = data.get('url') or data.get('file') or ''
         return f'''<video controls autoplay muted>
             <source src="{url}" type="video/mp4">
             Your browser does not support the video tag.
@@ -553,18 +628,17 @@ class HTMLRenderer(ProcessorPlugin):
         ext = Path(file_name).suffix.lower()
         icon = self.get_file_icon(ext)
         
-        # 格式化文件大小
-        if file_size > 1048576:
-            size_str = f"{file_size / 1048576:.1f} MB"
-        elif file_size > 1024:
-            size_str = f"{file_size / 1024:.1f} KB"
-        else:
-            size_str = f"{file_size} B"
+        # 格式化文件大小（humanfriendly）
+        try:
+            size_str = format_size(int(file_size), binary=False)
+        except Exception:
+            size_str = format_size(float(file_size), binary=False)
             
+        href = self._file_href(file_name)
         return f'''<div class="file-block">
             <img class="file-icon" src="{icon}" alt="File Icon">
             <div class="file-info">
-                <a class="file-name" href="#" download>{file_name}</a>
+                <a class="file-name" href="{href}" download>{self._html(file_name)}</a>
                 <div class="file-meta">{size_str}</div>
             </div>
         </div>'''
@@ -599,63 +673,205 @@ class HTMLRenderer(ProcessorPlugin):
     def render_forward(self, msg: Dict[str, Any]) -> str:
         """渲染合并转发"""
         data = msg.get('data', {})
-        messages = data.get('messages', data.get('content', []))
-        
-        items_html = []
-        for item in messages:
-            item_msgs = item.get('message', [])
-            item_html = self.render_messages(item_msgs)
-            items_html.append(f'<div class="forward-item">{item_html}</div>')
-            
+        raw = data.get('messages') or data.get('content') or []
+
+        # 归一化为若干“片段列表”，每个片段列表表示一条转发消息内的消息段数组
+        segment_lists: List[List[Dict[str, Any]]] = []
+        if isinstance(raw, list):
+            if raw and isinstance(raw[0], dict) and 'type' in raw[0]:
+                # 形如：[ {type:..., data:{...}}, ... ] -> 单条消息
+                segment_lists.append(raw)  # treat as one forwarded item
+            else:
+                # 形如：[ { message:[...] } | { content:[...] } | {type:...,data:{...}} , ... ]
+                for item in raw:
+                    if not isinstance(item, dict):
+                        continue
+                    if isinstance(item.get('message'), list) and item.get('message'):
+                        segment_lists.append(item.get('message') or [])
+                    elif isinstance(item.get('content'), list) and item.get('content'):
+                        segment_lists.append(item.get('content') or [])
+                    elif 'type' in item:
+                        segment_lists.append([item])
+
+        blocks: List[str] = []
+        for segs in segment_lists:
+            inner_html = self.render_messages(segs)
+            blocks.append(f'<div class="forward-item">{inner_html}</div>')
+
         return f'''<div class="forward-title">合并转发聊天记录</div>
         <div class="forward">
-            {''.join(items_html)}
+            {''.join(blocks)}
         </div>'''
         
     def render_reply(self, msg: Dict[str, Any]) -> str:
         """渲染回复消息"""
         data = msg.get('data', {})
         reply_id = data.get('id', '')
-        
-        # 这里应该查找被回复的消息内容
-        return f'''<div class="reply" data-mid="{reply_id}">
-            <div class="reply-meta">回复消息</div>
-            <div class="reply-body">引用的消息</div>
+        # 可用字段尝试提取元信息和预览
+        author = data.get('name') or data.get('nickname') or (data.get('sender') or {}).get('nickname') or ''
+        preview_text = data.get('text') or data.get('content') or ''
+        # 链接化预览文本
+        preview_html, _ = self._linkify_and_collect(str(preview_text))
+        meta = f"回复消息{(' · ' + self._html(author)) if author else ''}"
+        return f'''<div class="reply" data-mid="{self._html(reply_id)}">
+            <div class="reply-meta">{meta}</div>
+            <div class="reply-body">{preview_html or '引用的消息'}</div>
         </div>'''
         
     def render_card(self, msg: Dict[str, Any]) -> str:
-        """渲染卡片消息"""
-        data = msg.get('data', {}).get('data', '{}')
-        
+        """渲染卡片消息（支持 contact/miniapp/news/generic），并在有跳转时渲染二维码"""
+        raw = msg.get('data', {}).get('data', '{}')
+        card_data: Optional[Dict[str, Any]] = None
         try:
-            # 解析JSON卡片数据
-            card_data = json.loads(data)
-            title = card_data.get('prompt', '卡片消息')
-            desc = card_data.get('desc', '')
-            # 常见跳转字段
-            url = (
-                card_data.get('jumpUrl') or
-                card_data.get('url') or
-                card_data.get('target_url') or
-                card_data.get('targetUrl') or
-                card_data.get('link')
-            )
-            # 从所有字段兜底提取
-            if not url:
-                urls = self._extract_urls_from_object(card_data)
-                url = urls[0] if urls else None
-            if url:
-                self._collect_links([url])
-                return f'''<a class="card" href="{url}" target="_blank" rel="noopener noreferrer">
-                <div class="card-title">{title}</div>
-                <div class="card-desc">{desc}</div>
-            </a>'''
-            return f'''<div class="card">
-                <div class="card-title">{title}</div>
-                <div class="card-desc">{desc}</div>
-            </div>'''
-        except:
+            if isinstance(raw, dict):
+                card_data = raw
+            else:
+                s = str(raw)
+                # 兼容 HTML 实体/转义
+                s = s.replace('&#44;', ',').replace('\\/', '/')
+                try:
+                    import html as _html
+                    s = _html.unescape(s)
+                except Exception:
+                    pass
+                card_data = json.loads(s)
+        except Exception:
+            card_data = None
+
+        if not isinstance(card_data, dict):
             return '<div class="card">卡片消息</div>'
+
+        view = str(card_data.get('view') or '').lower()
+        meta = card_data.get('meta') or {}
+
+        url = self._extract_card_url(card_data)
+        if url:
+            self._collect_links([url])
+            qr_src = self._qr_data_uri(url)
+        else:
+            qr_src = None
+
+        # contact
+        if view == 'contact' and isinstance(meta.get('contact'), dict):
+            c = meta.get('contact') or {}
+            avatar = c.get('avatar') or ''
+            nickname = c.get('nickname') or '联系人'
+            contact_text = c.get('contact') or ''
+            tag = c.get('tag')
+            tag_icon = c.get('tagIcon')
+            href = url or '#'
+            parts = []
+            parts.append(f'<a class="card card-contact" href="{href}" target="_blank" rel="noopener noreferrer">')
+            parts.append('<div class="card-media">')
+            parts.append(f'<img src="{avatar}" alt="avatar">')
+            parts.append('</div>')
+            parts.append('<div class="card-body">')
+            parts.append(f'<div class="card-title">{self._html(nickname)}</div>')
+            if contact_text:
+                parts.append(f'<div class="card-desc">{self._html(contact_text)}</div>')
+            if tag or tag_icon:
+                parts.append('<div class="card-tag-row">')
+                if tag_icon:
+                    parts.append(f'<img class="card-tag-icon" src="{tag_icon}" alt="">')
+                if tag:
+                    parts.append(f'<span class="card-tag">{self._html(tag)}</span>')
+                parts.append('</div>')
+            parts.append('</div>')
+            if qr_src:
+                parts.append(f'<img class="qr-code" src="{qr_src}" alt="QR">')
+            parts.append('</a>')
+            return ''.join(parts)
+
+        # miniapp
+        if view == 'miniapp' and isinstance(meta.get('miniapp'), dict):
+            m = meta.get('miniapp') or {}
+            href = (m.get('jumpUrl') or m.get('doc_url') or url or '#')
+            parts = []
+            parts.append(f'<a class="card card-vertical card-miniapp" href="{href}" target="_blank" rel="noopener noreferrer">')
+            parts.append('<div class="card-header">')
+            parts.append('<div class="card-header-left">')
+            if m.get('source') or m.get('sourcelogo'):
+                parts.append('<div class="brand-inline">')
+                if m.get('sourcelogo'):
+                    parts.append(f'<img class="brand-icon" src="{m.get("sourcelogo")}" alt="">')
+                if m.get('source'):
+                    parts.append(f'<span class="brand-text">{self._html(m.get("source"))}</span>')
+                parts.append('</div>')
+            title = m.get('title') or '小程序卡片'
+            parts.append(f'<div class="card-title">{self._html(title)}</div>')
+            parts.append('</div>')
+            if qr_src:
+                parts.append(f'<img class="qr-code" src="{qr_src}" alt="QR">')
+            parts.append('</div>')
+            if m.get('preview'):
+                parts.append('<div class="card-preview">')
+                parts.append(f'<img src="{m.get("preview")}" alt="preview">')
+                parts.append('</div>')
+            if m.get('tag') or m.get('tagIcon'):
+                parts.append('<div class="card-tag-row">')
+                if m.get('tagIcon'):
+                    parts.append(f'<img class="card-tag-icon" src="{m.get("tagIcon")}" alt="">')
+                if m.get('tag'):
+                    parts.append(f'<span class="card-tag">{self._html(m.get("tag"))}</span>')
+                parts.append('</div>')
+            parts.append('</a>')
+            return ''.join(parts)
+
+        # news
+        if view == 'news' and isinstance(meta.get('news'), dict):
+            n = meta.get('news') or {}
+            href = (n.get('jumpUrl') or url or '#')
+            parts = []
+            parts.append(f'<a class="card card-news" href="{href}" target="_blank" rel="noopener noreferrer">')
+            parts.append('<div class="card-header">')
+            if n.get('preview'):
+                parts.append(f'<img class="thumb" src="{n.get("preview")}" alt="thumb">')
+            parts.append('<div class="card-header-right">')
+            title = n.get('title') or '分享'
+            parts.append(f'<div class="card-title">{self._html(title)}</div>')
+            parts.append('</div>')
+            if qr_src:
+                parts.append(f'<img class="qr-code" src="{qr_src}" alt="QR">')
+            parts.append('</div>')
+            # bottom
+            parts.append('<div class="card-bottom">')
+            parts.append('<div class="card-bottom-left">')
+            if n.get('desc'):
+                parts.append(f'<div class="card-desc">{self._html(n.get("desc"))}</div>')
+            if n.get('tag') or n.get('tagIcon'):
+                parts.append('<div class="card-tag-row">')
+                if n.get('tagIcon'):
+                    parts.append(f'<img class="card-tag-icon" src="{n.get("tagIcon")}" alt="">')
+                if n.get('tag'):
+                    parts.append(f'<span class="card-tag">{self._html(n.get("tag"))}</span>')
+                parts.append('</div>')
+            parts.append('</div>')
+            parts.append('</div>')
+            parts.append('</a>')
+            return ''.join(parts)
+
+        # generic
+        g = self._first_entry_value(meta)
+        title = g.get('title') or card_data.get('prompt') or (card_data.get('view') or '卡片')
+        desc = g.get('desc') or ''
+        preview = g.get('preview')
+        parts = []
+        parts.append('<div class="card card-vertical">')
+        if preview:
+            parts.append('<div class="card-preview">')
+            parts.append(f'<img src="{preview}" alt="preview">')
+            parts.append('</div>')
+        parts.append('<div class="card-body">')
+        parts.append(f'<div class="card-title">{self._html(title)}</div>')
+        if desc:
+            parts.append(f'<div class="card-desc">{self._html(desc)}</div>')
+        if qr_src:
+            parts.append('<div class="qr-wrap">')
+            parts.append(f'<img class="qr-code" src="{qr_src}" alt="QR">')
+            parts.append('</div>')
+        parts.append('</div>')
+        parts.append('</div>')
+        return ''.join(parts)
             
     def get_file_icon(self, ext: str) -> str:
         """根据文件扩展名获取图标"""
@@ -681,31 +897,50 @@ class HTMLRenderer(ProcessorPlugin):
         return f"/static/file/{icon}"
 
     # ===== 工具方法 =====
+    def _html(self, text: Any) -> str:
+        try:
+            import html as _html
+            return _html.escape(str(text))
+        except Exception:
+            return str(text)
+
     def _anchor(self, url: str) -> str:
         return f'<a href="{url}" target="_blank" rel="noopener noreferrer">{url}</a>'
 
     def _linkify_and_collect(self, text: str) -> (str, List[str]):
-        """将文本中的URL替换为可点击链接，并返回收集到的URL列表"""
+        """将文本中的URL替换为可点击链接，并返回收集到的URL列表（linkify-it-py）"""
         if not text:
             return '', []
-        # 正则匹配URL
-        url_pattern = re.compile(r"(?i)\b((?:https?://|www\.)[^\s<>\"']+)\b")
-
-        collected: List[str] = []
-
-        def _repl(match: re.Match) -> str:
-            url = match.group(1)
-            # 规范化并去除末尾中英文标点
-            # 使用原始字符串以避免无效的转义序列警告
-            url_clean = url.rstrip(r".,;:!?)\]}>，。；：！）』」》]")
-            collected.append(url_clean)
-            return self._anchor(url_clean)
-
-        # 首先替换换行
+        # 先替换换行为 <br>
         text_html = text.replace('\n', '<br>')
-        # 进行链接替换
-        text_html = url_pattern.sub(_repl, text_html)
-        return text_html, collected
+
+        # 使用 LinkifyIt 解析链接
+        collected: List[str] = []
+        parts: List[str] = []
+        last_idx = 0
+        matches = self._linkify.match(text)
+        for m in matches or []:
+            start = m.index
+            end = m.last_index
+            url = m.url if hasattr(m, 'url') else text[start:end]
+            # 添加前一段普通文本（替换其内部换行）
+            if start > last_idx:
+                chunk = text[last_idx:start]
+                parts.append(chunk.replace('\n', '<br>'))
+            # 追加链接锚点
+            if url:
+                collected.append(url)
+                parts.append(self._anchor(url))
+            else:
+                # 万一无 url 字段，直接原样输出
+                chunk = text[start:end]
+                parts.append(chunk.replace('\n', '<br>'))
+            last_idx = end
+        # 追加剩余文本
+        if last_idx < len(text):
+            parts.append(text[last_idx:].replace('\n', '<br>'))
+
+        return ''.join(parts) or text_html, collected
 
     def _collect_links(self, links: List[str]):
         if not links:
@@ -783,3 +1018,81 @@ class HTMLRenderer(ProcessorPlugin):
         data_uri = f"data:image/png;base64,{transparent_png}"
         self._face_cache[face_id] = data_uri
         return data_uri
+
+    def _qr_data_uri(self, url: str) -> str:
+        """为给定 URL 生成二维码并以 data URI 返回，带缓存。"""
+        if not hasattr(self, '_qr_cache'):
+            self._qr_cache: Dict[str, str] = {}
+        cached = self._qr_cache.get(url)
+        if cached:
+            return cached
+        try:
+            qr = qrcode.QRCode(version=None, error_correction=qrcode.constants.ERROR_CORRECT_M, box_size=3, border=0)
+            qr.add_data(url)
+            qr.make(fit=True)
+            img = qr.make_image(fill_color="black", back_color="white")
+            buf = BytesIO()
+            img.save(buf, format='PNG')
+            b64 = base64.b64encode(buf.getvalue()).decode('ascii')
+            data_uri = f"data:image/png;base64,{b64}"
+            self._qr_cache[url] = data_uri
+            return data_uri
+        except Exception:
+            return ''
+
+    def _extract_card_url(self, card: Dict[str, Any]) -> Optional[str]:
+        """仿照 gotohtml.sh 的 card_url 逻辑提取跳转 URL。"""
+        try:
+            view = str(card.get('view') or '').lower()
+            meta = card.get('meta') or {}
+            if view == 'contact' and isinstance(meta.get('contact'), dict):
+                c = meta.get('contact') or {}
+                jump = c.get('jumpUrl')
+                if isinstance(jump, str) and jump:
+                    return jump
+                text = c.get('contact') or ''
+                if isinstance(text, str):
+                    m = re.search(r'(?:uin=|)(?P<uin>\d{5,})', text)
+                    if m:
+                        return f'https://mp.qzone.qq.com/u/{m.group("uin")}'
+                return None
+            if view == 'miniapp' and isinstance(meta.get('miniapp'), dict):
+                m = meta.get('miniapp') or {}
+                return m.get('jumpUrl') or m.get('doc_url')
+            if view == 'news' and isinstance(meta.get('news'), dict):
+                n = meta.get('news') or {}
+                return n.get('jumpUrl')
+            # generic: 从 meta 的首个条目里找 jumpUrl
+            g = self._first_entry_value(meta)
+            if g.get('jumpUrl'):
+                return g.get('jumpUrl')
+            # 兜底：在整个对象内找第一个 URL
+            urls = self._extract_urls_from_object(card)
+            return urls[0] if urls else None
+        except Exception:
+            return None
+
+    def _first_entry_value(self, d: Any) -> Dict[str, Any]:
+        if isinstance(d, dict) and d:
+            try:
+                # Python 3.7+ preserves insertion order
+                first_key = next(iter(d.keys()))
+                v = d.get(first_key)
+                return v if isinstance(v, dict) else {}
+            except Exception:
+                return {}
+        return {}
+
+    def _file_href(self, path: str) -> str:
+        """生成 file:// 超链接，兼容绝对路径（含 Windows 盘符）与相对路径。"""
+        if not path:
+            return '#'
+        try:
+            p = Path(path)
+            if p.is_absolute():
+                return p.as_uri()
+        except Exception:
+            pass
+        # 相对路径：尽力转义
+        safe = path.replace('\\', '/')
+        return f'file://{quote(safe)}'
