@@ -649,14 +649,53 @@ class QQReceiver(BaseReceiver):
                 except Exception as e:
                     self.logger.error(f"立即发送失败: {e}")
 
+            # “是” 的无定时立即发送逻辑：若未配置任何平台的 send_schedule，则立刻发送当前投稿
+            has_schedule = None
+            pub_ok = None
+            if cmd == "是":
+                try:
+                    # 检查是否存在任一已注册发布器配置了 send_schedule
+                    from core.plugin import plugin_manager
+                    from utils.common import get_platform_config
+                    _has = False
+                    pubs = list(plugin_manager.publishers.values())
+                    for pub in pubs:
+                        try:
+                            cfg = get_platform_config(getattr(pub.platform, "value", ""))
+                            times = (cfg or {}).get("send_schedule") or []
+                            if times:
+                                _has = True
+                                break
+                        except Exception:
+                            continue
+                    has_schedule = _has
+                except Exception:
+                    has_schedule = False
+                # 未配置任何定时 -> 立即发送
+                if not has_schedule:
+                    try:
+                        if self.submission_service:
+                            pub_ok = await self.submission_service.publish_single_submission(submission_id)
+                    except Exception as e:
+                        self.logger.error(f"未配置定时，自动立即发送失败: {e}")
+                        pub_ok = False
+
             # 结果反馈
             msg = result.get("message") if isinstance(result, dict) else str(result)
             if cmd == "是":
                 parts = []
-                # 仅通知投稿者，发布将由定时任务执行
+                # 仅通知投稿者
                 if notif_ok is not None:
                     parts.append("已私聊通知投稿者" if notif_ok else "通知投稿者失败")
-                extra_line = "；".join(parts + ["已加入暂存区，等待定时发送"]) if parts is not None else "已加入暂存区，等待定时发送"
+                # 使用上文计算的 has_schedule/pub_ok 决定提示
+                _hs = bool(has_schedule) if has_schedule is not None else False
+                if not _hs and pub_ok is True:
+                    tail = "已立即发送"
+                elif not _hs and pub_ok is False:
+                    tail = "未配置定时，自动发送失败。可用“发送暂存区”或“立即”重试"
+                else:
+                    tail = "已加入暂存区，等待定时发送"
+                extra_line = "；".join(parts + [tail]) if parts is not None else tail
                 msg = (msg or "") + ("\n" + extra_line if extra_line else "")
             if result.get("need_reaudit"):
                 msg = (msg or "") + "\n请继续发送审核指令"
@@ -1169,7 +1208,8 @@ class QQReceiver(BaseReceiver):
             "[审核]（在管理群，仅管理员）\n"
             "语法：@本账号 <内部编号> 指令 或 回复审核消息 指令\n"
             "可用：是/否/匿/等/删/拒/立即/刷新/重渲染/扩列审查/评论 <内容>/回复 <内容>/展示/拉黑 [理由]\n"
-            "说明：'是' 加入暂存区等待定时发送；'立即' 立刻发送当前条\n\n"
+            "说明：'是' 加入暂存区；如已配置定时将自动发送；"
+            "未配置定时可用“发送暂存区”或“立即”手动发送\n\n"
             "[私聊]\n"
             "#删除 <编号或投稿ID>（仅能删除自己的投稿）\n"
             "#评论 <编号或投稿ID> <内容>\n"
