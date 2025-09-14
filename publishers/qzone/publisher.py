@@ -21,7 +21,7 @@ from tenacity import RetryError
 
 from publishers.base import BasePublisher
 from core.enums import PublishPlatform
-from .api import QzoneAPI
+from .api import create_qzone_api
 from aioqzone.exception import QzoneError
 
 
@@ -31,7 +31,7 @@ class QzonePublisher(BasePublisher):
     def __init__(self, config: Dict[str, Any]):
         super().__init__("qzone_publisher", PublishPlatform.QZONE, config)
         self.cookies: Dict[str, Dict[str, Any]] = {}  # 账号cookies
-        self.api_clients: Dict[str, QzoneAPI] = {}  # API客户端
+        self.api_clients: Dict[str, Any] = {}  # API客户端（支持不同驱动）
         
     async def initialize(self):
         """初始化发送器：加载或刷新 cookies，准备 API 客户端。"""
@@ -58,7 +58,7 @@ class QzonePublisher(BasePublisher):
                 data = cookie_file.read_bytes()
                 cookies = orjson.loads(data)
                 self.cookies[account_id] = cookies
-                self.api_clients[account_id] = QzoneAPI(cookies)
+                self.api_clients[account_id] = create_qzone_api(cookies)
                 self.logger.info(f"加载cookies成功: {account_id}")
                 return True
             except Exception as e:
@@ -74,7 +74,7 @@ class QzonePublisher(BasePublisher):
         cookie_file.write_bytes(orjson.dumps(cookies))
             
         self.cookies[account_id] = cookies
-        self.api_clients[account_id] = QzoneAPI(cookies)
+        self.api_clients[account_id] = create_qzone_api(cookies)
     
     async def login_via_napcat(self, account_id: str) -> bool:
         """通过 NapCat 本地 HTTP 接口拉取 qzone.qq.com 域 cookies 完成登录。

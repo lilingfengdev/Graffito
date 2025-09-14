@@ -88,6 +88,8 @@ class QQReceiverConfig(BaseModel):
 class QzonePublisherConfig(BaseModel):
     """QQ空间发送器配置"""
     enabled: bool = True
+    # 驱动选择：aioqzone（默认，基于 aioqzone H5）| ooqzone（兼容旧实现）
+    driver: str = "aioqzone"
     max_attempts: int = 3
     batch_size: int = 30
     max_images_per_post: int = 9

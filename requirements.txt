@@ -55,3 +55,15 @@ nonebot-adapter-onebot>=2.4.3
 # External platform SDKs
 aioqzone
 bilibili-api-python>=17.3.0
+
+yarl~=1.20.1
+tenacity~=9.1.2
+typing_extensions~=4.15.0
+tylisten~=2.2.1
+lxml~=5.4.0
+urllib3~=2.5.0
+requests~=2.32.5
+colorama~=0.4.6
+pycryptodomex~=3.23.0
+PyJWT~=2.10.1
+Brotli~=1.1.0

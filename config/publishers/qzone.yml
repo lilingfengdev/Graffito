@@ -1,4 +1,5 @@
 enabled: true
+driver: aioqzone
 max_attempts: 3
 batch_size: 30
 max_images_per_post: 9

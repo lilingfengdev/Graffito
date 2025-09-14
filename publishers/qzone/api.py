@@ -1,8 +1,10 @@
-"""QQ空间API接口（基于 aioqzone + qqqr 的 H5 实现）
+"""QQ空间API接口封装
 
-职责：
-- 使用 aioqzone.h5 API 完成图片上传、预上传和发表说说
-- 基于 aioqzone.login 的 gtk 计算做轻量登录有效性检查
+支持两种驱动：
+- aioqzone（默认）：基于 aioqzone.h5 API 直连
+- ooqzone：封装 publishers.qzone.ooqzone 中的实现
+
+通过平台配置 `publishers.qzone.driver` 选择，默认为 aioqzone。
 """
 from typing import Any, Dict, List, Optional, Sequence, Union
 from tenacity import RetryError
@@ -14,10 +16,11 @@ from aioqzone.exception import QzoneError
 from aioqzone.api.h5.model import QzoneH5API
 from aioqzone.api.login import ConstLoginMan
 from aioqzone.model.api.request import PhotoData
+from utils.common import get_platform_config
 
 
-class QzoneAPI:
-    """QQ空间API客户端（aioqzone H5 直连）"""
+class AioQzoneAPI:
+    """基于 aioqzone H5 的 Qzone API 客户端"""
 
     def __init__(self, cookies: Dict[str, str]):
         self.cookies: Dict[str, str] = cookies
@@ -131,3 +134,54 @@ class QzoneAPI:
         close_fn = getattr(self._client, "close", None)
         if callable(close_fn):
             await close_fn()
+
+
+class OoqzoneAPIAdapter:
+    """封装 publishers.qzone.ooqzone 的 API，以适配与 AioQzoneAPI 相同接口。
+
+    注意：ooqzone 实现内部使用同步 requests，这里保持接口的 async 以便上层统一。
+    """
+
+    def __init__(self, cookies: Dict[str, str]):
+        from publishers.qzone.ooqzone import QzoneAPI as _RawAPI  # 延迟导入避免不必要依赖
+        self._raw = _RawAPI(cookies)
+        uin_str = cookies.get("uin") or cookies.get("p_uin") or ""
+        uin_str = uin_str.lstrip("oO")
+        try:
+            self.uin: int = int(uin_str) if uin_str else 0
+        except Exception:
+            self.uin = 0
+
+    async def check_login(self) -> bool:
+        try:
+            return await self._raw.token_valid()
+        except Exception:
+            return False
+
+    async def publish_emotion(self, content: str, images: Optional[List[bytes]] = None) -> Dict[str, Any]:
+        images = images or []
+        try:
+            tid = await self._raw.publish_emotion(content, images)
+            return {"success": True, "tid": str(tid)}
+        except Exception as e:
+            return {"success": False, "message": str(e)}
+
+    async def add_comment(self, host_uin: Union[str, int], tid: str, content: str) -> Dict[str, Any]:
+        # 旧实现无评论接口，返回不支持
+        return {"success": False, "message": "not supported"}
+
+    async def delete_mood(self, tid: str) -> Dict[str, Any]:
+        # 旧实现无删除接口，返回不支持
+        return {"success": False, "message": "not supported"}
+
+    async def close(self):
+        return None
+
+
+def create_qzone_api(cookies: Dict[str, str]):
+    """根据配置返回相应驱动的 Qzone API 客户端实例。"""
+    cfg = get_platform_config("qzone") or {}
+    driver = (cfg.get("driver") or "aioqzone").strip().lower()
+    if driver == "ooqzone":
+        return OoqzoneAPIAdapter(cookies)
+    return AioQzoneAPI(cookies)
