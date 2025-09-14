@@ -1,6 +1,6 @@
 """通知服务"""
 import asyncio
-from typing import Dict, Any, List, Optional
+from typing import Dict, Any, List, Optional, Set
 from loguru import logger
 
 from config import get_settings
@@ -274,3 +274,152 @@ class NotificationService:
                 
         self.logger.info(f"广播消息到 {success_count} 个管理群")
         return success_count
+
+    async def broadcast_to_users(self, message: str, group_name: Optional[str] = None) -> Dict[str, int]:
+        """向所有用户（去重）私聊推送公告。
+
+        当提供 group_name 时，仅推送给该账号组下与机器人有过交互的用户；
+        否则推送给全局所有用户。
+
+        Returns:
+            {"total": 总人数, "success": 成功数, "failed": 失败数}
+        """
+        from core.database import get_db
+        from core.models import Submission, MessageCache
+        from sqlalchemy import select, distinct
+
+        # 汇总目标用户ID（字符串）
+        user_ids: Set[str] = set()
+
+        try:
+            db = await get_db()
+            async with db.get_session() as session:
+                # 约束 receiver_id 列表（当限定组时）
+                receiver_ids: Optional[Set[str]] = None
+                if group_name:
+                    grp = self.settings.account_groups.get(group_name)
+                    if grp:
+                        receiver_ids = {str(grp.main_account.qq_id)} | {str(acc.qq_id) for acc in (grp.minor_accounts or [])}
+
+                # 从 Submission 取 distinct(sender_id)
+                if group_name:
+                    sub_stmt = select(distinct(Submission.sender_id)).where(Submission.group_name == group_name)
+                else:
+                    sub_stmt = select(distinct(Submission.sender_id))
+                sub_rows = await session.execute(sub_stmt)
+                for (sid,) in sub_rows.all():
+                    if sid:
+                        user_ids.add(str(sid))
+
+                # 从 MessageCache 取 distinct(sender_id)
+                if receiver_ids:
+                    mc_stmt = select(distinct(MessageCache.sender_id)).where(MessageCache.receiver_id.in_(list(receiver_ids)))
+                else:
+                    mc_stmt = select(distinct(MessageCache.sender_id))
+                mc_rows = await session.execute(mc_stmt)
+                for (sid,) in mc_rows.all():
+                    if sid:
+                        user_ids.add(str(sid))
+        except Exception as e:
+            self.logger.error(f"收集公告推送用户失败: {e}")
+            return {"total": 0, "success": 0, "failed": 0}
+
+        if not user_ids:
+            self.logger.info("没有可推送的目标用户")
+            return {"total": 0, "success": 0, "failed": 0}
+
+        # 控制并发，避免对 OneBot/Napcat 造成压力
+        semaphore = asyncio.Semaphore(10)
+        success_count = 0
+
+        async def _send(uid: str) -> bool:
+            async with semaphore:
+                try:
+                    ok = await self.send_to_user(uid, message, group_name)
+                    return bool(ok)
+                except Exception:
+                    return False
+
+        tasks = [asyncio.create_task(_send(uid)) for uid in user_ids]
+        for t in asyncio.as_completed(tasks):
+            if await t:
+                success_count += 1
+
+        total = len(user_ids)
+        failed = total - success_count
+        self.logger.info(f"公告推送完成：总计 {total}，成功 {success_count}，失败 {failed}")
+        return {"total": total, "success": success_count, "failed": failed}
+
+    async def broadcast_to_friends(self, message: str, group_name: Optional[str] = None) -> Dict[str, int]:
+        """向所有好友私聊推送公告（基于 OneBot 好友列表）。
+
+        当提供 group_name 时，仅使用该账号组的主/副账号的好友列表；
+        否则汇总所有已连接账号的好友列表去重发送。
+
+        Returns:
+            {"total": 总人数, "success": 成功数, "failed": 失败数}
+        """
+        qq_receiver = plugin_manager.get_receiver('qq_receiver')
+        if not qq_receiver:
+            self.logger.error("QQ接收器未初始化")
+            return {"total": 0, "success": 0, "failed": 0}
+
+        # 计算需要查询好友的 self_id 列表
+        self_ids: Optional[List[str]] = None
+        if group_name:
+            grp = self.settings.account_groups.get(group_name)
+            if grp:
+                self_ids = [str(grp.main_account.qq_id)] + [str(acc.qq_id) for acc in (grp.minor_accounts or [])]
+
+        # 拉取好友列表
+        friend_entries: List[Dict[str, str]] = []
+        try:
+            if self_ids is None:
+                friend_entries = await qq_receiver.list_friends(None)
+            else:
+                collected: List[Dict[str, str]] = []
+                for sid in self_ids:
+                    items = await qq_receiver.list_friends(sid)
+                    collected.extend(items)
+                friend_entries = collected
+        except Exception as e:
+            self.logger.error(f"获取好友列表失败: {e}")
+            return {"total": 0, "success": 0, "failed": 0}
+
+        # 去重 user_id
+        user_ids: Set[str] = set()
+        for it in friend_entries:
+            uid = (it or {}).get("user_id")
+            if uid:
+                user_ids.add(str(uid))
+
+        if not user_ids:
+            self.logger.info("好友列表为空，无需推送")
+            return {"total": 0, "success": 0, "failed": 0}
+
+        # 并发发送
+        semaphore = asyncio.Semaphore(10)
+        success_count = 0
+
+        async def _send(uid: str) -> bool:
+            async with semaphore:
+                try:
+                    # 优先选择 group_name 指定账号发送；否则使用默认 send_to_user
+                    if group_name:
+                        # 使用 group_name 限定：由 qq_receiver 自动选择合适 bot
+                        ok = await self.send_to_user(uid, message, group_name)
+                    else:
+                        ok = await self.send_to_user(uid, message)
+                    return bool(ok)
+                except Exception:
+                    return False
+
+        tasks = [asyncio.create_task(_send(uid)) for uid in user_ids]
+        for t in asyncio.as_completed(tasks):
+            if await t:
+                success_count += 1
+
+        total = len(user_ids)
+        failed = total - success_count
+        self.logger.info(f"好友公告推送完成：总计 {total}，成功 {success_count}，失败 {failed}")
+        return {"total": total, "success": success_count, "failed": failed}

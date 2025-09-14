@@ -493,6 +493,75 @@ class QQReceiver(BaseReceiver):
             self.logger.error(f"发送群消息失败: {e}")
             return False
 
+    async def send_private_message_by_self(self, self_id: str, user_id: str, message: str) -> bool:
+        """指定使用某个 Bot(self_id) 发送私聊消息。"""
+        try:
+            bot = None
+            try:
+                bots = nonebot.get_bots()
+                for b in bots.values():
+                    if str(getattr(b, "self_id", "")) == str(self_id):
+                        bot = b
+                        break
+            except Exception:
+                bot = None
+            if not bot:
+                self.logger.error(f"未找到指定 self_id 的 Bot：{self_id}")
+                return False
+            try:
+                uid = int(user_id)
+            except Exception:
+                uid = user_id
+            for attempt in range(3):
+                try:
+                    await bot.call_api("send_private_msg", user_id=uid, message=message)
+                    return True
+                except Exception as e:
+                    if attempt == 2:
+                        raise
+                    await asyncio.sleep(0.8 + attempt * 0.8)
+        except Exception as e:
+            self.logger.error(f"发送私聊消息失败(self_id={self_id}): {e}")
+            return False
+
+    async def list_friends(self, receiver_id: Optional[str] = None) -> List[Dict[str, str]]:
+        """列出好友列表。
+
+        当 receiver_id 为 None 时，返回所有已连接 Bot 的好友，包含对应 self_id；
+        返回形如：[{"self_id": "123", "user_id": "456", "nickname": "...", "remark": "..."}, ...]
+        """
+        friends: List[Dict[str, str]] = []
+        try:
+            bots = []
+            try:
+                all_bots = nonebot.get_bots()
+                for b in all_bots.values():
+                    if (receiver_id is None) or (str(getattr(b, "self_id", "")) == str(receiver_id)):
+                        bots.append(b)
+            except Exception:
+                bots = []
+            for bot in bots:
+                try:
+                    resp = await bot.call_api("get_friend_list")
+                    for item in (resp or []):
+                        try:
+                            uid = str(item.get("user_id"))
+                            if not uid:
+                                continue
+                            friends.append({
+                                "self_id": str(getattr(bot, "self_id", "")),
+                                "user_id": uid,
+                                "nickname": str(item.get("nickname", "")),
+                                "remark": str(item.get("remark", "")),
+                            })
+                        except Exception:
+                            continue
+                except Exception:
+                    continue
+        except Exception:
+            return friends
+        return friends
+
     # ===== 指令解析与执行 =====
     async def _try_handle_group_command(self, bot: Bot, event: GroupMessageEvent) -> bool:
         try:
@@ -876,6 +945,35 @@ class QQReceiver(BaseReceiver):
                     await self.send_group_message(group_id, ("投稿已发送\n" + msg) if all_ok else ("发送完成（部分失败）\n" + msg))
                     return True
 
+            # 公告 / #公告 [全部] <内容>
+            if cmd in ("公告", "#公告"):
+                # 判定是否全局
+                synonyms_all = {"全部", "全体", "所有", "ALL", "all"}
+                is_global = bool(arg1 and arg1 in synonyms_all)
+                if is_global:
+                    content = " ".join(parts[2:]) if len(parts) > 2 else ""
+                else:
+                    content = (arg_rest or "")
+                content = content.strip()
+                if not content:
+                    await self.send_group_message(group_id, "错误：请输入公告内容。例如：公告 <内容> 或 公告 全部 <内容>")
+                    return True
+                try:
+                    # 复用已注入的通知服务；未注入则就地创建
+                    notifier = self.notification_service
+                    if not notifier:
+                        from services.notification_service import NotificationService  # 局部导入避免循环
+                        notifier = NotificationService()
+                    # 调整为向所有好友发布
+                    res = await notifier.broadcast_to_friends(content, None if is_global else group_name)
+                    await self.send_group_message(
+                        group_id,
+                        f"公告已推送：总计 {res.get('total',0)}，成功 {res.get('success',0)}，失败 {res.get('failed',0)}"
+                    )
+                except Exception as e:
+                    await self.send_group_message(group_id, f"公告发送失败：{e}")
+                return True
+
             # 自检
             if cmd == "自检":
                 try:
@@ -1200,6 +1298,7 @@ class QQReceiver(BaseReceiver):
             "- 删除待处理\n"
             "- 删除暂存区\n"
             "- 发送暂存区 [平台]\n"
+            "- 公告 [全部] <内容>\n"
             "- 设定编号 <数字>\n"
             "- 快捷回复 [添加 指令=内容|删除 指令]\n"
             "- 取消拉黑 <QQ>\n"
