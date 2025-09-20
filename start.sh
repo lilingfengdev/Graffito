@@ -1,6 +1,6 @@
 #!/bin/bash
 
-# OQQWall 启动脚本
+# XWall 启动脚本
 
 # 颜色定义
 RED='\033[0;31m'
@@ -9,7 +9,7 @@ YELLOW='\033[0;33m'
 NC='\033[0m' # No Color
 
 echo -e "${GREEN}╔═══════════════════════════════════════════╗${NC}"
-echo -e "${GREEN}║          OQQWall-Python 启动脚本         ║${NC}"
+echo -e "${GREEN}║                XWall 启动脚本           ║${NC}"
 echo -e "${GREEN}╚═══════════════════════════════════════════╝${NC}"
 
 # 检查Python版本
@@ -74,6 +74,6 @@ case "$1" in
 esac
 
 # 启动主程序
-echo -e "${GREEN}启动 OQQWall...${NC}"
+echo -e "${GREEN}启动 XWall...${NC}"
 export DRIVER=~fastapi
 python3 main.py

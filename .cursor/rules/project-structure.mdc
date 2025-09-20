@@ -1,0 +1,28 @@
+---
+alwaysApply: true
+---
+## 项目结构与关键入口
+
+- 主运行入口：`main.py`。
+- 配置来源：`config/settings.py` 与 `config/config.yaml`（以及 `config/publishers/*.yml`）。
+- 数据库：`core/database.py` 管理异步 SQLAlchemy 引擎，会在首次调用 `get_db()` 时初始化；模型在 `core/models.py`。
+- 处理管道：`processors/pipeline.py` 负责 LLM -> HTML -> 图片渲染的串联，分别调用 `LLMProcessor`、`HTMLRenderer`、`ContentRenderer`。
+- 发布器插件：`publishers/*/publisher.py` 实现平台发送，基类在 `publishers/base.py`，动态发现与注册在 `publishers/loader.py`。
+- 消息接收：QQ 接入位于 `receivers/qq/`，最终形成 `Submission` 数据并进入处理队列。
+
+### 重要约定
+- `ProcessingPipeline.process_submission()` 会：
+  - 将 `Submission.status` 更新为 `PROCESSING`，处理后置为 `WAITING`，发布成功置为 `PUBLISHED`。
+  - 写入 `submission.llm_result`、`submission.processed_content`、`submission.rendered_images`。
+  - 清理对应的 `MessageCache`，避免历史消息重复合并。
+- 发布器统一通过 `BasePublisher.prepare_content()` 组装文本，并根据平台配置决定是否包含编号、@、分段文本与链接。
+
+### 快速索引
+- 数据模型：`core/models.py`
+- 数据库单例/会话：`core/database.py`
+- 管道实现：`processors/pipeline.py`
+- 渲染器：`processors/html_renderer.py`、`processors/content_renderer.py`
+- LLM 处理：`processors/llm_processor.py`
+- 发布器基类与发现：`publishers/base.py`、`publishers/loader.py`
+- 配置工具：`utils/common.py`
+

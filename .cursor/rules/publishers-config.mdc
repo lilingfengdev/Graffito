@@ -1,0 +1,39 @@
+---
+description: 发布器（publishers）配置与实现约定
+globs: publishers/*.py,publishers/**/*.py,services/*.py
+---
+## 发布器发现与配置
+
+- 启用由 `config/publishers/<platform>.yml` 的 `enabled: true` 控制。
+- 发现逻辑优先按平台显式导入 `publishers.<key>.publisher`，失败时回退到包遍历。
+- 平台键来自包路径：`publishers.<key>.* -> <key>`（见 `publishers/loader.py`）。
+
+### 基类职责（`publishers/base.py`）
+- `initialize()` 加载账号组配置到 `self.accounts`（主/副账号）。
+- `prepare_content(submission, include_text)` 统一组装文本，受平台配置控制：
+  - `include_publish_id`、`include_at_sender`、`include_segments`、`publish_text`。
+  - 链接始终追加并美化展示；图片来源可选 `rendered|chat|both`。
+- `record_publish()` 统一记录 `PublishRecord` 并在成功时更新 `Submission.status=PUBLISHED`。
+
+### 平台配置读取
+- 使用 `utils/common.get_platform_config(key)`，在发布器内通过 `_get_platform_config()` 访问。
+---
+description: 发布器（publishers）配置与实现约定
+globs: publishers/**/*.py,config/publishers/*.yml
+---
+## 发布器发现与配置
+
+- 启用由 `config/publishers/<platform>.yml` 的 `enabled: true` 控制。
+- 发现逻辑优先按平台显式导入 `publishers.<key>.publisher`，失败时回退到包遍历。
+- 平台键来自包路径：`publishers.<key>.* -> <key>`（见 `publishers/loader.py`）。
+
+### 基类职责（`publishers/base.py`）
+- `initialize()` 加载账号组配置到 `self.accounts`（主/副账号）。
+- `prepare_content(submission, include_text)` 统一组装文本，受平台配置控制：
+  - `include_publish_id`、`include_at_sender`、`include_segments`、`publish_text`。
+  - 链接始终追加并美化展示；图片来源可选 `rendered|chat|both`。
+- `record_publish()` 统一记录 `PublishRecord` 并在成功时更新 `Submission.status=PUBLISHED`。
+
+### 平台配置读取
+- 使用 `utils/common.get_platform_config(key)`，在发布器内通过 `_get_platform_config()` 访问。
+

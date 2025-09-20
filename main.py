@@ -1,6 +1,6 @@
 #!/usr/bin/env python3
 """
-OQQWall-Python 主程序入口
+XWall 主程序入口
 """
 import asyncio
 import signal
@@ -18,7 +18,7 @@ logger.add(
     level="INFO"
 )
 logger.add(
-    "data/logs/oqqwall_{time:YYYY-MM-DD}.log",
+    "data/logs/xwall_{time:YYYY-MM-DD}.log",
     rotation="00:00",
     retention="30 days",
     level="DEBUG"
@@ -36,7 +36,7 @@ from publishers.loader import register_publishers_from_configs
 from services import AuditService, SubmissionService, NotificationService
 
 
-class OQQWallApp:
+class XWallApp:
     """主应用程序"""
     
     def __init__(self):
@@ -51,7 +51,7 @@ class OQQWallApp:
         
     async def initialize(self):
         """初始化应用"""
-        logger.info("正在初始化 OQQWall...")
+        logger.info("正在初始化 XWall...")
         
         # 创建必要的目录
         Path("data").mkdir(exist_ok=True)
@@ -82,7 +82,7 @@ class OQQWallApp:
         # 注入服务到接收器
         self.inject_services_into_receivers()
         
-        logger.info("OQQWall 初始化完成")
+        logger.info("XWall 初始化完成")
         return True
         
     async def register_plugins(self):
@@ -146,7 +146,7 @@ class OQQWallApp:
             return
             
         self.is_running = True
-        logger.info("正在启动 OQQWall...")
+        logger.info("正在启动 XWall...")
         
         # 启动所有接收器
         for name, receiver in plugin_manager.receivers.items():
@@ -154,7 +154,7 @@ class OQQWallApp:
                 await receiver.start()
                 logger.info(f"已启动接收器: {name}")
                 
-        logger.info("OQQWall 已启动")
+        logger.info("XWall 已启动")
         
         # 等待关闭信号
         await self.shutdown_event.wait()
@@ -164,7 +164,7 @@ class OQQWallApp:
         if not self.is_running:
             return
 
-        logger.info("正在停止 OQQWall...")
+        logger.info("正在停止 XWall...")
         self.is_running = False
 
         # 停止所有接收器
@@ -182,7 +182,7 @@ class OQQWallApp:
         # 关闭数据库
         await close_db()
 
-        logger.info("OQQWall 已停止")
+        logger.info("XWall 已停止")
         
     def handle_signal(self, sig):
         """处理系统信号"""
@@ -226,12 +226,12 @@ async def main():
     """主函数"""
     logger.info("""
 ╔═══════════════════════════════════════════╗
-║          OQQWall-Python 重构版            ║
-║         校园墙自动运营系统 v2.0           ║
+║                 XWall                     ║
+║         校园墙自动运营系统                    ║
 ╚═══════════════════════════════════════════╝
     """)
     
-    app = OQQWallApp()
+    app = XWallApp()
     await app.run()
 
 

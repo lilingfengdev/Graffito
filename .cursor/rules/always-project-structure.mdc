@@ -1,0 +1,29 @@
+---
+alwaysApply: true
+---
+### 项目结构与关键入口
+
+- 主运行入口：[`main.py`](mdc:main.py)
+- 配置来源：[`config/settings.py`](mdc:config/settings.py)、[`config/config.yaml`](mdc:config/config.yaml)、以及发布平台配置 [`config/publishers/bilibili.yml`](mdc:config/publishers/bilibili.yml) / [`config/publishers/qzone.yml`](mdc:config/publishers/qzone.yml) / [`config/publishers/rednote.yml`](mdc:config/publishers/rednote.yml)
+- 数据库：[`core/database.py`](mdc:core/database.py) 管理异步 SQLAlchemy 引擎与会话；模型在 [`core/models.py`](mdc:core/models.py)
+- 处理管道：[`processors/pipeline.py`](mdc:processors/pipeline.py) 串联处理阶段，分别调用 [`processors/llm_processor.py`](mdc:processors/llm_processor.py)、[`processors/html_renderer.py`](mdc:processors/html_renderer.py)、[`processors/content_renderer.py`](mdc:processors/content_renderer.py)
+- 发布器插件：基类在 [`publishers/base.py`](mdc:publishers/base.py)，动态发现与注册在 [`publishers/loader.py`](mdc:publishers/loader.py)
+- 消息接收：QQ 接入位于 [`receivers/qq/nonebot_receiver.py`](mdc:receivers/qq/nonebot_receiver.py)，最终形成 `Submission` 数据并进入处理队列
+
+### 重要约定
+- `ProcessingPipeline.process_submission()` 负责阶段性状态流转：
+  - 进入处理置 `Submission.status=PROCESSING`；
+  - 渲染完成置 `WAITING`；
+  - 平台发布成功置 `PUBLISHED`。
+- 管道写回以下字段：`submission.llm_result`、`submission.processed_content`、`submission.rendered_images`。
+- 处理完成后清理对应的 `MessageCache`，避免历史消息重复合并。
+- 发布器统一通过 `BasePublisher.prepare_content()` 组装文本；是否包含编号、@、分段文本与链接由平台配置决定。
+
+### 快速索引
+- 数据模型与索引结构：[`core/models.py`](mdc:core/models.py)
+- 数据库单例/会话：[`core/database.py`](mdc:core/database.py)
+- 处理管道编排：[`processors/pipeline.py`](mdc:processors/pipeline.py)
+- 渲染器：[`processors/html_renderer.py`](mdc:processors/html_renderer.py)、[`processors/content_renderer.py`](mdc:processors/content_renderer.py)
+- LLM 处理：[`processors/llm_processor.py`](mdc:processors/llm_processor.py)
+- 发布器基类与发现：[`publishers/base.py`](mdc:publishers/base.py)、[`publishers/loader.py`](mdc:publishers/loader.py)
+- 配置工具与加载：[`config/settings.py`](mdc:config/settings.py)

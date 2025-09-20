@@ -1,0 +1,35 @@
+---
+description: 处理器数据契约（LLM -> HTML -> Content 渲染）
+globs: processors/*.py,services/*.py
+---
+## 处理器输入/输出契约
+
+管道数据结构 `data: Dict[str, Any]` 在阶段间传递，关键字段：
+
+- 输入基础字段：`submission_id`、`sender_id`、`nickname`、`messages`、`is_anonymous`、`watermark_text`、`wall_mark`。
+- LLM 阶段输出：`llm_result`，并派生 `is_anonymous`/`is_safe`/`is_complete` 到 `Submission`。
+- HTML 阶段输出：`rendered_html`、`extracted_links`（链接需去重并保序）。
+- 内容渲染阶段输出：`rendered_images: List[str]`（最终用于各发布平台）。
+
+### 不变量
+- 不移除已有字段；追加字段以免破坏后续阶段。
+- `processed_content` 的结构统一为：`{"text": List[str]|str, "html": str, "links": List[str]}`。
+- 渲染完成后由管道写回 `Submission` 的 `rendered_images` 与 `processed_content`。
+---
+description: 处理器数据契约（LLM -> HTML -> Content 渲染）
+globs: processors/**/*.py
+---
+## 处理器输入/输出契约
+
+管道数据结构 `data: Dict[str, Any]` 在阶段间传递，关键字段：
+
+- 输入基础字段：`submission_id`、`sender_id`、`nickname`、`messages`、`is_anonymous`、`watermark_text`、`wall_mark`。
+- LLM 阶段输出：`llm_result`，并派生 `is_anonymous`/`is_safe`/`is_complete` 到 `Submission`。
+- HTML 阶段输出：`rendered_html`、`extracted_links`（链接需去重并保序）。
+- 内容渲染阶段输出：`rendered_images: List[str]`（最终用于各发布平台）。
+
+### 不变量
+- 不移除已有字段；追加字段以免破坏后续阶段。
+- `processed_content` 的结构统一为：`{"text": List[str]|str, "html": str, "links": List[str]}`。
+- 渲染完成后由管道写回 `Submission` 的 `rendered_images` 与 `processed_content`。
+

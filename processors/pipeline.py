@@ -71,7 +71,7 @@ class ProcessingPipeline:
                     'messages': messages,
                     'is_anonymous': submission.is_anonymous,
                     'watermark_text': await self.get_watermark_text(submission.group_name),
-                    'wall_mark': (await self.get_wall_mark(submission.group_name)) or submission.group_name or 'OQQWall'
+                    'wall_mark': (await self.get_wall_mark(submission.group_name)) or submission.group_name or 'XWall'
                 }
                 
                 # 执行处理管道
@@ -224,7 +224,7 @@ class ProcessingPipeline:
                     'messages': messages,
                     'is_anonymous': submission.is_anonymous,
                     'watermark_text': await self.get_watermark_text(submission.group_name),
-                    'wall_mark': (await self.get_wall_mark(submission.group_name)) or submission.group_name or 'OQQWall'
+                    'wall_mark': (await self.get_wall_mark(submission.group_name)) or submission.group_name or 'XWall'
                 }
                 
                 # 如果不跳过LLM，执行LLM处理

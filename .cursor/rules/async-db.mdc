@@ -1,0 +1,33 @@
+---
+description: 异步数据库访问与会话管理约束
+globs: core/*.py,services/*.py,processors/*.py,publishers/*.py,receivers/**/*.py,cli.py,main.py
+---
+## 异步数据库规范（SQLAlchemy Async）
+
+- 统一通过 `core/database.py` 的 `get_db()` 获取单例 `Database`。
+- 获取会话使用 `async with db.get_session() as session:`，避免手动管理 commit/rollback。
+- 所有 ORM 导入放在使用处的局部作用域，避免循环依赖（示例见 `fetch_submission_by_id`）。
+- SQLite 使用 WAL 已在初始化中配置，无需重复设定。
+- 长事务需拆分；查询与写入分步提交，必要时添加索引（参考模型里的复合索引）。
+- 提供的高阶方法：`fetch_submission_by_id`、`fetch_submissions_by_ids` 优先复用。
+
+### 会话内更新状态的约定
+- 处理管道将 `Submission.status` 在不同阶段置为 `PROCESSING`/`WAITING`/`PUBLISHED`/`PENDING`。
+- 捕获异常后回滚并尽量恢复状态到安全值（例如回退到 `PENDING`）。
+---
+description: 异步数据库访问与会话管理约束
+globs: core/**/*.py,services/**/*.py,processors/**/*.py,publishers/**/*.py,receivers/**/*.py
+---
+## 异步数据库规范（SQLAlchemy Async）
+
+- 统一通过 `core/database.py` 的 `get_db()` 获取单例 `Database`。
+- 获取会话使用 `async with db.get_session() as session:`，避免手动管理 commit/rollback。
+- 所有 ORM 导入放在使用处的局部作用域，避免循环依赖（示例见 `fetch_submission_by_id`）。
+- SQLite 使用 WAL 已在初始化中配置，无需重复设定。
+- 长事务需拆分；查询与写入分步提交，必要时添加索引（参考模型里的复合索引）。
+- 提供的高阶方法：`fetch_submission_by_id`、`fetch_submissions_by_ids` 优先复用。
+
+### 会话内更新状态的约定
+- 处理管道将 `Submission.status` 在不同阶段置为 `PROCESSING`/`WAITING`/`PUBLISHED`/`PENDING`。
+- 捕获异常后回滚并尽量恢复状态到安全值（例如回退到 `PENDING`）。
+

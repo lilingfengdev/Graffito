@@ -48,7 +48,7 @@ class DatabaseConfig(BaseModel):
 
     type: str = "sqlite"
 
-    url: str = "sqlite+aiosqlite:///./data/oqqwall.db"
+    url: str = "sqlite+aiosqlite:///./data/xwall.db"
 
     pool_size: int = 10
 
@@ -74,9 +74,9 @@ class QueueMySQLConfig(BaseModel):
 
     password: str = ""
 
-    database: str = "oqqqueue"
+    database: str = "xwallqueue"
 
-    table: str = "oqq_tasks"
+    table: str = "xwall_tasks"
 
 
 class QueueConfig(BaseModel):

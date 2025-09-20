@@ -1,0 +1,57 @@
+---
+description: 本地运行与常见操作手册
+globs: README.md,docs/*.md,*.py
+---
+## 运行手册（本地）
+
+### 1) 安装依赖
+- Python: 使用 `requirements.txt` 安装；Windows 可执行 `start.bat`。
+- 可选：B 站/红书登录工具见根目录对应 `*_login_tool.py`。
+
+### 2) 配置
+- 复制并修改 `config/config.example.yaml` 为 `config/config.yaml`。
+- 平台发布配置位于 `config/publishers/*.yml`，按需开启 `enabled: true`。
+
+### 3) 初始化与启动
+- 首次运行会自动初始化数据库（SQLite，WAL 已配置）。
+- 入口：`python main.py` 或按文档脚本启动。
+
+### 4) 调试处理管道
+- 提交消息后，`ProcessingPipeline` 会依次运行 LLM、HTML、内容渲染。
+- 结果写入 `Submission.processed_content`、`rendered_images`，状态更新为 `WAITING`。
+
+### 5) 发布
+- 通过对应发布器将 `WAITING` 的投稿发布，成功后状态为 `PUBLISHED`，并记录 `PublishRecord`。
+
+### 6) 常见排障
+- 数据库问题：检查 `config/settings.py` 的数据库 URL 与文件权限，必要时删除 `data/oqqwall.db*` 后重新初始化（谨慎）。
+- 第三方依赖：确认未误改 `bilibili-api-17.3.0/`、`aioqzone/`、`qqqr/`、`xiaohongshu-mcp-main/`。
+---
+description: 本地运行与常见操作手册
+alwaysApply: false
+---
+## 运行手册（本地）
+
+### 1) 安装依赖
+- Python: 使用 `requirements.txt` 安装；Windows 可执行 `start.bat`。
+- 可选：B 站/红书登录工具见根目录对应 `*_login_tool.py`。
+
+### 2) 配置
+- 复制并修改 `config/config.example.yaml` 为 `config/config.yaml`。
+- 平台发布配置位于 `config/publishers/*.yml`，按需开启 `enabled: true`。
+
+### 3) 初始化与启动
+- 首次运行会自动初始化数据库（SQLite，WAL 已配置）。
+- 入口：`python main.py` 或按文档脚本启动。
+
+### 4) 调试处理管道
+- 提交消息后，`ProcessingPipeline` 会依次运行 LLM、HTML、内容渲染。
+- 结果写入 `Submission.processed_content`、`rendered_images`，状态更新为 `WAITING`。
+
+### 5) 发布
+- 通过对应发布器将 `WAITING` 的投稿发布，成功后状态为 `PUBLISHED`，并记录 `PublishRecord`。
+
+### 6) 常见排障
+- 数据库问题：检查 `config/settings.py` 的数据库 URL 与文件权限，必要时删除 `data/oqqwall.db*` 后重新初始化（谨慎）。
+- 第三方依赖：确认未误改 `bilibili-api-17.3.0/`、`aioqzone/`、`qqqr/`、`xiaohongshu-mcp-main/`。
+

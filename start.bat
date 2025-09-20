@@ -1,8 +1,8 @@
 @echo off
-REM OQQWall Windows启动脚本
+REM XWall Windows启动脚本
 
 echo ╔═══════════════════════════════════════════╗
-echo ║          OQQWall-Python 启动脚本         ║
+echo ║                XWall 启动脚本           ║
 echo ╚═══════════════════════════════════════════╝
 
 REM 检查Python
@@ -47,7 +47,7 @@ echo 初始化数据库...
 python cli.py db-init
 
 REM 启动主程序
-echo 启动 OQQWall...
+echo 启动 XWall...
 set DRIVER=~fastapi
 python main.py
 

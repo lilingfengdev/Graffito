@@ -1,6 +1,6 @@
 #!/usr/bin/env python3
 """
-OQQWall CLI 管理工具
+XWall CLI 管理工具
 """
 import asyncio
 import sys
@@ -19,7 +19,7 @@ from core.models import Submission, BlackList, StoredPost
 
 @click.group()
 def cli():
-    """OQQWall 命令行管理工具"""
+    """XWall 命令行管理工具"""
     pass
 
 

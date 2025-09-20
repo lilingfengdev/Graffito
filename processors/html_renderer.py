@@ -50,7 +50,7 @@ class HTMLRenderer(ProcessorPlugin):
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>OQQWall消息页</title>
+    <title>XWall 消息页</title>
     <style>
         :root {
             --primary-color: #007aff;
@@ -554,7 +554,7 @@ class HTMLRenderer(ProcessorPlugin):
             watermark_text=watermark_text,
             show_avatar=show_avatar,
             render_time=datetime.now().strftime("%Y-%m-%d %H:%M"),
-            wall_mark=data.get('wall_mark') or 'OQQWall'
+            wall_mark=data.get('wall_mark') or 'XWall'
         )
         
         return html
