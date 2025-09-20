@@ -1,154 +1,313 @@
-# OQQWall 示例配置文件
-# 复制此文件为 config.yaml 并根据实际情况修改
-
-# 系统配置
-system:
-  debug: false
-  log_level: INFO
-  data_dir: ./data
-  cache_dir: ./data/cache
-  
-# 服务器配置  
-server:
-  host: "0.0.0.0"
-  port: 8082
-  workers: 4
-  
-# 数据库配置
-database:
-  type: sqlite
-  url: sqlite+aiosqlite:///./data/oqqwall.db
-  pool_size: 10
-  
-# Redis配置（可选，用于缓存和消息队列）
-redis:
-  enabled: false
-  host: localhost
-  port: 6379
-  db: 0
-  
-# LLM配置
-llm:
-  provider: dashscope  # dashscope/openai
-  api_key: sk-your-api-key-here  # 替换为实际的API密钥
-  text_model: qwen-plus-latest
-  vision_model: qwen-vl-max-latest
-  timeout: 30
-  max_retry: 3
-  
-# 处理配置
-processing:
-  wait_time: 120  # 等待用户补充消息的时间（秒）
-  max_concurrent: 10  # 最大并发处理数
-
-# 队列配置（用于定时发送任务的持久化队列）
-# backend 取值：AsyncSQLiteQueue | AsyncQueue | MySQLQueue
-# - AsyncSQLiteQueue：基于 SQLite 的异步持久化队列（推荐）
-# - AsyncQueue：基于文件系统的异步持久化队列
-# - MySQLQueue：使用 MySQL 作为后端（需提供 mysql 连接参数）
-queue:
-  backend: AsyncSQLiteQueue
-  path: data/queues  # 当 backend 为 Async* 时生效，队列数据目录
-  mysql:             # 当 backend 为 MySQLQueue 时生效
-    host: 127.0.0.1
-    port: 3306
-    user: root
-    password: ""
-    database: oqqqueue
-    table: oqq_tasks
-  
-# 接收器配置
-receivers:
-  qq:
-    enabled: true
-    auto_accept_friend: true
-    friend_request_window: 300
-    friend_accept_delay_min: 180  # 好友请求最短延迟（秒）
-    friend_accept_delay_max: 240  # 好友请求最大延迟（秒）
-    access_token: ""
-    
-# 发送器配置  
-publishers:
-  qzone:
-    enabled: true
-    max_attempts: 3
-    batch_size: 30
-    max_images_per_post: 9
-    send_schedule: []  # ["09:00", "12:00", "18:00", "21:00"]
-    # 发布控制
-    publish_text: true            # 是否发布文本（编号/@/评论/链接等）
-    include_publish_id: true      # 是否包含发布编号
-    include_at_sender: true       # 是否@投稿者
-    image_source: both            # 图片来源：rendered|chat|both
-    include_segments: false       # 是否包含聊天分段文本（false 不发聊天记录）
-  bilibili:
-    enabled: false
-    max_attempts: 3
-    batch_size: 30
-    max_images_per_post: 9
-    send_schedule: []
-    publish_text: true
-    include_publish_id: true
-    include_at_sender: false
-    image_source: rendered
-    include_segments: false
-    # 可选：直接指定各账号的 cookie 文件位置（如未指定则默认 data/cookies/bilibili_{account_id}.json）
-    accounts: {}
-  # 小红书（RedNote）发送器配置
-  # 使用 Playwright 自动化在创作平台发布图文笔记。
-  # 提示：先运行 `python rednote_login_tool.py` 获取并保存登录 Cookies。
-  rednote:
-    enabled: false               # 是否启用小红书发送器
-    max_attempts: 3              # 单条发布失败后的最大重试次数
-    batch_size: 20               # 批量发布的批次大小（一次处理的投稿数量）
-    max_images_per_post: 9       # 单条笔记最多附带图片数量（红书上限一般为9）
-    send_schedule: []            # 定时发送时间（如 ["09:00", "12:00", "18:00", "21:00"]）
-    # 发布内容控制（与其它平台保持一致配置语义）
-    publish_text: true           # 是否发布文本（编号/@/评论/链接等）。红书主要以图文为主。
-    include_publish_id: false    # 是否包含发布编号（一般关闭，避免影响标题/正文）
-    include_at_sender: false     # 是否@投稿者（红书不支持通过QQ号@，建议关闭）
-    image_source: rendered       # 图片来源：rendered|chat|both（默认使用渲染后的图片）
-    include_segments: false      # 是否包含聊天分段文本（不建议在红书正文中附加聊天记录）
-    # 账号 Cookies 配置：可为每个账号指定 Cookie 文件；未指定时默认 data/cookies/rednote_{account_id}.json
-    accounts: {}
-    # 示例：
-    # accounts:
-    #   myacc:                     # 账号标识（可与 QQ 号一致，方便管理）
-    #     cookie_file: data/cookies/rednote_myacc.json
-    # Playwright 行为配置
-    headless: true               # 是否使用无头模式运行浏览器（服务器环境建议开启）
-    slow_mo_ms: 0                # 放慢自动化操作（毫秒）。调试选择较大值如 50-200
-    user_agent: ""               # 自定义 UA（留空使用默认 UA）
-    
-# 审核配置
-audit:
-  auto_approve: false
-  ai_safety_check: true
-  sensitive_words: []
-  
-# 账号组配置
-account_groups:
-  # 示例组（需要根据实际情况修改）
-  default:
-    name: "默认组"
-    manage_group_id: "123456789"  # 管理群ID
-    main_account:
-      qq_id: "1234567890"  # 主账号QQ
-      http_port: 3000  # NapCat HTTP端口（若使用 NapCat/QSign 等，需要仍保留）
-      http_token: ""   # Napcat HTTP Token（若启用HTTP鉴权则填写）
-    minor_accounts: []  # 副账号列表
-    # - qq_id: "9876543210"
-    #   http_port: 3001
-    #   http_token: ""
-    max_post_stack: 1
-    max_images_per_post: 30
-    send_schedule: []
-    watermark_text: ""
-    wall_mark: "OQQWall"  # 渲染页底部显示的墙标识（如 学校墙/社团墙）
-    friend_add_message: "你好，欢迎投稿"
-    quick_replies:
-      "格式": "投稿格式：直接发送文字+图片即可"
-      "时间": "我们会在每天9:00、12:00、18:00、21:00发送投稿"
-    # 是否允许匿名评论（所有人使用 #评论 指令时，系统不暴露其身份到外部平台；
-    # 仅在内部审核日志中可见可选的操作者ID）
-    allow_anonymous_comment: true
+# OQQWall 示例配置文件
+
+# 复制此文件为 config.yaml 并根据实际情况修改
+
+
+
+# 系统配置
+
+system:
+
+  debug: false
+
+  log_level: INFO
+
+  data_dir: ./data
+
+  cache_dir: ./data/cache
+
+
+
+# 服务器配置  
+
+server:
+
+  host: "0.0.0.0"
+
+  port: 8082
+
+  workers: 4
+
+
+
+# 数据库配置
+
+database:
+
+  type: sqlite
+
+  url: sqlite+aiosqlite:///./data/oqqwall.db
+
+  pool_size: 10
+
+
+
+# Redis配置（可选，用于缓存和消息队列）
+
+redis:
+
+  enabled: false
+
+  host: localhost
+
+  port: 6379
+
+  db: 0
+
+
+
+# LLM配置
+
+llm:
+  # OpenAI API 基础地址：
+  # - 官方服务: https://api.openai.com/v1
+  # - 兼容代理/自建服务: 填写对应的 base_url
+  base_url: https://api.openai.com/v1
+
+  api_key: sk-your-api-key-here  # 替换为实际的API密钥，或使用 ${OPENAI_API_KEY}
+
+  text_model: gpt-4o-mini
+
+  vision_model: gpt-4o-mini
+
+  timeout: 30
+
+  max_retry: 3
+
+
+
+# 处理配置
+
+processing:
+
+  wait_time: 120  # 等待用户补充消息的时间（秒）
+
+  max_concurrent: 10  # 最大并发处理数
+
+
+
+# 队列配置（用于定时发送任务的持久化队列）
+
+# backend 取值：AsyncSQLiteQueue | AsyncQueue | MySQLQueue
+
+# - AsyncSQLiteQueue：基于 SQLite 的异步持久化队列（推荐）
+
+# - AsyncQueue：基于文件系统的异步持久化队列
+
+# - MySQLQueue：使用 MySQL 作为后端（需提供 mysql 连接参数）
+
+queue:
+
+  backend: AsyncSQLiteQueue
+
+  path: data/queues  # 当 backend 为 Async* 时生效，队列数据目录
+
+  mysql: # 当 backend 为 MySQLQueue 时生效
+
+    host: 127.0.0.1
+
+    port: 3306
+
+    user: root
+
+    password: ""
+
+    database: oqqqueue
+
+    table: oqq_tasks
+
+
+
+# 接收器配置
+
+receivers:
+
+  qq:
+
+    enabled: true
+
+    auto_accept_friend: true
+
+    friend_request_window: 300
+
+    friend_accept_delay_min: 180  # 好友请求最短延迟（秒）
+
+    friend_accept_delay_max: 240  # 好友请求最大延迟（秒）
+
+    access_token: ""
+
+
+
+# 发送器配置  
+
+publishers:
+
+  qzone:
+
+    enabled: true
+
+    max_attempts: 3
+
+    batch_size: 30
+
+    max_images_per_post: 9
+
+    send_schedule: [ ]  # ["09:00", "12:00", "18:00", "21:00"]
+
+    # 发布控制
+
+    publish_text: true            # 是否发布文本（编号/@/评论/链接等）
+
+    include_publish_id: true      # 是否包含发布编号
+
+    include_at_sender: true       # 是否@投稿者
+
+    image_source: both            # 图片来源：rendered|chat|both
+
+    include_segments: false       # 是否包含聊天分段文本（false 不发聊天记录）
+
+  bilibili:
+
+    enabled: false
+
+    max_attempts: 3
+
+    batch_size: 30
+
+    max_images_per_post: 9
+
+    send_schedule: [ ]
+
+    publish_text: true
+
+    include_publish_id: true
+
+    include_at_sender: false
+
+    image_source: rendered
+
+    include_segments: false
+
+    # 可选：直接指定各账号的 cookie 文件位置（如未指定则默认 data/cookies/bilibili_{account_id}.json）
+
+    accounts: { }
+
+  # 小红书（RedNote）发送器配置
+
+  # 使用 Playwright 自动化在创作平台发布图文笔记。
+
+  # 提示：先运行 `python rednote_login_tool.py` 获取并保存登录 Cookies。
+
+  rednote:
+
+    enabled: false               # 是否启用小红书发送器
+
+    max_attempts: 3              # 单条发布失败后的最大重试次数
+
+    batch_size: 20               # 批量发布的批次大小（一次处理的投稿数量）
+
+    max_images_per_post: 9       # 单条笔记最多附带图片数量（红书上限一般为9）
+
+    send_schedule: [ ]            # 定时发送时间（如 ["09:00", "12:00", "18:00", "21:00"]）
+
+    # 发布内容控制（与其它平台保持一致配置语义）
+
+    publish_text: true           # 是否发布文本（编号/@/评论/链接等）。红书主要以图文为主。
+
+    include_publish_id: false    # 是否包含发布编号（一般关闭，避免影响标题/正文）
+
+    include_at_sender: false     # 是否@投稿者（红书不支持通过QQ号@，建议关闭）
+
+    image_source: rendered       # 图片来源：rendered|chat|both（默认使用渲染后的图片）
+
+    include_segments: false      # 是否包含聊天分段文本（不建议在红书正文中附加聊天记录）
+
+    # 账号 Cookies 配置：可为每个账号指定 Cookie 文件；未指定时默认 data/cookies/rednote_{account_id}.json
+
+    accounts: { }
+
+    # 示例：
+
+    # accounts:
+
+    #   myacc:                     # 账号标识（可与 QQ 号一致，方便管理）
+
+    #     cookie_file: data/cookies/rednote_myacc.json
+
+    # Playwright 行为配置
+
+    headless: true               # 是否使用无头模式运行浏览器（服务器环境建议开启）
+
+    slow_mo_ms: 0                # 放慢自动化操作（毫秒）。调试选择较大值如 50-200
+
+    user_agent: ""               # 自定义 UA（留空使用默认 UA）
+
+
+
+# 审核配置
+
+audit:
+
+  auto_approve: false
+
+  ai_safety_check: true
+
+  sensitive_words: [ ]
+
+  # 当图片原始大小超过该阈值（MB）时跳过 AI 安全检测与图片描述（0 或不配置表示不跳过）
+  skip_image_audit_over_mb: 0
+
+
+
+# 账号组配置
+
+account_groups:
+
+  # 示例组（需要根据实际情况修改）
+
+  default:
+
+    name: "默认组"
+
+    manage_group_id: "123456789"  # 管理群ID
+
+    main_account:
+
+      qq_id: "1234567890"  # 主账号QQ
+
+      http_port: 3000  # NapCat HTTP端口（若使用 NapCat/QSign 等，需要仍保留）
+
+      http_token: ""   # Napcat HTTP Token（若启用HTTP鉴权则填写）
+
+    minor_accounts: [ ]  # 副账号列表
+
+    # - qq_id: "9876543210"
+
+    #   http_port: 3001
+
+    #   http_token: ""
+
+    max_post_stack: 1
+
+    max_images_per_post: 30
+
+    send_schedule: [ ]
+
+    watermark_text: ""
+
+    wall_mark: "OQQWall"  # 渲染页底部显示的墙标识（如 学校墙/社团墙）
+
+    friend_add_message: "你好，欢迎投稿"
+
+    quick_replies:
+
+      "格式": "投稿格式：直接发送文字+图片即可"
+
+      "时间": "我们会在每天9:00、12:00、18:00、21:00发送投稿"
+
+    # 是否允许匿名评论（所有人使用 #评论 指令时，系统不暴露其身份到外部平台；
+
+    # 仅在内部审核日志中可见可选的操作者ID）
+
+    allow_anonymous_comment: true
+

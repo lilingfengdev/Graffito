@@ -5,9 +5,13 @@ from typing import Dict, Any, List, Optional, Tuple
 import os
 import time
 import ssl
-import dashscope
-from dashscope import Generation, MultiModalConversation
+import hashlib
+from pathlib import Path
+import base64
+import mimetypes
+from openai import OpenAI
 import urllib3
+from urllib.parse import urlparse, parse_qs
 
 urllib3.disable_warnings(urllib3.exceptions.InsecureRequestWarning)
 ssl._create_default_https_context = ssl._create_unverified_context
@@ -33,12 +37,28 @@ class LLMProcessor(ProcessorPlugin):
         config = settings.llm.dict() if hasattr(settings.llm, 'dict') else settings.llm.__dict__
         super().__init__("llm_processor", config)
 
-        # 设置API密钥
-        dashscope.api_key = self.config.get('api_key')
-        self.text_model = self.config.get('text_model', 'qwen-plus-latest')
-        self.vision_model = self.config.get('vision_model', 'qwen-vl-max-latest')
+        # OpenAI 客户端与模型
+        self.api_key = self.config.get('api_key')
+        self.base_url = self.config.get('base_url') or 'https://api.openai.com/v1'
+        self.client = OpenAI(api_key=self.api_key, base_url=self.base_url)
+        self.text_model = self.config.get('text_model', 'gpt-4o-mini')
+        self.vision_model = self.config.get('vision_model', self.text_model)
         self.timeout = self.config.get('timeout', 30)
         self.max_retry = self.config.get('max_retry', 3)
+
+        # 审核跳过阈值（单位：MB，<=0 表示不跳过）
+        try:
+            self.skip_image_audit_over_mb: float = float(getattr(settings.audit, 'skip_image_audit_over_mb', 0.0))
+        except Exception:
+            self.skip_image_audit_over_mb = 0.0
+
+        # 图片缓存目录（用于将远程图片保存为本地 file://）
+        cache_root = getattr(settings.system, 'cache_dir', './data/cache') or './data/cache'
+        self.chat_image_cache_dir = os.path.join(cache_root, 'chat_images')
+        try:
+            Path(self.chat_image_cache_dir).mkdir(parents=True, exist_ok=True)
+        except Exception:
+            pass
 
         self.per_type_rules = {
             "image": {
@@ -164,9 +184,8 @@ class LLMProcessor(ProcessorPlugin):
 
 ### 输出格式
 
-严格按照下面的 JSON 格式输出，仅填写最后一组投稿的 `message_id`，不要输出任何额外的文字或说明：
+**严格按照下面的 JSON 格式输出**，仅填写最后一组投稿的 `message_id`，不要输出任何额外的文字或说明：
 
-```json
 {{
 "needpriv": "true" 或 "false",
 "safemsg": "true" 或 "false",
@@ -178,7 +197,6 @@ class LLMProcessor(ProcessorPlugin):
     ...
 ]
 }}
-```
 """
 
         # 3) 调用文本 LLM（一次性 JSON 返回）
@@ -237,7 +255,6 @@ class LLMProcessor(ProcessorPlugin):
         data['is_anonymous'] = final_obj.get('needpriv') == 'true'
         return data
 
-
     # ==================== 图片处理 ====================
     async def _process_images_in_messages(self, messages_root: List[Dict[str, Any]]) -> bool:
         """压缩本地图片、进行安全检查并为图片生成描述，返回全局安全性。"""
@@ -251,10 +268,32 @@ class LLMProcessor(ProcessorPlugin):
             url = data.get('url') or data.get('file') or ''
             if not isinstance(url, str):
                 continue
+            original_size_bytes: int = 0
             if url.startswith('file://'):
-                image_path = url[7:]
+                # 兼容 file:///D:/... 与 file://D:/... 两种写法，统一解析为本地路径
+                image_path = self._file_uri_to_path(url)
+                try:
+                    original_size_bytes = os.path.getsize(image_path)
+                except Exception:
+                    original_size_bytes = 0
+            elif url.startswith('http://') or url.startswith('https://'):
+                # 远程图片：下载到本地缓存，并将 url 改写为 file://
+                try:
+                    # 保留原始链接供后续渲染时作为说明链接
+                    if 'origin_url' not in data:
+                        data['origin_url'] = url
+                    image_path, original_size_bytes = await self._download_remote_image(url)
+                    if not image_path:
+                        # 下载失败，跳过该图片的后续处理
+                        continue
+                    abs_path = os.path.abspath(image_path)
+                    # 后续渲染/发布统一使用本地绝对路径（不带 file://）
+                    data['url'] = abs_path
+                except Exception as e:
+                    self.logger.warning(f"远程图片下载失败: {url}, {e}")
+                    continue
             else:
-                # 非本地文件不处理压缩与安全
+                # 非本地/非HTTP链接跳过
                 continue
             try:
                 with Image.open(image_path) as im:
@@ -262,68 +301,187 @@ class LLMProcessor(ProcessorPlugin):
                     im.save(image_path)
             except Exception as e:
                 self.logger.warning(f"压缩失败: {image_path}, {e}")
-            try:
-                is_safe, description = self._process_image_safety_and_description(image_path)
-                if not is_safe:
-                    overall_safe = False
-                if description:
-                    msg['describe'] = description.strip()
-            except Exception as e:
-                self.logger.warning(f"安全/描述失败: {image_path}, {e}")
+            # 根据原始大小判断是否跳过 AI 检测
+            skip_audit = False
+            if self.skip_image_audit_over_mb and self.skip_image_audit_over_mb > 0:
+                threshold_bytes = int(self.skip_image_audit_over_mb * 1024 * 1024)
+                if original_size_bytes and original_size_bytes > threshold_bytes:
+                    skip_audit = True
+                    self.logger.info(
+                        f"跳过图片安全检测（原始大小 {original_size_bytes} bytes > {threshold_bytes} bytes）: {image_path}"
+                    )
+            if not skip_audit:
+                try:
+                    is_safe, description = self._process_image_safety_and_description(image_path)
+                    if not is_safe:
+                        overall_safe = False
+                    if description:
+                        msg['describe'] = description.strip()
+                except Exception as e:
+                    self.logger.warning(f"安全/描述失败: {image_path}, {e}")
         return overall_safe
-
 
     # _compress_image 已移除：直接在 _process_images_in_messages 中使用 Pillow 进行缩放与保存
 
     def _process_image_safety_and_description(self, path: str) -> Tuple[bool, str]:
         if not path or not os.path.exists(path):
             return True, ""
-        messages = [{
-            'role': 'user',
-            'content': [
-                {'image': 'file://' + os.path.abspath(path)},
-                {'text': (
-                    '请分析这张图片并回答以下两个问题：\n\n'
-                    '1. 安全性检查：这张图片是否含有暴力、血腥、色情、政治敏感，人生攻击或其他敏感内容(发到国内平台，被举报后会导致处罚的都算)？如果安全请回答"safe"，否则回答"unsafe"。\n\n'
-                    '2. 图片描述：请详细描述这张图片的内容，包括图片中的主要元素、场景、颜色、风格等。描述要准确、详细，但不要过于冗长。\n\n'
-                    '请按以下格式回答：\n安全性：[safe/unsafe]\n描述：[详细描述内容]'
-                )}
-            ]
-        }]
+        abs_path = os.path.abspath(path)
+        import mimetypes, base64
+        mime, _ = mimetypes.guess_type(abs_path)
+        if not mime:
+            mime = 'image/jpeg'
         try:
-            response = MultiModalConversation.call(
-                model=self.vision_model,
-                messages=messages,
-                api_key=self.config.get('api_key'),
-                timeout=self.timeout
-            )
-            if getattr(response, 'status_code', None) == 200:
-                content = response.output.choices[0].message.content
-                if isinstance(content, list):
-                    content = " ".join(map(str, content))
-                txt = str(content or "")
-                is_safe = 'unsafe' not in txt.lower()
-                description = ""
-                idx = txt.find('描述：')
-                if idx != -1:
-                    description = txt[idx + 3:].strip()
-                else:
-                    # 退化提取第一行非 safe/unsafe 的文本
-                    for line in txt.splitlines():
-                        l = line.strip()
-                        if not l:
-                            continue
-                        lower = l.lower()
-                        if 'safe' in lower or 'unsafe' in lower or l.startswith('安全性'):
-                            continue
-                        description = l
-                        break
-                return is_safe, description
-            if getattr(response, 'status_code', None) == 400:
-                return False, ""
-            return True, ""
+            with open(abs_path, 'rb') as f:
+                b64 = base64.b64encode(f.read()).decode('ascii')
+            data_url = f"data:{mime};base64,{b64}"
         except Exception:
             return True, ""
+
+        prompt = (
+            '请分析这张图片并回答以下两个问题：\n\n'
+            '1. 安全性检查：这张图片是否含有暴力、血腥、色情、政治敏感，人生攻击或其他敏感内容(发到国内平台，被举报后会导致处罚的都算)？如果安全请回答"safe"，否则回答"unsafe"。\n\n'
+            '2. 图片描述：请详细描述这张图片的内容，包括图片中的主要元素、场景、颜色、风格等。描述要准确、详细，但不要过于冗长。\n\n'
+            '请按以下格式回答：\n安全性：[safe/unsafe]\n描述：[详细描述内容]'
+        )
+
+        content = [
+            {"type": "text", "text": prompt},
+            {"type": "image_url", "image_url": {"url": data_url}},
+        ]
+
+        try:
+            response = self.client.chat.completions.create(
+                model=self.vision_model,
+                messages=[{"role": "user", "content": content}],
+                temperature=0.0,
+                max_tokens=1000,
+            )
+            txt = str(response.choices[0].message.content or "")
+            lower = txt.lower()
+            is_safe = 'unsafe' not in lower
+            description = ""
+            idx = txt.find('描述：')
+            if idx != -1:
+                description = txt[idx + 3:].strip()
+            else:
+                for line in txt.splitlines():
+                    l = line.strip()
+                    if not l:
+                        continue
+                    lw = l.lower()
+                    if 'safe' in lw or 'unsafe' in lw or l.startswith('安全性'):
+                        continue
+                    description = l
+                    break
+            return is_safe, description
+        except Exception:
+            return True, ""
+
+    # ===== 路径与 file:// 互转 =====
+    def _to_file_uri(self, path: str) -> str:
+        """将本地绝对路径转换为标准 file URI（跨平台）。"""
+        try:
+            if not path:
+                return ''
+            p = Path(path)
+            if not p.is_absolute():
+                p = Path(os.path.abspath(str(p)))
+            return p.as_uri()
+        except Exception:
+            # 回退：尽量构造
+            path = os.path.abspath(path)
+            if os.name == 'nt':
+                # Windows: file:///D:/...
+                drive = ''
+                if len(path) >= 2 and path[1] == ':' and path[0].isalpha():
+                    drive = path[:2]
+                rest = path[2:] if drive else path
+                rest = rest.replace('\\', '/')
+                if drive:
+                    return f'file:///{drive[0].upper()}{rest}'
+                return f'file:///{rest}'
+            return f'file://{path}'
+
+    def _file_uri_to_path(self, uri: str) -> str:
+        """将 file:// URI 转换为本地路径，兼容 Windows 与 Unix。"""
+        try:
+            if not uri:
+                return ''
+            s = str(uri)
+            if not s.startswith('file://'):
+                return s
+            # 去掉前缀，考虑 file:///D:/... 与 file://D:/...
+            body = s[7:]
+            # 去除多余的斜杠
+            while body.startswith('/') and len(body) > 3 and body[2] == ':':
+                # 形如 /D:/path -> D:/path
+                body = body[1:]
+            return body.replace('/', '\\') if os.name == 'nt' else body
+        except Exception:
+            return uri
+        except Exception:
+            return True, ""
+
+    async def _download_remote_image(self, url: str) -> Tuple[str, int]:
+        """下载远程图片到缓存目录并返回 (本地路径, 原始大小字节)。失败返回 ("", 0)。"""
+        # 生成稳定文件名：优先使用 QQ fileid；否则使用 URL 哈希
+        parsed = urlparse(url)
+        query = parse_qs(parsed.query)
+        basename = None
+        if 'fileid' in query and query['fileid']:
+            basename = query['fileid'][0]
+        if not basename:
+            basename = hashlib.sha1(url.encode('utf-8')).hexdigest()
+
+        # 预判扩展名
+        ext = os.path.splitext(parsed.path)[1].lower()
+        if ext not in ('.jpg', '.jpeg', '.png', '.gif', '.webp', '.bmp'):
+            ext = '.jpg'
+        filename = f"{basename}{ext}"
+        local_path = os.path.join(self.chat_image_cache_dir, filename)
+
+        # 如已存在则复用
+        try:
+            if os.path.exists(local_path):
+                size = os.path.getsize(local_path)
+                return local_path, size
+        except Exception:
+            pass
+
+        try:
+            import httpx
+            headers = {
+                'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/124 Safari/537.36',
+                'Accept': 'image/avif,image/webp,image/apng,image/*,*/*;q=0.8',
+                'Referer': 'https://multimedia.nt.qq.com.cn/' if 'multimedia.nt.qq.com.cn' in parsed.netloc else parsed.scheme + '://' + parsed.netloc,
+            }
+            timeout = self.timeout if isinstance(self.timeout, (int, float)) else 30
+            async with httpx.AsyncClient(timeout=timeout) as client:
+                resp = await client.get(url, headers=headers)
+                resp.raise_for_status()
+                # 根据 Content-Type 纠正扩展名
+                ctype = resp.headers.get('Content-Type', '')
+                if 'image/' in ctype:
+                    if 'jpeg' in ctype and not filename.lower().endswith('.jpg') and not filename.lower().endswith(
+                            '.jpeg'):
+                        filename = f"{basename}.jpg"
+                    elif 'png' in ctype and not filename.lower().endswith('.png'):
+                        filename = f"{basename}.png"
+                    elif 'gif' in ctype and not filename.lower().endswith('.gif'):
+                        filename = f"{basename}.gif"
+                    elif 'webp' in ctype and not filename.lower().endswith('.webp'):
+                        filename = f"{basename}.webp"
+                    local_path = os.path.join(self.chat_image_cache_dir, filename)
+
+                Path(self.chat_image_cache_dir).mkdir(parents=True, exist_ok=True)
+                with open(local_path, 'wb') as f:
+                    f.write(resp.content)
+                size = os.path.getsize(local_path)
+                return local_path, size
+        except Exception as e:
+            self.logger.warning(f"下载远程图片失败: {url}, {e}")
+            return "", 0
 
     def _iter_all_message_nodes(self, messages_root: List[Dict[str, Any]]):
         for item in messages_root:
@@ -434,7 +592,7 @@ class LLMProcessor(ProcessorPlugin):
 
     def _make_lm_sanitized_and_original(self, data_root: Dict[str, Any]) -> Tuple[
         List[Dict[str, Any]], List[Dict[str, Any]]]:
-        origin_messages = orjson.loads(orjson.dumps(data_root.get("messages", []) ))
+        origin_messages = orjson.loads(orjson.dumps(data_root.get("messages", [])))
         lm_messages = orjson.loads(orjson.dumps(origin_messages))
         for item in lm_messages:
             self._remove_many(item, self.global_event_rules.get('remove_event', []))
@@ -483,43 +641,20 @@ class LLMProcessor(ProcessorPlugin):
             {'role': 'user', 'content': prompt}
         ]
         try:
-            response = Generation.call(
+            response = await asyncio.to_thread(
+                self.client.chat.completions.create,
                 model=self.text_model,
                 messages=messages,
-                # 尝试强制 JSON 对象返回；如果 SDK 不支持，则由提示词保证
-                response_format={'type': 'json_object'},  # 兼容新版 SDK
-                result_format='message',
-                stream=False,
-                max_tokens=2048,
+                response_format={'type': 'json_object'},
                 temperature=0.3,
-                repetition_penalty=1.0,
-                timeout=self.timeout
+                max_tokens=2048,
             )
         except Exception as exc:
             self.logger.error(f"调用文本模型失败: {exc}")
             return None
 
         try:
-            if getattr(response, 'status_code', None) != 200:
-                return None
-            # 优先使用 output_text
-            raw_text = getattr(response, 'output_text', None)
-            if not raw_text:
-                # 兼容 message 结构
-                content = response.output.choices[0].message.content
-                if isinstance(content, list):
-                    parts: List[str] = []
-                    for c in content:
-                        # 兼容 {"text": "..."} 或 直接字符串
-                        if isinstance(c, dict) and 'text' in c:
-                            parts.append(str(c['text']))
-                        else:
-                            parts.append(str(c))
-                    raw_text = ''.join(parts)
-                else:
-                    raw_text = str(content)
-            # 直接尝试解析 JSON
-            raw_text = raw_text.strip()
+            raw_text = (response.choices[0].message.content or '').strip()
             return orjson.loads(raw_text)
         except Exception:
             return None

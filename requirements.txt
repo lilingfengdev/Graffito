@@ -38,7 +38,7 @@ linkify-it-py>=2.0.3
 humanfriendly>=10.0
 
 # AI/LLM
-dashscope>=1.14.0  # 阿里云通义千问
+openai>=1.50.0
 
 # High-performance libraries
 orjson>=3.9.10

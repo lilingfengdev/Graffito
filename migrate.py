@@ -84,10 +84,10 @@ class OldDataMigrator:
                 'pool_size': 10
             },
             'llm': {
-                'provider': 'dashscope',
+                'base_url': 'https://api.openai.com/v1',
                 'api_key': old_config.get('apikey', ''),
-                'text_model': old_config.get('text_model', 'qwen-plus-latest'),
-                'vision_model': old_config.get('vision_model', 'qwen-vl-max-latest'),
+                'text_model': old_config.get('text_model', 'gpt-4o-mini'),
+                'vision_model': old_config.get('vision_model', 'gpt-4o-mini'),
                 'timeout': 30,
                 'max_retry': 3
             },

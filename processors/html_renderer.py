@@ -4,6 +4,8 @@ from pathlib import Path
 from typing import Dict, Any, List, Optional
 from datetime import datetime
 from jinja2 import Template
+import os
+import mimetypes
 import re
 import base64
 from io import BytesIO
@@ -601,13 +603,10 @@ class HTMLRenderer(ProcessorPlugin):
         """渲染图片消息"""
         data = msg.get('data', {})
         url = data.get('url', '')
-        # 从图片消息的其他字段尝试提取链接（如标题/描述等），不包含图片本身URL
-        links = [u for u in self._extract_urls_from_object(data) if u != url]
-        self._collect_links(links)
-        if links:
-            caption = ' '.join([self._anchor(u) for u in links])
-            return f'<div class="image-block"><img src="{url}" alt="Image"><div class="bubble link-bubble">{caption}</div></div>'
-        return f'<img src="{url}" alt="Image">'
+        # 将本地路径/file:// 转为 data:URI 以便在无权限的浏览器上下文中可渲染
+        src = self._resolve_image_src(url)
+        # 不再收集或展示图片的“原始链接”等，避免将图片渲染成链接
+        return f'<img src="{src}" alt="Image">'
         
     def render_video(self, msg: Dict[str, Any]) -> str:
         """渲染视频消息"""
@@ -970,6 +969,50 @@ class HTMLRenderer(ProcessorPlugin):
         seen: set = set()
         unique = [x for x in result if not (x in seen or seen.add(x))]
         return unique
+
+    # 将路径/URI 解析为适用于 HTML 的 <img src> 值
+    def _resolve_image_src(self, url: str) -> str:
+        try:
+            if not url:
+                return ''
+            if url.startswith('data:image'):
+                return url
+            if url.startswith('http://') or url.startswith('https://'):
+                return url
+            # file:// -> 本地路径
+            path = url
+            if url.startswith('file://'):
+                path = self._file_uri_to_path(url)
+            # 直接本地路径：转为 data URI 内联，避免浏览器 file 权限限制
+            if os.path.exists(path):
+                return self._image_to_data_uri(path)
+            return url
+        except Exception:
+            return url
+
+    def _file_uri_to_path(self, uri: str) -> str:
+        try:
+            s = str(uri)
+            if not s.startswith('file://'):
+                return s
+            body = s[7:]
+            while body.startswith('/') and len(body) > 3 and body[2] == ':':
+                body = body[1:]
+            return body.replace('/', '\\') if os.name == 'nt' else body
+        except Exception:
+            return uri
+
+    def _image_to_data_uri(self, path: str) -> str:
+        try:
+            mime, _ = mimetypes.guess_type(path)
+            if not mime:
+                # 兜底按 png
+                mime = 'image/png'
+            with open(path, 'rb') as f:
+                b64 = base64.b64encode(f.read()).decode('ascii')
+            return f'data:{mime};base64,{b64}'
+        except Exception:
+            return path
 
     def _get_face_src(self, face_id: str) -> str:
         """根据 face_id 返回 data-URI 图片，优先从 data/qlottie，其次回退 legacy 资源目录。"""
