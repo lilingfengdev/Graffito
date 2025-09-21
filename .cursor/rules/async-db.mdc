@@ -1,4 +1,23 @@
 ---
+alwaysApply: false
+description: 异步数据库访问与会话管理约束
+globs: core/**/*.py,services/**/*.py,processors/**/*.py,publishers/**/*.py,receivers/**/*.py
+---
+## 异步数据库规范（SQLAlchemy Async）
+
+- 统一通过 `core/database.py` 的 `get_db()` 获取单例 `Database`。
+- 获取会话使用 `async with db.get_session() as session:`，避免手动管理 commit/rollback。
+- ORM 导入置于使用处局部作用域，避免循环依赖（参考 `fetch_submission_by_id`）。
+- SQLite 的 WAL、同步等已在初始化中设置，无需重复配置。
+- 长事务需拆分；查询与写入分步提交；必要时为高频查询添加索引（见 `core/models.py`）。
+- 复用公共查询：`fetch_submission_by_id`、`fetch_submissions_by_ids`。
+
+### 会话内状态更新约定
+- 管道阶段更新 `Submission.status`：`PROCESSING` -> 渲染完成 `WAITING` -> 发布成功 `PUBLISHED`；失败回退为 `PENDING`。
+- 捕获异常后回滚，并尽量恢复到安全值。
+
+相关文件：[`core/database.py`](mdc:core/database.py)、[`processors/pipeline.py`](mdc:processors/pipeline.py)
+---
 description: 异步数据库访问与会话管理约束
 globs: core/*.py,services/*.py,processors/*.py,publishers/*.py,receivers/**/*.py,cli.py,main.py
 ---

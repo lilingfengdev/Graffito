@@ -1,4 +1,26 @@
 ---
+alwaysApply: false
+description: 发布器（publishers）配置与实现约定
+globs: publishers/**/*.py,config/publishers/*.yml
+---
+## 发布器发现与配置
+
+- 启用由 `config/publishers/<platform>.yml` 的 `enabled: true` 控制。
+- 发现逻辑优先按平台显式导入 `publishers.<key>.publisher`，失败时回退包遍历（见 `publishers/loader.py`）。
+- 平台键来自包路径：`publishers.<key>.* -> <key>`。
+
+### 基类职责（`publishers/base.py`）
+- `initialize()` 加载账号组配置至 `self.accounts`（主/副账号）。
+- `prepare_content(submission, include_text)` 统一组装文本，受平台配置控制：
+  - `include_publish_id`、`include_at_sender`、`include_segments`、`publish_text`。
+  - 链接始终追加并美化展示；图片来源可选 `rendered|chat|both`（去重保序）。
+- `record_publish()` 记录 `PublishRecord`，成功时更新 `Submission.status=PUBLISHED` 与 `published_at`。
+
+### 平台配置
+- 使用 `utils/common.get_platform_config(key)`，在发布器内通过 `_get_platform_config()` 访问。
+
+相关文件：[`publishers/base.py`](mdc:publishers/base.py)、[`publishers/loader.py`](mdc:publishers/loader.py)、[`config/publishers/qzone.yml`](mdc:config/publishers/qzone.yml)、[`config/publishers/bilibili.yml`](mdc:config/publishers/bilibili.yml)、[`config/publishers/rednote.yml`](mdc:config/publishers/rednote.yml)
+---
 description: 发布器（publishers）配置与实现约定
 globs: publishers/*.py,publishers/**/*.py,services/*.py
 ---

@@ -115,6 +115,11 @@ def audit(submission_id, action, comment):
             if not submission:
                 click.echo(f"投稿 {submission_id} 不存在")
                 return
+            
+            # 已通过/已发布禁止重复通过
+            if action == 'approve' and submission.status in (SubmissionStatus.APPROVED.value, SubmissionStatus.PUBLISHED.value):
+                click.echo(f"投稿 {submission_id} 已处于通过/发布状态，不能重复通过")
+                return
                 
             # 更新状态
             status_map = {

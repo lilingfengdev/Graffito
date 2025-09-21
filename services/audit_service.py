@@ -94,6 +94,13 @@ class AuditService:
             
             if not submission:
                 return {'success': False, 'message': '投稿不存在'}
+            
+            # 已通过或已发布不可重复通过
+            if submission.status in (SubmissionStatus.APPROVED.value, SubmissionStatus.PUBLISHED.value):
+                return {
+                    'success': False,
+                    'message': '该投稿已处于通过/发布状态，不能重复通过'
+                }
                 
             # 更新状态
             submission.status = SubmissionStatus.APPROVED.value

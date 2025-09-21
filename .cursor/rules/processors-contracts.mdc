@@ -1,4 +1,24 @@
 ---
+alwaysApply: false
+description: 处理器数据契约（LLM -> HTML -> Content 渲染）
+globs: processors/**/*.py
+---
+## 处理器输入/输出契约
+
+管道数据 `data: Dict[str, Any]` 在阶段间传递，关键字段：
+
+- 基础输入：`submission_id`、`sender_id`、`nickname`、`messages`、`is_anonymous`、`watermark_text`、`wall_mark`。
+- LLM 输出：`llm_result`（并派生 `is_anonymous`/`is_safe`/`is_complete` 到 `Submission`）。
+- HTML 输出：`rendered_html`、`extracted_links`（链接需去重并保序）。
+- 内容渲染输出：`rendered_images: List[str]`（供发布器使用）。
+
+### 不变量
+- 不移除已有字段；仅追加字段，避免破坏后续阶段。
+- `processed_content` 结构统一为：`{"text": List[str]|str, "html": str, "links": List[str]}`。
+- 渲染完成后由管道写回 `Submission.rendered_images` 与 `Submission.processed_content`。
+
+相关文件：[`processors/pipeline.py`](mdc:processors/pipeline.py)、[`processors/llm_processor.py`](mdc:processors/llm_processor.py)、[`processors/html_renderer.py`](mdc:processors/html_renderer.py)、[`processors/content_renderer.py`](mdc:processors/content_renderer.py)
+---
 description: 处理器数据契约（LLM -> HTML -> Content 渲染）
 globs: processors/*.py,services/*.py
 ---

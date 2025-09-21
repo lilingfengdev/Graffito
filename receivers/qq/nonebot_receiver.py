@@ -1389,7 +1389,7 @@ class QQReceiver(BaseReceiver):
 
             notif_ok = None
 
-            if cmd == "是":
+            if cmd == "是" and (isinstance(result, dict) and result.get("success")):
 
                 try:
 
@@ -1406,7 +1406,7 @@ class QQReceiver(BaseReceiver):
 
             # 特殊命令：立即 -> 同步触发发送暂存区并单发当前投稿
 
-            if cmd == "立即":
+            if cmd == "立即" and (isinstance(result, dict) and result.get("success")):
 
                 try:
 
@@ -1427,7 +1427,7 @@ class QQReceiver(BaseReceiver):
 
             pub_ok = None
 
-            if cmd == "是":
+            if cmd == "是" and (isinstance(result, dict) and result.get("success")):
 
                 try:
 
@@ -1522,7 +1522,7 @@ class QQReceiver(BaseReceiver):
 
                 msg = (msg or "") + ("\n" + extra_line if extra_line else "")
 
-            if result.get("need_reaudit"):
+            if isinstance(result, dict) and result.get("need_reaudit"):
                 msg = (msg or "") + "\n请继续发送审核指令"
 
             await self.send_group_message(group_id, msg or "已处理")

@@ -1,4 +1,24 @@
 ---
+alwaysApply: false
+description: Python 代码风格与类型约定
+globs: *.py
+---
+## Python 风格与类型约定
+
+- 命名：函数/方法用动词短语；变量用名词短语；避免 1-2 字母名。
+- 类型：对外 API 与重要函数显式类型注解；避免 `Any` 与不安全 cast。
+- 控制流：守卫式返回，避免超过 2-3 层嵌套；错误优先处理。
+- 异常：不吞异常；仅在有意义的处理/转换时捕获；避免空 `except`。
+- 注释：解释“为什么”而非“如何”；复杂函数使用 docstring。
+- 格式化：保持既有缩进与风格；长行适度换行；不要无关重格式化。
+- 异步：I/O 使用 `async/await`；禁止在事件循环中执行阻塞 I/O；协程粒度清晰。
+- 日志：统一使用 `loguru` 的绑定 logger（例如 `logger.bind(module="...")`）。
+- 数据结构：优先 `TypedDict` / `dataclass` / `pydantic` 表达结构化数据。
+
+### 代码组织
+- 领域模型在 `core/models.py`；异步 DB 在 `core/database.py`；处理器在 `processors/*`；发布器在 `publishers/*`。
+- 工具函数放在 `utils/`；跨层调用避免循环依赖，必要时局部导入。
+---
 description: Python 代码风格与类型约定
 globs: **/*.py
 ---
