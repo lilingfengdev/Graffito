@@ -22,7 +22,7 @@ start.bat
 
 ```bash
 # 克隆项目
-git clone https://github.com/yourusername/XWall.git
+git clone https://github.com/lilingfengdev/XWall.git
 cd XWall
 
 # 安装依赖

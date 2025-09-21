@@ -84,7 +84,7 @@ start.bat
 
 #### Linux/Mac 用户
 ```bash
-git clone https://github.com/yourusername/XWall.git
+git clone https://github.com/lilingfengdev/XWall.git
 cd XWall
 pip install -r requirements.txt
 playwright install chromium

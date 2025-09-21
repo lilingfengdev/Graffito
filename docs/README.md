@@ -19,4 +19,4 @@
 
 ## 📞 获取帮助
 
-- [GitHub Issues](https://github.com/yourusername/XWall/issues)
+- [GitHub Issues](https://github.com/lilingfengdev/XWall/issues)
