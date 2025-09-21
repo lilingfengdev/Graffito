@@ -97,6 +97,20 @@ class QueueConfig(BaseModel):
     mysql: QueueMySQLConfig = QueueMySQLConfig()
 
 
+class WebConfig(BaseModel):
+    """Web 后端配置"""
+    enabled: bool = True
+    host: str = "0.0.0.0"
+    port: int = 8082
+    jwt_secret_key: str = "change-this-secret"
+    jwt_algorithm: str = "HS256"
+    access_token_expires_minutes: int = 12 * 60
+    cors_allow_origins: List[str] = Field(default_factory=lambda: ["*"])
+    cors_allow_credentials: bool = True
+    cors_allow_methods: List[str] = Field(default_factory=lambda: ["*"])
+    cors_allow_headers: List[str] = Field(default_factory=lambda: ["*"])
+
+
 class LLMConfig(BaseModel):
     """LLM配置"""
 
@@ -343,6 +357,7 @@ class Settings(BaseSettings):
     redis: RedisConfig = RedisConfig()
 
     queue: QueueConfig = QueueConfig()
+    web: WebConfig = WebConfig()
 
     llm: LLMConfig = LLMConfig()
 

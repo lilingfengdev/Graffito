@@ -34,6 +34,7 @@ from publishers.loader import register_publishers_from_configs
 
 # 导入服务
 from services import AuditService, SubmissionService, NotificationService
+import uvicorn
 
 
 class XWallApp:
@@ -48,6 +49,9 @@ class XWallApp:
         self.audit_service = AuditService()
         self.submission_service = SubmissionService()
         self.notification_service = NotificationService()
+        # Web 服务
+        self.web_server: Optional[uvicorn.Server] = None
+        self.web_task: Optional[asyncio.Task] = None
         
     async def initialize(self):
         """初始化应用"""
@@ -153,6 +157,24 @@ class XWallApp:
             if receiver.is_enabled:
                 await receiver.start()
                 logger.info(f"已启动接收器: {name}")
+
+        # 启动 Web 后端（可选）
+        if getattr(self.settings, 'web', None) and self.settings.web.enabled:
+            try:
+                from web.backend.app import app as web_app
+                web_cfg = uvicorn.Config(
+                    web_app,
+                    host=self.settings.web.host,
+                    port=self.settings.web.port,
+                    loop="asyncio",
+                    lifespan="on",
+                    log_level="info"
+                )
+                self.web_server = uvicorn.Server(web_cfg)
+                self.web_task = asyncio.create_task(self.web_server.serve())
+                logger.info(f"Web 后端已启动: http://{self.settings.web.host}:{self.settings.web.port}")
+            except Exception as e:
+                logger.error(f"启动 Web 后端失败: {e}")
                 
         logger.info("XWall 已启动")
         
@@ -166,6 +188,15 @@ class XWallApp:
 
         logger.info("正在停止 XWall...")
         self.is_running = False
+
+        # 停止 Web 后端
+        if self.web_server is not None:
+            try:
+                self.web_server.should_exit = True
+                if self.web_task:
+                    await self.web_task
+            except Exception as e:
+                logger.warning(f"停止 Web 后端失败: {e}")
 
         # 停止所有接收器
         for name, receiver in plugin_manager.receivers.items():

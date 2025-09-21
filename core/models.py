@@ -212,3 +212,55 @@ class PublishRecord(Base):
             'error_message': self.error_message,
             'created_at': self.created_at.isoformat() if self.created_at else None,
         }
+
+
+class User(Base):
+    """管理后台用户"""
+    __tablename__ = 'users'
+
+    id = Column(Integer, primary_key=True, autoincrement=True)
+    username = Column(String(50), nullable=False, unique=True, index=True)
+    display_name = Column(String(100))
+    password_hash = Column(String(255), nullable=False)
+
+    # 角色标识
+    is_admin = Column(Boolean, default=False, index=True)
+    is_superadmin = Column(Boolean, default=False, index=True)
+    is_active = Column(Boolean, default=True, index=True)
+
+    created_at = Column(DateTime, default=func.now())
+    updated_at = Column(DateTime, default=func.now(), onupdate=func.now())
+
+    def to_dict(self) -> Dict[str, Any]:
+        return {
+            'id': self.id,
+            'username': self.username,
+            'display_name': self.display_name,
+            'is_admin': self.is_admin,
+            'is_superadmin': self.is_superadmin,
+            'is_active': self.is_active,
+            'created_at': self.created_at.isoformat() if self.created_at else None,
+        }
+
+
+class InviteToken(Base):
+    """邀请注册链接令牌"""
+    __tablename__ = 'invite_tokens'
+
+    id = Column(Integer, primary_key=True, autoincrement=True)
+    token = Column(String(64), nullable=False, unique=True, index=True)
+    created_by_user_id = Column(Integer, ForeignKey('users.id'), nullable=False, index=True)
+    used_by_user_id = Column(Integer, ForeignKey('users.id'))
+    expires_at = Column(DateTime)
+    used_at = Column(DateTime)
+    is_active = Column(Boolean, default=True, index=True)
+    created_at = Column(DateTime, default=func.now())
+
+    def is_valid(self) -> bool:
+        if not self.is_active:
+            return False
+        if self.used_at is not None:
+            return False
+        if self.expires_at is None:
+            return True
+        return datetime.now() < self.expires_at
