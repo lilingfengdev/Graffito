@@ -1,150 +1,127 @@
-# XWall - 校园墙自动运营系统
+<div align="center">
+  <img src="logo.png" alt="XWall Logo" width="200" height="200">
+  
+  # XWall - 校园墙自动运营系统
+  
+  ![Python](https://img.shields.io/badge/Python-3.8%2B-blue?style=flat-square&logo=python&logoColor=white)
+  ![License](https://img.shields.io/badge/License-MIT-green?style=flat-square)
+  ![Platform](https://img.shields.io/badge/Platform-Windows%20%7C%20Linux-lightgrey?style=flat-square)
+  ![Status](https://img.shields.io/badge/Status-Active-brightgreen?style=flat-square)
+  
+  🚀 **智能化校园墙自动运营解决方案**
+  
+  基于 Python + AI 的全自动校园墙系统，支持 QQ 消息接收、智能内容处理、多平台自动发布
+  
+  [📚 完整文档](docs/) • [🚀 快速开始](docs/installation.md) • [⚙️ 配置指南](docs/configuration.md) • [📖 使用手册](docs/usage.md)
+</div>
 
-🚀 一个基于 Python 的智能校园墙自动运营系统，支持 QQ 消息接收、AI 内容处理和多平台自动发布。
+---
 
-## 🎯 核心功能
+## ✨ 核心特性
 
-### 📱 智能接收与处理
-- **QQ 消息接收**：自动接收用户私聊投稿，支持文字+图片组合
-- **消息合并**：智能等待用户补充内容，合并多条相关消息
-- **状态流转**：PENDING → PROCESSING → WAITING → PUBLISHED 完整流程管理
+<table>
+<tr>
+<td width="50%" align="center">
 
-### 🤖 AI 智能审核
-- **内容安全检查**：使用 LLM 进行文本和图片安全审核
-- **匿名识别**：AI 自动判断是否需要匿名发布
-- **完整性检查**：智能判断内容是否完整，避免未写完就发布
-- **图片处理**：自动压缩图片，生成描述文本
-- **敏感词过滤**：支持自定义敏感词列表
+### 🤖 AI 智能化
+- **全程 AI 驱动**：95% 流程自动化
+- **智能安全审核**：内容安全 + 匿名判断
+- **自适应处理**：智能合并消息与完整性检查
 
-### 🎨 内容渲染与美化
-- **HTML 渲染**：使用模板引擎生成美观的可视化内容
-- **图片渲染**：使用 Playwright 将 HTML 渲染为高质量图片
-- **水印添加**：支持自定义水印和墙标识
-- **链接提取**：自动识别和处理文本中的链接
+</td>
+<td width="50%" align="center">
 
-### 🚀 多平台自动发布
-- **QQ 空间**：支持说说发布，自动@投稿者，批量图片上传
-- **哔哩哔哩**：支持动态发布，cookie 管理，内容适配
-- **小红书**：支持图文笔记发布，标题限制处理，专业发布工具
-- **统一配置**：每个平台支持独立的发布控制和内容定制
+### 🚀 多平台发布
+- **QQ 空间**：说说 + 图片批量发布
+- **哔哩哔哩**：动态发布，账号管理
+- **小红书**：图文笔记发布
 
-### 👨‍💼 完善的审核管理
-- **丰富指令**：支持 是/否/匿/等/删/拒/立即/刷新/重渲染 等多种审核操作
-- **管理群集成**：审核消息直接发送到管理群，便于团队协作
-- **快速回复**：支持管理员自定义快捷回复模板
-- **拉黑功能**：支持用户拉黑和解禁管理
+</td>
+</tr>
+<tr>
+<td width="50%" align="center">
 
-### ⏰ 智能调度系统
-- **定时发布**：支持多个时间段自动发布（如 9:00、12:00、18:00、21:00）
-- **暂存区管理**：审核通过的内容进入暂存区，等待定时发布
-- **批量处理**：支持批量发布，提高发布效率
-- **任务队列**：基于持久化队列的可靠任务调度
+### 🎨 内容渲染
+- **模板引擎**：Jinja2 + HTML 美观渲染
+- **图片生成**：Playwright 高质量渲染
+- **水印添加**：自定义墙标识和水印
 
-### 🔧 用户交互功能
-- **私聊指令**：支持 #删除、#评论 等私聊指令操作
-- **评论追加**：投稿者可对已发布内容追加评论
-- **投稿查询**：用户可查询自己的投稿状态
-- **自动好友**：支持自动接受好友申请，定制欢迎语
+</td>
+<td width="50%" align="center">
+
+### 👨‍💼 审核管理
+- **丰富指令**：是/否/匿/拒/立即等操作
+- **团队协作**：管理群集成审核
+- **定时发布**：多时段自动发布
+
+</td>
+</tr>
+</table>
 
 ## 🏗️ 系统架构
 
+```mermaid
+graph LR
+    A[👤 用户投稿] -->|QQ 私聊| B[📱 消息接收器]
+    B --> C[🤖 AI 处理管道]
+    C --> D[🎨 内容渲染]
+    D --> E[👨‍💼 人工审核]
+    E --> F[📤 多平台发布]
+    
+    F --> F1[📺 QQ 空间]
+    F --> F2[🎬 哔哩哔哩]
+    F --> F3[📱 小红书]
 ```
-用户投稿 (QQ) → 消息接收器 → AI 处理管道 → 内容渲染 → 多平台发布
-```
-
-### 核心组件
-
-- **接收器 (Receivers)**：处理来自 QQ 的消息接收
-- **处理管道 (Pipeline)**：LLM 处理 → HTML 渲染 → 内容渲染
-- **发布器 (Publishers)**：支持 QQ 空间、B站、小红书等平台
-- **服务层 (Services)**：审核、投稿、通知等业务逻辑
 
 ## 🚀 快速开始
 
-### 1. 环境要求
+### ⚡ 一键启动
 
-- Python 3.8+
-- SQLite（默认）或 MySQL
-- Playwright（用于页面渲染）
-
-### 2. 安装依赖
-
+#### Windows 用户
 ```bash
-# Windows 用户
 start.bat
+```
 
-# 或手动安装
+#### Linux/Mac 用户
+```bash
+git clone https://github.com/yourusername/XWall.git
+cd XWall
 pip install -r requirements.txt
 playwright install chromium
-```
-
-### 3. 配置系统
-
-```bash
-# 复制配置文件
 cp config/config.example.yaml config/config.yaml
-
-# 编辑配置文件，设置：
-# - LLM API 配置
-# - QQ 接收器配置  
-# - 发布平台配置
-```
-
-### 4. 启动服务
-
-```bash
+# 编辑配置文件后启动
 python main.py
 ```
 
-## ⚙️ 配置说明
+> 📖 **详细安装和配置说明**：[安装部署指南](docs/installation.md) | [配置指南](docs/configuration.md)
 
-### LLM 配置
-支持 OpenAI 兼容的 API，包括 GPT、Claude、国产大模型等。
+## 🛠️ 技术栈
 
-### 发布平台详细配置
+<div align="center">
 
-#### QQ 空间发布器
-- **发布形式**：说说 + 图片，支持最多 30 张图片
-- **内容控制**：可配置是否包含发布编号、@投稿者、聊天记录等
-- **驱动支持**：aioqzone（推荐）或 ooqzone 兼容模式
-- **自动化**：自动登录、批量上传、定时发布
+![Python](https://img.shields.io/badge/Python-3776AB?style=for-the-badge&logo=python&logoColor=white)
+![FastAPI](https://img.shields.io/badge/FastAPI-005571?style=for-the-badge&logo=fastapi)
+![SQLAlchemy](https://img.shields.io/badge/SQLAlchemy-323232?style=for-the-badge&logo=sqlalchemy)
+![OpenAI](https://img.shields.io/badge/OpenAI-412991?style=for-the-badge&logo=openai)
+![Playwright](https://img.shields.io/badge/Playwright-2EAD33?style=for-the-badge&logo=playwright)
 
-#### 哔哩哔哩发布器  
-- **发布形式**：动态 + 图片，支持最多 9 张图片
-- **登录方式**：Cookie 文件管理，支持多账号
-- **内容适配**：自动适配 B站动态格式和字数限制
-- **账号管理**：支持多个 B站账号轮换发布
+</div>
 
-#### 小红书发布器
-- **发布形式**：图文笔记，标题限制 20 个字符
-- **专业工具**：集成专用的 xiaohongshu-mcp 发布工具
-- **内容优化**：自动处理标题长度、话题标签等
-- **自动化**：基于 Playwright 的全自动化发布流程
+## 📊 功能实现进度
 
-### 账号组管理系统
-```yaml
-account_groups:
-  default:  # 账号组名
-    name: "默认组"
-    manage_group_id: "1061835019"  # 管理群ID
-    main_account:
-      qq_id: "3935962727"
-      http_port: 3000
-      http_token: "your_token"
-    minor_accounts: []  # 副账号列表
-    max_post_stack: 1   # 最大投稿堆栈
-    send_schedule: ["09:00", "12:00", "18:00", "21:00"]
-    watermark_text: "学校墙"
-    wall_mark: "XWall"
-    quick_replies:
-      "格式": "投稿格式：直接发送文字+图片即可"
-```
+- [x] QQ 接收器与发送器
+- [x] 渲染器
+- [x] LLM 审核
+- [ ] Bilibili 与小红书推送
+- [ ] 网页审核
+- [ ] 微信接收器与发送器(企业微信或者 WeChatPadPro)
 
-**账号组特性**：
-- **多账号支持**：主账号 + 多个副账号轮换
-- **独立配置**：每个组独立的管理群、发布计划等
-- **负载均衡**：自动分配投稿到不同账号处理
-- **故障转移**：主账号异常时自动切换到副账号
+## 📚 文档
+
+- 📖 [用户使用手册](docs/usage.md) - 详细的使用流程和操作说明
+- 👨‍💼 [管理员指南](docs/admin-guide.md) - 审核管理和系统维护
+- ⚙️ [配置指南](docs/configuration.md) - 完整的配置说明和示例
+- 🔧 [安装部署](docs/installation.md) - 详细的安装和部署说明
 
 ## 📁 项目结构
 
@@ -152,142 +129,33 @@ account_groups:
 XWall/
 ├── main.py              # 主程序入口
 ├── config/              # 配置文件
-│   ├── config.yaml      # 主配置
-│   └── publishers/      # 平台配置
-├── core/                # 核心功能
-│   ├── models.py        # 数据模型
-│   ├── database.py      # 数据库管理
-│   └── enums.py         # 枚举定义
-├── processors/          # 处理管道
-│   ├── pipeline.py      # 主管道
-│   ├── llm_processor.py # LLM 处理
-│   └── content_renderer.py # 内容渲染
-├── publishers/          # 发布器
-│   ├── qzone/           # QQ 空间
-│   ├── bilibili/        # 哔哩哔哩
-│   └── rednote/         # 小红书
-├── receivers/           # 接收器
-│   └── qq/              # QQ 接收
-└── services/            # 服务层
+├── core/                # 核心功能 (数据模型、数据库)
+├── processors/          # 处理管道 (LLM、渲染)
+├── publishers/          # 发布器 (QQ空间、B站、小红书)
+├── receivers/           # 接收器 (QQ消息接收)
+├── services/            # 服务层 (审核、通知)
+└── docs/                # 文档目录
 ```
 
-## 🔧 开发工具
+## 🙏 感谢
 
-项目还提供了便捷的登录工具：
-- `bilibili_login_tool.py` - B站登录助手
-- `rednote_login_tool.py` - 小红书登录助手
+- [gfhdhytghd/OQQWall](https://github.com/gfhdhytghd/OQQWall/)
+- [aioqzone](https://github.com/aioqzone/aioqzone/)
+- [xiaohongshu-mcp](https://github.com/xpzouying/xiaohongshu-mcp)
+- [bilibili-api-python](https://github.com/nemo2011/bilibili-api)
+- [Campux](https://github.com/idoknow/Campux)
 
-## 📝 详细使用流程
+---
 
-### 1. 📩 投稿接收阶段
-- 用户通过 QQ 私聊机器人发送投稿内容（文字+图片）
-- 系统自动创建投稿记录，状态设置为 `PENDING`
-- 等待 2 分钟接收用户可能的补充消息，智能合并相关内容
+<div align="center">
 
-### 2. 🤖 AI 智能处理阶段  
-- 状态更新为 `PROCESSING`，开始 AI 处理管道
-- **LLM 分析**：安全审核、匿名判断、完整性检查
-- **图片处理**：压缩优化、安全检查、生成描述
-- **内容优化**：提取链接、格式规范化
 
-### 3. 🎨 内容渲染阶段
-- **HTML 生成**：使用 Jinja2 模板生成美观的 HTML 内容
-- **图片渲染**：使用 Playwright 将 HTML 渲染为高质量图片
-- **水印添加**：添加墙标识和水印信息
-- 处理完成后状态更新为 `WAITING`
+### 📄 开源协议
 
-### 4. 👨‍💼 审核管理阶段
-- 系统自动发送审核请求到管理群
-- 管理员可使用丰富的审核指令：
-  - `是`：通过审核，加入暂存区
-  - `否`：跳过本次发布
-  - `匿`：切换匿名/实名状态  
-  - `拒`：拒绝并通知投稿者
-  - `立即`：立即发布（跳过定时）
-  - `重渲染`：重新渲染内容
+本项目基于 [MIT License](LICENSE) 开源协议，你可以自由使用、修改和分发。
 
-### 5. 🚀 自动发布阶段
-- **定时发布**：根据配置的时间点自动发布暂存区内容
-- **多平台同步**：同时发布到 QQ 空间、B站、小红书等平台
-- **状态跟踪**：发布成功后状态更新为 `PUBLISHED`，记录详细日志
+<div style="text-align: center; margin-top: 20px; color: #666; font-size: 14px;">
+  Made with ❤️ by the lilingfeng
+</div>
 
-### 6. 📊 后续管理
-- 用户可通过私聊指令查询投稿状态
-- 支持对已发布内容追加评论
-- 管理员可进行投稿删除、用户拉黑等操作
-
-## 🎛️ 管理功能
-
-### 审核指令大全
-| 指令 | 功能 | 示例 |
-|------|------|------|
-| `是` | 通过审核，加入暂存区 | `@机器人 123 是` |
-| `否` | 跳过本次发布 | `@机器人 123 否` |
-| `匿` | 切换匿名/实名状态 | `@机器人 123 匿` |
-| `等` | 暂缓处理 | `@机器人 123 等` |
-| `删` | 删除投稿 | `@机器人 123 删` |
-| `拒` | 拒绝并通知用户 | `@机器人 123 拒 内容不合规` |
-| `立即` | 立即发布 | `@机器人 123 立即` |
-| `重渲染` | 重新渲染内容 | `@机器人 123 重渲染` |
-| `评论` | 添加管理员评论 | `@机器人 123 评论 优质内容` |
-| `回复` | 回复投稿者 | `@机器人 123 回复 感谢投稿` |
-
-### 全局管理指令
-| 指令 | 功能 |
-|------|------|
-| `待处理` | 查看待审核投稿列表 |
-| `发送暂存区` | 手动发布暂存区内容 |
-| `删除暂存区` | 清空暂存区 |
-| `公告 全部 <内容>` | 向所有用户发送公告 |
-| `设定编号 <数字>` | 设置发布编号起始值 |
-| `快捷回复 添加 指令=内容` | 添加快捷回复 |
-| `列出拉黑` | 查看黑名单用户 |
-| `取消拉黑 <QQ>` | 解除用户拉黑 |
-
-## 🛠️ 技术栈
-
-- **后端框架**：FastAPI + SQLAlchemy + Pydantic
-- **异步支持**：asyncio + aiohttp + aiosqlite
-- **AI 集成**：OpenAI API（兼容多种 LLM）
-- **内容渲染**：Playwright + Jinja2
-- **平台集成**：专用 SDK 和 API
-- **任务调度**：APScheduler + 持久化队列
-
-## 🌟 特色亮点
-
-### 🧠 智能化程度高
-- **AI 驱动**：全流程 AI 参与，从安全审核到内容优化
-- **自适应处理**：智能判断匿名需求、内容完整性
-- **自动化程度高**：95% 以上流程无需人工干预
-
-### 🔧 高度可定制
-- **模块化设计**：接收器、处理器、发布器独立可插拔
-- **丰富配置项**：每个环节都支持细粒度配置
-- **模板系统**：支持自定义 HTML 模板和渲染样式
-
-### 💪 高可用性
-- **异步架构**：全异步设计，高并发处理能力
-- **持久化队列**：基于数据库的可靠任务调度
-- **故障恢复**：支持任务重试、状态恢复等机制
-
-### 🛡️ 安全可靠
-- **多层审核**：AI + 人工 + 敏感词多重安全保障
-- **隐私保护**：支持匿名投稿，保护用户隐私
-- **权限控制**：精细的管理员权限和操作日志
-
-## ⚠️ 使用注意事项
-
-### 平台限制
-- **小红书**：每日发布数量建议控制在 50 篇以内
-- **B站**：需要定期更新 Cookie，避免登录失效
-- **QQ 空间**：注意发布频率，避免被平台限制
-
-### 账号安全
-- **独占登录**：小红书账号不能同时在多个网页端登录
-- **Cookie 管理**：建议定期更新各平台的登录凭证
-- **IP 限制**：建议使用稳定的服务器 IP，避免频繁更换
-
-### 内容合规
-- 确保投稿内容符合各平台的内容规范
-- 建议开启 AI 安全检查功能
-- 定期更新敏感词列表
+</div>

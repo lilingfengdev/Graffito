@@ -26,7 +26,7 @@ call venv\Scripts\activate.bat
 REM 安装/更新依赖
 echo 检查依赖...
 python -m pip install --upgrade pip >nul
-pip install -r requirements.txt >nul
+pip install -r requirements.txt --extra-index-url https://aioqzone.github.io/aioqzone-index/simple >nul
 
 REM 检查配置文件
 if not exist "config\config.yaml" (
