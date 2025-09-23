@@ -53,30 +53,57 @@ class HTMLRenderer(ProcessorPlugin):
     <title>XWall 消息页</title>
     <style>
         :root {
-            --primary-color: #007aff;
+            /* 与前端设计系统保持一致的颜色和样式变量 */
+            --primary-color: #6366f1;
             --secondary-color: #71a1cc;
-            --background-color: #f2f2f2;
+            --background-color: #f8fafc;
             --card-background: #ffffff;
-            --text-primary: #000000;
-            --text-secondary: #666666;
-            --text-muted: #888888;
-            --border-color: #e0e0e0;
+            --text-primary: #0f172a;
+            --text-secondary: #64748b;
+            --text-muted: #94a3b8;
+            --border-color: #e2e8f0;
+            --success-color: #10b981;
+            --warning-color: #f59e0b;
+            --danger-color: #ef4444;
+            
+            /* 间距系统 - 与设计系统保持一致 */
+            --spacing-1: 4px;
+            --spacing-2: 8px;
+            --spacing-3: 12px;
+            --spacing-4: 16px;
+            --spacing-5: 20px;
+            --spacing-6: 24px;
+            --spacing-8: 32px;
             --spacing-sm: 6px;
             --spacing-md: 8px;
             --spacing-lg: 10px;
             --spacing-xl: 12px;
             --spacing-xxl: 20px;
+            
+            /* 边框圆角 */
             --radius-sm: 4px;
             --radius-md: 8px;
             --radius-lg: 12px;
-            --shadow-sm: 0 0 5px rgba(0, 0, 0, 0.1);
-            --shadow-md: 0px 0px 6px rgba(0, 0, 0, 0.2);
-            --font-family: "PingFang SC", "Microsoft YaHei", Arial, sans-serif;
-            --font-size-sm: 12px;
-            --font-size-md: 14px;
+            --radius-xl: 16px;
+            
+            /* 阴影系统 */
+            --shadow-sm: 0 1px 2px 0 rgb(0 0 0 / 0.05);
+            --shadow-md: 0 4px 6px -1px rgb(0 0 0 / 0.1), 0 2px 4px -2px rgb(0 0 0 / 0.1);
+            --shadow-lg: 0 10px 15px -3px rgb(0 0 0 / 0.1), 0 4px 6px -4px rgb(0 0 0 / 0.1);
+            
+            /* 字体系统 */
+            --font-family: 'Inter', -apple-system, BlinkMacSystemFont, 'Segoe UI', 'PingFang SC', 'Hiragino Sans GB', 'Microsoft YaHei', 'Helvetica Neue', Helvetica, Arial, sans-serif;
+            --font-size-xs: 12px;
+            --font-size-sm: 14px;
+            --font-size-md: 16px;
             --font-size-lg: 24px;
+            
+            /* 组件特定变量 */
             --container-width: 4in;
             --avatar-size: 50px;
+            
+            /* 过渡动画 */
+            --transition: all 0.2s cubic-bezier(0.4, 0, 0.2, 1);
         }
 
         * { box-sizing: border-box; }
@@ -141,13 +168,19 @@ class HTMLRenderer(ProcessorPlugin):
         .bubble {
             display: block;
             background-color: var(--card-background);
+            border: 1px solid var(--border-color);
             border-radius: var(--radius-lg);
-            padding: 4px 8px;
+            padding: var(--spacing-2) var(--spacing-3);
             margin-bottom: var(--spacing-lg);
             word-break: break-word;
             max-width: fit-content;
             box-shadow: var(--shadow-sm);
             line-height: 1.5;
+            transition: var(--transition);
+        }
+        
+        .bubble:hover {
+            box-shadow: var(--shadow-md);
         }
 
         .content img:not(.thumb):not(.qr-code):not(.brand-icon):not(.card-tag-icon):not(.cqface),

@@ -182,8 +182,7 @@ class XWallApp:
                     port=self.settings.web.port,
                     loop="asyncio",
                     lifespan="on",
-                    log_level="info",
-                    access_log=False
+                    log_level="info"
                 )
                 self.web_server = uvicorn.Server(web_cfg)
                 self.web_task = asyncio.create_task(self.web_server.serve())

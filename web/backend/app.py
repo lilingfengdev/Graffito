@@ -9,6 +9,7 @@ CORS is enabled; static frontend can be served from ../frontend/dist if built.
 """
 
 import asyncio
+import logging
 from datetime import datetime, timedelta
 from pathlib import Path
 from typing import Optional, List, Dict, Any
@@ -22,6 +23,9 @@ from fastapi.staticfiles import StaticFiles
 
 import jwt
 from passlib.context import CryptContext
+
+# 抑制 passlib bcrypt 版本兼容性警告
+logging.getLogger("passlib").setLevel(logging.ERROR)
 
 from pydantic import BaseModel
 
@@ -346,8 +350,9 @@ async def register_via_invite(body: RegisterViaInviteIn):
         from sqlalchemy import select
         from core.models import User, InviteToken
 
-        # Validate token
-        stmt = select(InviteToken).where(InviteToken.token == body.token)
+        # Validate token（去除首尾空白，避免复制粘贴导致的误判）
+        token_value = (body.token or "").strip()
+        stmt = select(InviteToken).where(InviteToken.token == token_value)
         result = await session.execute(stmt)
         invite = result.scalar_one_or_none()
         if not invite or not invite.is_valid():

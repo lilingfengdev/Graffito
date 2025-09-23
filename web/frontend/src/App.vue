@@ -79,78 +79,78 @@ body {
   box-sizing: border-box;
 }
 
-/* 基础颜色定义 */
+/* 基础颜色定义 - 与设计系统保持一致 */
 :root {
-  --el-color-primary: #6366f1;
-  --el-color-primary-light-3: #818cf8;
-  --el-color-primary-light-5: #a5b4fc;
-  --el-color-primary-light-7: #c7d2fe;
-  --el-color-primary-light-8: #ddd6fe;
-  --el-color-primary-light-9: #e0e7ff;
-  --el-color-primary-dark-2: #4f46e5;
-  --el-color-success: #10b981;
-  --el-color-warning: #f59e0b;
-  --el-color-danger: #ef4444;
-  --el-color-error: #ef4444;
-  --el-color-info: #6b7280;
+  --el-color-primary: var(--xw-primary);
+  --el-color-primary-light-3: var(--xw-primary-light);
+  --el-color-primary-light-5: var(--xw-primary-lighter);
+  --el-color-primary-light-7: var(--xw-primary-lightest);
+  --el-color-primary-light-8: var(--xw-primary-lightest);
+  --el-color-primary-light-9: var(--xw-primary-lightest);
+  --el-color-primary-dark-2: var(--xw-primary-dark);
+  --el-color-success: var(--xw-success);
+  --el-color-warning: var(--xw-warning);
+  --el-color-danger: var(--xw-danger);
+  --el-color-error: var(--xw-danger);
+  --el-color-info: var(--xw-info);
 }
 
-/* 深色主题 */
+/* 深色主题 - 使用设计系统变量 */
 html.dark {
-  --el-bg-color: #1e293b;
-  --el-bg-color-page: #0f172a;
-  --el-bg-color-overlay: #334155;
+  --el-bg-color: var(--xw-bg-secondary);
+  --el-bg-color-page: var(--xw-bg-primary);
+  --el-bg-color-overlay: var(--xw-bg-tertiary);
   
-  --el-text-color-primary: #f1f5f9;
-  --el-text-color-regular: #cbd5e1;
-  --el-text-color-secondary: #94a3b8;
-  --el-text-color-placeholder: #64748b;
+  --el-text-color-primary: var(--xw-text-primary);
+  --el-text-color-regular: var(--xw-text-secondary);
+  --el-text-color-secondary: var(--xw-text-tertiary);
+  --el-text-color-placeholder: var(--xw-text-quaternary);
   
-  --el-border-color: #475569;
-  --el-border-color-light: #374151;
-  --el-border-color-lighter: #334155;
-  --el-border-color-extra-light: #1e293b;
+  --el-border-color: var(--xw-border-primary);
+  --el-border-color-light: var(--xw-border-secondary);
+  --el-border-color-lighter: var(--xw-border-tertiary);
+  --el-border-color-extra-light: var(--xw-bg-secondary);
   
-  --el-fill-color: #334155;
-  --el-fill-color-light: #374151;
-  --el-fill-color-lighter: #2d3748;
-  --el-fill-color-extra-light: #2a3441;
+  --el-fill-color: var(--xw-bg-tertiary);
+  --el-fill-color-light: var(--xw-bg-quaternary);
+  --el-fill-color-lighter: var(--xw-bg-tertiary);
+  --el-fill-color-extra-light: var(--xw-bg-secondary);
   
   /* 自定义背景渐变 */
-  --app-bg-gradient: linear-gradient(135deg, #0f172a 0%, #1e293b 100%);
-  --card-bg: rgba(30, 41, 59, 0.8);
-  --sidebar-bg: rgba(30, 41, 59, 0.9);
+  --app-bg-gradient: var(--xw-gradient-primary);
+  --card-bg: var(--xw-card-bg);
+  --sidebar-bg: var(--xw-backdrop-blur);
 }
 
 html.dark body {
   background: var(--app-bg-gradient);
 }
 
-/* 亮色主题 */
+/* 亮色主题 - 使用设计系统变量 */
 html.light {
-  --el-bg-color: #ffffff;
-  --el-bg-color-page: #ffffff;
-  --el-bg-color-overlay: #ffffff;
+  --el-bg-color: var(--xw-bg-primary);
+  --el-bg-color-page: var(--xw-bg-primary);
+  --el-bg-color-overlay: var(--xw-bg-primary);
   
-  --el-text-color-primary: #1f2937;
-  --el-text-color-regular: #374151;
-  --el-text-color-secondary: #6b7280;
-  --el-text-color-placeholder: #9ca3af;
+  --el-text-color-primary: var(--xw-text-primary);
+  --el-text-color-regular: var(--xw-text-secondary);
+  --el-text-color-secondary: var(--xw-text-tertiary);
+  --el-text-color-placeholder: var(--xw-text-quaternary);
   
-  --el-border-color: #d1d5db;
-  --el-border-color-light: #e5e7eb;
-  --el-border-color-lighter: #e5e7eb;
-  --el-border-color-extra-light: #f3f4f6;
+  --el-border-color: var(--xw-border-primary);
+  --el-border-color-light: var(--xw-border-secondary);
+  --el-border-color-lighter: var(--xw-border-secondary);
+  --el-border-color-extra-light: var(--xw-border-tertiary);
   
-  --el-fill-color: #f9fafb;
-  --el-fill-color-light: #f3f4f6;
-  --el-fill-color-lighter: #e5e7eb;
-  --el-fill-color-extra-light: #f0f0f0;
+  --el-fill-color: var(--xw-bg-secondary);
+  --el-fill-color-light: var(--xw-bg-tertiary);
+  --el-fill-color-lighter: var(--xw-border-secondary);
+  --el-fill-color-extra-light: var(--xw-bg-secondary);
   
-  /* 自定义背景渐变 - 更亮的配色 */
-  --app-bg-gradient: linear-gradient(135deg, #ffffff 0%, #f0f9ff 50%, #e0f2fe 100%);
-  --card-bg: rgba(255, 255, 255, 0.95);
-  --sidebar-bg: rgba(255, 255, 255, 0.98);
+  /* 自定义背景渐变 */
+  --app-bg-gradient: var(--xw-gradient-primary);
+  --card-bg: var(--xw-card-bg);
+  --sidebar-bg: var(--xw-backdrop-blur);
 }
 
 html.light body {
@@ -202,20 +202,57 @@ html.light ::-webkit-scrollbar-thumb:hover {
   border-left-color: var(--el-color-primary) !important;
 }
 
-/* Element Plus component overrides */
+/* Element Plus component overrides - 使用设计系统 */
 .el-card {
   background: var(--card-bg) !important;
-  border: 1px solid var(--el-border-color-light) !important;
+  border: 1px solid var(--xw-card-border) !important;
   backdrop-filter: blur(10px);
+  border-radius: var(--xw-radius-lg) !important;
 }
 
 .el-button--primary {
-  background: linear-gradient(135deg, #6366f1, #8b5cf6) !important;
+  background: linear-gradient(135deg, var(--xw-primary), var(--xw-primary-light)) !important;
   border: none !important;
+  border-radius: var(--xw-radius) !important;
+  font-weight: 500 !important;
+  transition: var(--xw-transition) !important;
 }
 
 .el-button--primary:hover {
-  background: linear-gradient(135deg, #4f46e5, #7c3aed) !important;
+  background: linear-gradient(135deg, var(--xw-primary-dark), var(--xw-primary)) !important;
+  box-shadow: var(--xw-shadow-md) !important;
+}
+
+.el-button--primary:focus {
+  box-shadow: 0 0 0 3px rgba(99, 102, 241, 0.3) !important;
+}
+
+.el-button {
+  border-radius: var(--xw-radius) !important;
+  font-weight: 500 !important;
+  transition: var(--xw-transition) !important;
+}
+
+.el-input__wrapper {
+  border-radius: var(--xw-radius) !important;
+  transition: var(--xw-transition) !important;
+}
+
+.el-input__wrapper.is-focus {
+  box-shadow: 0 0 0 1px var(--xw-primary) inset !important;
+}
+
+.el-select .el-input__wrapper.is-focus {
+  box-shadow: 0 0 0 1px var(--xw-primary) inset !important;
+}
+
+.el-textarea__inner {
+  border-radius: var(--xw-radius) !important;
+  transition: var(--xw-transition) !important;
+}
+
+.el-textarea__inner:focus {
+  box-shadow: 0 0 0 1px var(--xw-primary) inset !important;
 }
 
 /* 表格样式 - 深色主题 */

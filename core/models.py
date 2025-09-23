@@ -262,8 +262,8 @@ class InviteToken(Base):
     def is_valid(self) -> bool:
         if not self.is_active:
             return False
-        # 过期校验
-        if self.expires_at is not None and not (datetime.now() < self.expires_at):
+        # 过期校验（与创建时保持 UTC 一致）
+        if self.expires_at is not None and not (datetime.utcnow() < self.expires_at):
             return False
         # 兼容旧数据：未设置 max_uses 时，沿用 used_at 单次使用逻辑
         if self.max_uses is None:

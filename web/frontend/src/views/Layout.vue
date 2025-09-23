@@ -14,20 +14,32 @@
       :class="{ 'mobile': isMobile, 'mobile-hidden': isMobile && collapsed }"
     >
       <div class="logo-container" :class="{ 'collapsed': collapsed }">
-        <div class="logo" v-if="!collapsed">
-          <el-icon size="28" color="#6366f1"><Document /></el-icon>
-          <span class="logo-text">XWall</span>
+        <!-- Logo区域 - 统一容器，避免跳动 -->
+        <div class="logo-section">
+          <el-icon size="28" color="#6366f1" class="logo-icon">
+            <Document />
+          </el-icon>
+          <transition name="logo-text-fade">
+            <span v-if="!collapsed" class="logo-text">XWall</span>
+          </transition>
         </div>
-        <div class="logo-collapsed" v-else>
-          <el-icon size="28" color="#6366f1"><Document /></el-icon>
-        </div>
-        <el-button 
-          :icon="collapsed ? Expand : Fold" 
-          text 
-          @click="toggleCollapse"
-          class="collapse-btn"
-          :class="{ 'collapsed': collapsed }"
-        />
+        
+        <!-- 折叠按钮 - 固定位置，避免跳动 -->
+        <el-tooltip 
+          :content="collapsed ? '展开侧边栏' : '折叠侧边栏'" 
+          placement="right"
+          :disabled="isMobile"
+        >
+          <button 
+            @click="toggleCollapse"
+            class="collapse-btn"
+            :class="{ 'collapsed': collapsed }"
+          >
+            <el-icon class="collapse-icon">
+              <component :is="collapsed ? Expand : Fold" />
+            </el-icon>
+          </button>
+        </el-tooltip>
       </div>
       
       <el-menu
@@ -52,35 +64,47 @@
       </el-menu>
       
       <!-- 用户信息 -->
-      <div class="user-section">
-        <el-dropdown placement="top-start" @command="handleUserCommand">
-          <div class="user-info">
-            <el-avatar :size="32" style="background-color: #6366f1;">
-              {{ userInitial }}
-            </el-avatar>
-            <span v-show="!collapsed" class="username">{{ user?.display_name || user?.username }}</span>
-          </div>
-          <template #dropdown>
-            <el-dropdown-menu>
-              <el-dropdown-item command="profile">
-                <el-icon><User /></el-icon>
-                个人信息
-              </el-dropdown-item>
-              <el-dropdown-item command="invite" v-if="user?.is_superadmin">
-                <el-icon><Plus /></el-icon>
-                创建邀请链接
-              </el-dropdown-item>
-              <el-dropdown-item command="theme" divided>
-                <el-icon><component :is="themeIcon" /></el-icon>
-                {{ themeText }}
-              </el-dropdown-item>
-              <el-dropdown-item command="logout" divided>
-                <el-icon><SwitchButton /></el-icon>
-                退出登录
-              </el-dropdown-item>
-            </el-dropdown-menu>
-          </template>
-        </el-dropdown>
+      <div class="user-section" :class="{ 'collapsed': collapsed }">
+        <el-tooltip 
+          :content="user?.display_name || user?.username || '用户'" 
+          placement="right"
+          :disabled="!collapsed || isMobile"
+        >
+          <el-dropdown 
+            :placement="collapsed ? 'right-start' : 'top-start'" 
+            @command="handleUserCommand"
+            :trigger="collapsed ? 'hover' : 'click'"
+          >
+            <div class="user-info" :class="{ 'collapsed': collapsed }">
+              <el-avatar :size="collapsed ? 28 : 32" style="background-color: #6366f1;">
+                {{ userInitial }}
+              </el-avatar>
+              <transition name="username-fade">
+                <span v-if="!collapsed" class="username">{{ user?.display_name || user?.username }}</span>
+              </transition>
+            </div>
+            <template #dropdown>
+              <el-dropdown-menu>
+                <el-dropdown-item command="profile">
+                  <el-icon><User /></el-icon>
+                  个人信息
+                </el-dropdown-item>
+                <el-dropdown-item command="invite" v-if="user?.is_superadmin">
+                  <el-icon><Plus /></el-icon>
+                  创建邀请链接
+                </el-dropdown-item>
+                <el-dropdown-item command="theme" divided>
+                  <el-icon><component :is="themeIcon" /></el-icon>
+                  {{ themeText }}
+                </el-dropdown-item>
+                <el-dropdown-item command="logout" divided>
+                  <el-icon><SwitchButton /></el-icon>
+                  退出登录
+                </el-dropdown-item>
+              </el-dropdown-menu>
+            </template>
+          </el-dropdown>
+        </el-tooltip>
       </div>
     </el-aside>
 
@@ -428,10 +452,22 @@ const resetInviteDialog = () => {
   inviteMaxUses.value = 1
 }
 
+// 键盘快捷键处理
+const handleKeydown = (event) => {
+  // Ctrl/Cmd + B 切换侧边栏
+  if ((event.ctrlKey || event.metaKey) && event.key === 'b' && !isMobile.value) {
+    event.preventDefault()
+    toggleCollapse()
+  }
+}
+
 onMounted(async () => {
   // 初始化移动端检测
   checkMobile()
   window.addEventListener('resize', handleResize)
+  
+  // 添加键盘快捷键
+  window.addEventListener('keydown', handleKeydown)
   
   await fetchUserInfo()
   await fetchPendingCount()
@@ -443,6 +479,7 @@ onMounted(async () => {
 // 组件卸载时清理事件监听
 onUnmounted(() => {
   window.removeEventListener('resize', handleResize)
+  window.removeEventListener('keydown', handleKeydown)
 })
 </script>
 
@@ -455,62 +492,145 @@ onUnmounted(() => {
 .sidebar {
   background: var(--sidebar-bg);
   border-right: 1px solid var(--el-border-color);
-  transition: width 0.3s ease, background 0.3s ease;
+  transition: all 0.3s cubic-bezier(0.4, 0, 0.2, 1);
   display: flex;
   flex-direction: column;
   backdrop-filter: blur(10px);
+  position: relative;
+  z-index: 100;
 }
 
+.sidebar::before {
+  content: '';
+  position: absolute;
+  top: 0;
+  right: 0;
+  bottom: 0;
+  width: 1px;
+  background: linear-gradient(
+    to bottom,
+    transparent 0%,
+    var(--xw-border-primary) 20%,
+    var(--xw-border-primary) 80%,
+    transparent 100%
+  );
+  transition: opacity 0.3s ease;
+}
+
+.sidebar:hover::before {
+  opacity: 0.8;
+}
+
+/* Logo容器 - 优化布局和动画 */
 .logo-container {
   height: 64px;
   display: flex;
   align-items: center;
   justify-content: space-between;
-  padding: 0 16px;
+  padding: 0 12px;
   border-bottom: 1px solid var(--el-border-color-light);
   position: relative;
+  transition: padding 0.3s ease;
 }
 
 .logo-container.collapsed {
-  justify-content: center;
   flex-direction: column;
-  gap: 8px;
+  justify-content: center;
+  gap: 6px;
+  padding: 8px 12px;
 }
 
-.logo {
+/* Logo区域 - 统一布局避免跳动 */
+.logo-section {
   display: flex;
   align-items: center;
   gap: 12px;
-  font-size: 18px;
-  font-weight: 600;
-  color: var(--el-text-color-primary);
   flex: 1;
+  min-width: 0;
+  transition: all 0.3s cubic-bezier(0.4, 0, 0.2, 1);
 }
 
-.logo-collapsed {
-  display: flex;
-  align-items: center;
+.logo-container.collapsed .logo-section {
+  flex: none;
   justify-content: center;
-  width: 100%;
+  gap: 0;
+}
+
+.logo-icon {
+  flex-shrink: 0;
+  transition: transform 0.3s ease;
+}
+
+.logo-container.collapsed .logo-icon {
+  transform: scale(0.9);
 }
 
 .logo-text {
-  background: linear-gradient(135deg, #6366f1, #8b5cf6);
+  font-size: 18px;
+  font-weight: 600;
+  background: linear-gradient(135deg, var(--xw-primary), var(--xw-primary-light));
   -webkit-background-clip: text;
   -webkit-text-fill-color: transparent;
   background-clip: text;
+  white-space: nowrap;
+  overflow: hidden;
 }
 
+/* 折叠按钮 - 优化动画和交互 */
 .collapse-btn {
-  color: var(--el-text-color-secondary);
-  position: absolute;
-  right: 16px;
-  transition: all 0.3s ease;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  width: 32px;
+  height: 32px;
+  border: none;
+  border-radius: var(--xw-radius);
+  background: transparent;
+  color: var(--xw-text-tertiary);
+  cursor: pointer;
+  transition: all 0.3s cubic-bezier(0.4, 0, 0.2, 1);
+  flex-shrink: 0;
+}
+
+.collapse-btn:hover {
+  background: var(--xw-bg-secondary);
+  color: var(--xw-primary);
+  transform: scale(1.05);
+}
+
+.collapse-btn:active {
+  transform: scale(0.95);
 }
 
 .collapse-btn.collapsed {
-  position: static;
-  margin: 0 auto;
+  width: 28px;
+  height: 28px;
+}
+
+.collapse-icon {
+  transition: transform 0.3s cubic-bezier(0.4, 0, 0.2, 1);
+}
+
+.collapse-btn:hover .collapse-icon {
+  transform: rotate(180deg);
+}
+
+/* Logo文本淡入淡出动画 */
+.logo-text-fade-enter-active,
+.logo-text-fade-leave-active {
+  transition: all 0.3s cubic-bezier(0.4, 0, 0.2, 1);
+}
+
+.logo-text-fade-enter-from,
+.logo-text-fade-leave-to {
+  opacity: 0;
+  transform: translateX(-10px);
+}
+
+.logo-text-fade-enter-to,
+.logo-text-fade-leave-from {
+  opacity: 1;
+  transform: translateX(0);
 }
 
 .nav-menu {
@@ -519,9 +639,9 @@ onUnmounted(() => {
   padding: 16px 0;
 }
 
-/* 折叠态：菜单项与图标完全居中 */
+/* 导航菜单 - 优化折叠状态 */
 :deep(.el-menu--collapse) {
-  width: 64px; /* 与 aside 折叠宽度一致，避免视觉偏移 */
+  width: 64px;
 }
 
 :deep(.el-menu--collapse .el-menu-item),
@@ -531,37 +651,76 @@ onUnmounted(() => {
   display: flex;
   align-items: center;
   justify-content: center;
+  margin: 4px 8px;
+  border-radius: var(--xw-radius-lg);
+  transition: all 0.3s cubic-bezier(0.4, 0, 0.2, 1);
 }
 
-/* 清除图标默认右侧外边距，确保图标水平正中 */
 :deep(.el-menu--collapse .el-menu-item .el-icon),
 :deep(.el-menu--collapse .el-sub-menu__title .el-icon) {
   margin: 0 !important;
+  font-size: 18px;
+  transition: transform 0.3s ease;
 }
 
-/* 高亮项在折叠时的视觉居中与圆角背景 */
+:deep(.el-menu--collapse .el-menu-item:hover .el-icon) {
+  transform: scale(1.1);
+}
+
 :deep(.el-menu--collapse .el-menu-item.is-active) {
-  border-radius: 8px;
+  background: linear-gradient(135deg, var(--xw-primary-lightest), rgba(99, 102, 241, 0.15));
+  box-shadow: var(--xw-shadow-sm);
 }
 
 .nav-item {
   margin: 4px 12px;
-  border-radius: 8px;
-  transition: all 0.3s ease;
+  border-radius: var(--xw-radius-lg);
+  transition: all 0.3s cubic-bezier(0.4, 0, 0.2, 1);
+  position: relative;
+  overflow: hidden;
+}
+
+.nav-item::before {
+  content: '';
+  position: absolute;
+  left: 0;
+  top: 0;
+  bottom: 0;
+  width: 0;
+  background: linear-gradient(135deg, var(--xw-primary), var(--xw-primary-light));
+  transition: width 0.3s ease;
+}
+
+.nav-item:hover::before {
+  width: 3px;
 }
 
 .nav-item:hover {
-  background: rgba(99, 102, 241, 0.1);
+  background: rgba(99, 102, 241, 0.08);
+  transform: translateX(2px);
 }
 
 .nav-item.is-active {
-  background: rgba(99, 102, 241, 0.15);
-  color: var(--el-color-primary);
+  background: linear-gradient(135deg, var(--xw-primary-lightest), rgba(99, 102, 241, 0.15));
+  color: var(--xw-primary);
+  box-shadow: var(--xw-shadow-sm);
 }
 
+.nav-item.is-active::before {
+  width: 3px;
+}
+
+/* 用户信息区域 - 优化折叠状态 */
 .user-section {
   padding: 16px;
   border-top: 1px solid var(--el-border-color-light);
+  transition: all 0.3s ease;
+}
+
+.user-section.collapsed {
+  padding: 12px 8px;
+  display: flex;
+  justify-content: center;
 }
 
 .user-info {
@@ -570,18 +729,54 @@ onUnmounted(() => {
   gap: 12px;
   cursor: pointer;
   padding: 8px;
-  border-radius: 8px;
-  transition: background 0.3s ease;
+  border-radius: var(--xw-radius-lg);
+  transition: all 0.3s cubic-bezier(0.4, 0, 0.2, 1);
+  min-height: 48px;
+  position: relative;
+}
+
+.user-info.collapsed {
+  gap: 0;
+  padding: 6px;
+  min-height: 40px;
+  justify-content: center;
 }
 
 .user-info:hover {
-  background: rgba(99, 102, 241, 0.1);
+  background: rgba(99, 102, 241, 0.08);
+  transform: translateY(-1px);
+  box-shadow: var(--xw-shadow-sm);
 }
 
 .username {
   font-size: 14px;
-  color: var(--el-text-color-primary);
+  color: var(--xw-text-primary);
   font-weight: 500;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  min-width: 0;
+  flex: 1;
+}
+
+/* 用户名淡入淡出动画 */
+.username-fade-enter-active,
+.username-fade-leave-active {
+  transition: all 0.3s cubic-bezier(0.4, 0, 0.2, 1);
+}
+
+.username-fade-enter-from,
+.username-fade-leave-to {
+  opacity: 0;
+  transform: translateX(-10px);
+  max-width: 0;
+}
+
+.username-fade-enter-to,
+.username-fade-leave-from {
+  opacity: 1;
+  transform: translateX(0);
+  max-width: 200px;
 }
 
 .main-container {
@@ -690,20 +885,78 @@ onUnmounted(() => {
   flex: 1;
 }
 
-/* 移动端适配 */
+/* 移动端适配 - 优化动画效果 */
 .sidebar.mobile {
   position: fixed;
   top: 0;
   left: 0;
   z-index: 1000;
   height: 100vh;
-  box-shadow: 2px 0 8px rgba(0, 0, 0, 0.15);
+  box-shadow: var(--xw-shadow-xl);
   transform: translateX(0);
-  transition: transform 0.3s ease;
+  transition: all 0.3s cubic-bezier(0.4, 0, 0.2, 1);
+  border-right: none;
+}
+
+.sidebar.mobile::before {
+  display: none;
 }
 
 .sidebar.mobile-hidden {
   transform: translateX(-100%);
+}
+
+.sidebar.mobile:not(.mobile-hidden) {
+  animation: slideInFromLeft 0.3s cubic-bezier(0.4, 0, 0.2, 1);
+}
+
+@keyframes slideInFromLeft {
+  from {
+    transform: translateX(-100%);
+    opacity: 0.8;
+  }
+  to {
+    transform: translateX(0);
+    opacity: 1;
+  }
+}
+
+/* 移动端菜单按钮优化 */
+.mobile-menu-btn {
+  color: var(--xw-text-primary);
+  font-size: 20px;
+  padding: 8px;
+  border-radius: var(--xw-radius);
+  transition: all 0.3s ease;
+  position: relative;
+  overflow: hidden;
+}
+
+.mobile-menu-btn::before {
+  content: '';
+  position: absolute;
+  top: 50%;
+  left: 50%;
+  width: 0;
+  height: 0;
+  background: radial-gradient(circle, var(--xw-primary-lightest) 0%, transparent 70%);
+  transition: all 0.3s ease;
+  border-radius: 50%;
+  transform: translate(-50%, -50%);
+}
+
+.mobile-menu-btn:hover::before {
+  width: 40px;
+  height: 40px;
+}
+
+.mobile-menu-btn:hover {
+  color: var(--xw-primary);
+  transform: scale(1.05);
+}
+
+.mobile-menu-btn:active {
+  transform: scale(0.95);
 }
 
 /* 响应式设计 */

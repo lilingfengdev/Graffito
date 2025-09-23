@@ -179,7 +179,7 @@ onMounted(() => {
     (new URLSearchParams(location.hash.replace(/^#/, ''))).get('invite')
   
   if (inviteToken) {
-    form.value.token = inviteToken
+    form.value.token = inviteToken.trim()
     ElMessage.success('已自动填入邀请令牌')
   }
 })
@@ -199,7 +199,7 @@ const register = async () => {
   
   try {
     await api.post('/auth/register-invite', {
-      token: form.value.token,
+      token: form.value.token.trim(),
       username: form.value.username,
       password: form.value.password,
       display_name: form.value.displayName || undefined

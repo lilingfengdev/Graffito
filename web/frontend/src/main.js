@@ -12,6 +12,12 @@ import * as ElementPlusIconsVue from '@element-plus/icons-vue'
 import NProgress from 'nprogress'
 import 'nprogress/nprogress.css'
 
+// 引入统一设计系统样式
+import './styles/design-system.css'
+
+// 引入统一组件系统
+import XwComponents from './components/index.js'
+
 const app = createApp(App)
 
 // Register all Element Plus icons
@@ -24,5 +30,6 @@ NProgress.configure({ showSpinner: false })
 
 app.use(router)
 app.use(ElementPlus)
+app.use(XwComponents)
 app.mount('#app')
 
