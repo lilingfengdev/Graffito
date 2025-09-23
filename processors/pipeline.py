@@ -12,6 +12,9 @@ from .html_renderer import HTMLRenderer
 from .content_renderer import ContentRenderer
 
 
+_shared_pipeline: Optional["ProcessingPipeline"] = None
+
+
 class ProcessingPipeline:
     """消息处理管道"""
     
@@ -20,16 +23,28 @@ class ProcessingPipeline:
         self.html_renderer = HTMLRenderer()
         self.content_renderer = ContentRenderer()
         self.logger = logger.bind(module="pipeline")
+        self._initialized: bool = False
+        self._init_lock: asyncio.Lock = asyncio.Lock()
+        self._shutdown_called: bool = False
         
     async def initialize(self):
-        """初始化管道"""
-        await self.llm_processor.initialize()
-        await self.html_renderer.initialize()
-        await self.content_renderer.initialize()
-        self.logger.info("处理管道初始化完成")
+        """初始化管道（幂等）"""
+        if self._initialized:
+            return
+        async with self._init_lock:
+            if self._initialized:
+                return
+            await self.llm_processor.initialize()
+            await self.html_renderer.initialize()
+            await self.content_renderer.initialize()
+            self._initialized = True
+            self.logger.info("处理管道初始化完成")
         
     async def shutdown(self):
-        """关闭管道"""
+        """关闭管道（幂等）"""
+        if not self._initialized or self._shutdown_called:
+            return
+        self._shutdown_called = True
         await self.llm_processor.shutdown()
         await self.html_renderer.shutdown()
         await self.content_renderer.shutdown()
@@ -262,3 +277,11 @@ class ProcessingPipeline:
         except Exception as e:
             self.logger.error(f"重新处理投稿失败 {submission_id}: {e}", exc_info=True)
             return False
+
+
+def get_shared_pipeline() -> ProcessingPipeline:
+    """获取全局共享的处理管道实例（单例）。"""
+    global _shared_pipeline
+    if _shared_pipeline is None:
+        _shared_pipeline = ProcessingPipeline()
+    return _shared_pipeline

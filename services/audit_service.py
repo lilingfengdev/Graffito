@@ -7,7 +7,7 @@ from loguru import logger
 from core.database import get_db
 from core.models import Submission, AuditLog, BlackList, StoredPost
 from core.enums import SubmissionStatus, AuditAction
-from processors.pipeline import ProcessingPipeline
+from processors.pipeline import get_shared_pipeline, ProcessingPipeline
 
 # module-level commonly used imports to avoid repeated runtime imports
 from config import get_settings
@@ -21,7 +21,8 @@ class AuditService:
     
     def __init__(self):
         self.logger = logger.bind(module="audit")
-        self.pipeline = ProcessingPipeline()
+        # 共享全局管道，避免重复初始化
+        self.pipeline = get_shared_pipeline()
         self.commands = {
             '是': self.approve,
             '否': self.reject,

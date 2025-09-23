@@ -1,4 +1,49 @@
 ---
+description: 处理器数据契约（LLM -> HTML -> Content 渲染）
+---
+
+# 处理器数据契约（processors-contracts）
+
+适用范围：`processors/*` 与依赖处理结果的 `publishers/*`、`receivers/*`。
+
+## 管道阶段与职责
+- `LLMProcessor`（[processors/llm_processor.py](mdc:processors/llm_processor.py)）
+  - 输入：`Submission`（含用户消息或聚合文本）
+  - 输出：结构化 LLM 结果 `submission.llm_result`（JSON 兼容，包含标题、段落、标签、外链等）
+- `HTMLRenderer`（[processors/html_renderer.py](mdc:processors/html_renderer.py)）
+  - 输入：`submission.llm_result`
+  - 输出：HTML 字符串 `submission.processed_content`
+- `ContentRenderer`（[processors/content_renderer.py](mdc:processors/content_renderer.py)）
+  - 输入：`submission.processed_content`（HTML）
+  - 输出：图片渲染列表 `submission.rendered_images`（文件路径或二进制引用）
+
+## 状态流转契约
+由 `ProcessingPipeline.process_submission()`（[processors/pipeline.py](mdc:processors/pipeline.py)）负责：
+- 开始处理：`Submission.status = PROCESSING`
+- 渲染完成：`Submission.status = WAITING`
+- 发布成功：`Submission.status = PUBLISHED`
+
+## 数据写回契约
+- 必填写回字段：
+  - `submission.llm_result`
+  - `submission.processed_content`
+  - `submission.rendered_images`
+- 写回时应保证：
+  - 字段可序列化（JSON 友好）
+  - 尺寸可控（必要时做截断或拆分）
+  - 路径为相对工程路径或受控的绝对路径
+
+## 消息缓存清理
+- 管道处理成功后，需清理对应的 `MessageCache`，防止历史消息重复合并。
+
+## 错误与重试
+- 各阶段应抛出具有上下文的异常，并由管道统一捕获记录。
+- 允许幂等重试；处理器不应产生不可逆副作用（例如重复写文件名需具备去重/覆盖策略）。
+
+## 与发布器的集成
+- 文本统一通过 `BasePublisher.prepare_content()`（[publishers/base.py](mdc:publishers/base.py)）组装。
+- 是否包含编号、@、分段、链接由对应平台配置控制（见 `config/publishers/*.yml`）。
+---
 alwaysApply: false
 description: 处理器数据契约（LLM -> HTML -> Content 渲染）
 globs: processors/**/*.py

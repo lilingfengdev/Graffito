@@ -7,7 +7,7 @@ from loguru import logger
 from core.database import get_db
 from core.models import Submission, MessageCache, StoredPost, PublishRecord, BlackList
 from core.enums import SubmissionStatus, PublishPlatform
-from processors.pipeline import ProcessingPipeline
+from processors.pipeline import get_shared_pipeline, ProcessingPipeline
 from apscheduler.schedulers.asyncio import AsyncIOScheduler
 from apscheduler.triggers.cron import CronTrigger
 
@@ -24,7 +24,8 @@ class SubmissionService:
     
     def __init__(self):
         self.logger = logger.bind(module="submission")
-        self.pipeline = ProcessingPipeline()
+        # 共享全局管道，避免重复初始化
+        self.pipeline = get_shared_pipeline()
         self.publishers = {}
         self.scheduler: Optional[AsyncIOScheduler] = None
         self._queue_backend: TaskQueueBackend = build_queue_backend()

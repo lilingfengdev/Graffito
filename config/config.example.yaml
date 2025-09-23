@@ -11,7 +11,7 @@ system:
   debug: false
 
   log_level: INFO
-
+  # 除非你知道你在做什么,否则千万不要改,因为压根没做兼容
   data_dir: ./data
 
   cache_dir: ./data/cache
@@ -27,6 +27,37 @@ server:
   port: 8082
 
   workers: 4
+
+
+
+# Web 后端配置
+
+web:
+
+  enabled: true
+
+  host: "0.0.0.0"
+
+  port: 8083
+
+  # 前端来源（可选）：设置为前端站点的完整 Origin（含协议与端口），例如 "http://localhost:5173"
+  frontend_origin: ""
+
+  # 身份认证（JWT），用于前端登录会话
+  jwt_secret_key: "change-this-secret"
+
+  jwt_algorithm: "HS256"
+
+  access_token_expires_minutes: 720
+
+  # CORS 跨域设置（如前端域名固定，建议仅设置 frontend_origin）
+  cors_allow_origins: [ "*" ]
+
+  cors_allow_credentials: true
+
+  cors_allow_methods: [ "*" ]
+
+  cors_allow_headers: [ "*" ]
 
 
 

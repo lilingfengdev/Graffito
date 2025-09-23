@@ -10,9 +10,8 @@
   
   🚀 **智能化校园墙自动运营解决方案**
   
-  基于 Python + AI 的全自动校园墙系统，支持 QQ 消息接收、智能内容处理、多平台自动发布
-  
-  [📚 完整文档](docs/) • [🚀 快速开始](docs/installation.md) • [⚙️ 配置指南](docs/configuration.md) • [📖 使用手册](docs/usage.md)
+  基于 Python + AI 的全自动校园墙系统，支持 QQ 消息接收、网页审核、智能内容处理、多平台自动发布
+
 </div>
 
 ---
@@ -73,28 +72,6 @@ graph LR
     F --> F3[📱 小红书]
 ```
 
-## 🚀 快速开始
-
-### ⚡ 一键启动
-
-#### Windows 用户
-```bash
-start.bat
-```
-
-#### Linux/Mac 用户
-```bash
-git clone https://github.com/lilingfengdev/XWall.git
-cd XWall
-pip install -r requirements.txt
-playwright install chromium
-cp config/config.example.yaml config/config.yaml
-# 编辑配置文件后启动
-python main.py
-```
-
-> 📖 **详细安装和配置说明**：[安装部署指南](docs/installation.md) | [配置指南](docs/configuration.md)
-
 ## 🛠️ 技术栈
 
 <div align="center">
@@ -112,16 +89,14 @@ python main.py
 - [x] QQ 接收器与发送器
 - [x] 渲染器
 - [x] LLM 审核
-- [ ] Bilibili 与小红书推送
-- [ ] 网页审核
+- [ ] 网页审核(Work)
+- [ ] Bilibili 与小红书推送(Work)
 - [ ] 微信接收器与发送器(企业微信或者 WeChatPadPro)
+
 
 ## 📚 文档
 
-- 📖 [用户使用手册](docs/usage.md) - 详细的使用流程和操作说明
-- 👨‍💼 [管理员指南](docs/admin-guide.md) - 审核管理和系统维护
-- ⚙️ [配置指南](docs/configuration.md) - 完整的配置说明和示例
-- 🔧 [安装部署](docs/installation.md) - 详细的安装和部署说明
+实在不想写,AI 写的太烂了,有人来写吗?
 
 ## 📁 项目结构
 

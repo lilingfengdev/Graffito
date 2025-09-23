@@ -1,6 +1,7 @@
 """基于 NoneBot2 的 QQ 接收器实现"""
 
 import asyncio
+import contextlib
 
 import random
 
@@ -53,6 +54,8 @@ class QQReceiver(BaseReceiver):
         self.app = None
 
         self.server: Optional[Server] = None
+        # 保存 Uvicorn 服务任务以便优雅关闭
+        self.server_task: Optional[asyncio.Task] = None
 
         self.friend_request_cache: Dict[str, float] = {}
 
@@ -125,6 +128,22 @@ class QQReceiver(BaseReceiver):
             pass
 
         nonebot.init()
+        
+        # NoneBot2 初始化后重新配置日志文件输出（避免被覆盖）
+        import os
+        if os.getenv("XWALL_LOG_CONFIGURED") == "true":
+            from loguru import logger as loguru_logger
+            import sys
+            # 重新添加文件日志处理器
+            loguru_logger.add(
+                "data/logs/xwall_{time:YYYY-MM-DD}.log",
+                rotation="00:00",
+                retention="30 days",
+                level="DEBUG",
+                # 确保格式一致
+                format="{time:YYYY-MM-DD HH:mm:ss.SSS} | {level: <8} | {name}:{function}:{line} - {message}"
+            )
+            logger.info("NoneBot2 初始化后重新配置文件日志")
 
         driver = nonebot.get_driver()
 
@@ -839,8 +858,8 @@ class QQReceiver(BaseReceiver):
         )
 
         self.server = Server(config)
-
-        asyncio.create_task(self.server.serve())
+        # 保存任务句柄，便于 stop 阶段等待退出
+        self.server_task = asyncio.create_task(self.server.serve())
 
         self.logger.info(f"QQ NoneBot 接收器已启动: {config.host}:{config.port}")
 
@@ -853,8 +872,23 @@ class QQReceiver(BaseReceiver):
 
         if self.server:
             self.server.should_exit = True
-
-            await asyncio.sleep(1)
+            # 优雅等待服务任务退出；超时则强制取消
+            try:
+                if self.server_task:
+                    await asyncio.wait_for(self.server_task, timeout=5)
+            except asyncio.TimeoutError:
+                try:
+                    if self.server_task and not self.server_task.done():
+                        self.server_task.cancel()
+                        with contextlib.suppress(asyncio.CancelledError):
+                            await self.server_task
+                except Exception:
+                    pass
+            except asyncio.CancelledError:
+                pass
+            except Exception:
+                # 兜底等待一小段时间
+                await asyncio.sleep(0.5)
 
         self.logger.info("QQ NoneBot 接收器已停止")
 

@@ -1,4 +1,46 @@
 ---
+description: 本地运行与常见操作手册
+---
+
+# 本地运行与常见操作手册（runbook）
+
+## 环境准备
+- Python 版本：与项目 `pyproject.toml`/`requirements.txt` 一致
+- 安装依赖：`pip install -r requirements.txt`
+- 配置文件：
+  - 基础配置：[config/config.yaml](mdc:config/config.yaml)
+  - 平台配置：`config/publishers/*.yml`
+
+## 数据库
+- 连接与会话由 [core/database.py](mdc:core/database.py) 管理。
+- 首次运行会自动初始化引擎；模型见 [core/models.py](mdc:core/models.py)。
+
+## 启动程序
+- 主入口：[main.py](mdc:main.py)
+- 常用命令（示例）：
+  - `python main.py` 启动服务或任务调度
+
+## 处理管道
+- 管道编排：[processors/pipeline.py](mdc:processors/pipeline.py)
+- 渲染器：[processors/html_renderer.py](mdc:processors/html_renderer.py)、[processors/content_renderer.py](mdc:processors/content_renderer.py)
+- LLM 处理：[processors/llm_processor.py](mdc:processors/llm_processor.py)
+
+## 发布器
+- 基类与发现：[publishers/base.py](mdc:publishers/base.py)、[publishers/loader.py](mdc:publishers/loader.py)
+- 平台配置：
+  - 哔哩哔哩：[config/publishers/bilibili.yml](mdc:config/publishers/bilibili.yml)
+  - QQ 空间：[config/publishers/qzone.yml](mdc:config/publishers/qzone.yml)
+  - 小红书：[config/publishers/rednote.yml](mdc:config/publishers/rednote.yml)
+
+## 调试与排错
+- 开启更详细日志：在 `config/config.yaml` 中调整日志级别。
+- 数据库问题：检查连接串/会话泄漏，遵循 [async-db](mdc:.cursor/rules/async-db.mdc)。
+- 状态异常：确认 `Submission.status` 状态机流转是否符合约定。
+
+## 常见注意事项
+- 管道处理完成后需清理 `MessageCache`，避免历史记录重复影响。
+- 任何新平台发布器需通过 `BasePublisher.prepare_content()` 统一组装文本。
+---
 alwaysApply: false
 description: 本地运行与常见操作手册
 ---

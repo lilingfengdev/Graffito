@@ -12,17 +12,24 @@ from loguru import logger
 
 # 配置日志
 logger.remove()  # 移除默认处理器
-logger.add(
+# 控制台日志处理器
+console_handler_id = logger.add(
     sys.stdout,
     format="<green>{time:YYYY-MM-DD HH:mm:ss}</green> | <level>{level: <8}</level> | <cyan>{name}</cyan>:<cyan>{function}</cyan>:<cyan>{line}</cyan> - <level>{message}</level>",
     level="INFO"
 )
-logger.add(
+# 文件日志处理器
+file_handler_id = logger.add(
     "data/logs/xwall_{time:YYYY-MM-DD}.log",
     rotation="00:00",
     retention="30 days",
-    level="DEBUG"
+    level="DEBUG",
+    format="{time:YYYY-MM-DD HH:mm:ss.SSS} | {level: <8} | {name}:{function}:{line} - {message}"
 )
+
+# 设置全局标志，用于其他模块检查是否需要重新配置日志
+import os
+os.environ["XWALL_LOG_CONFIGURED"] = "true"
 
 from config import get_settings
 from core.database import get_db, close_db
@@ -161,14 +168,22 @@ class XWallApp:
         # 启动 Web 后端（可选）
         if getattr(self.settings, 'web', None) and self.settings.web.enabled:
             try:
-                from web.backend.app import app as web_app
+                from web.backend import app as web_app_module
+                web_app = web_app_module.app
+                # Inject shared services so web reuses initialized pipeline
+                try:
+                    if hasattr(web_app_module, 'set_services'):
+                        web_app_module.set_services(self.audit_service)
+                except Exception as e:
+                    logger.warning(f"注入服务到 Web 失败: {e}")
                 web_cfg = uvicorn.Config(
                     web_app,
                     host=self.settings.web.host,
                     port=self.settings.web.port,
                     loop="asyncio",
                     lifespan="on",
-                    log_level="info"
+                    log_level="info",
+                    access_log=False
                 )
                 self.web_server = uvicorn.Server(web_cfg)
                 self.web_task = asyncio.create_task(self.web_server.serve())

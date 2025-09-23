@@ -255,12 +255,42 @@ class InviteToken(Base):
     used_at = Column(DateTime)
     is_active = Column(Boolean, default=True, index=True)
     created_at = Column(DateTime, default=func.now())
+    # 使用次数限制：若为空则兼容旧逻辑（单次使用，以 used_at 判定）
+    max_uses = Column(Integer)
+    uses_count = Column(Integer, default=0)
 
     def is_valid(self) -> bool:
         if not self.is_active:
             return False
-        if self.used_at is not None:
+        # 过期校验
+        if self.expires_at is not None and not (datetime.now() < self.expires_at):
             return False
-        if self.expires_at is None:
-            return True
-        return datetime.now() < self.expires_at
+        # 兼容旧数据：未设置 max_uses 时，沿用 used_at 单次使用逻辑
+        if self.max_uses is None:
+            return self.used_at is None
+        # 新逻辑：未达到最大使用次数
+        current_uses = self.uses_count or 0
+        return current_uses < (self.max_uses or 1)
+
+
+class AdminProfile(Base):
+    """管理员扩展信息
+
+    用于为后台用户提供角色、权限、备注及最后登录时间等扩展字段，
+    不改变核心 `users` 表结构，兼容既有流程。
+    """
+    __tablename__ = 'admin_profiles'
+
+    id = Column(Integer, primary_key=True, autoincrement=True)
+    user_id = Column(Integer, ForeignKey('users.id'), nullable=False, unique=True, index=True)
+
+    # 展示/权限信息
+    nickname = Column(String(100))
+    role = Column(String(20), default='admin', index=True)  # admin | senior_admin | super_admin
+    permissions = Column(JSON)  # list[str]
+    notes = Column(Text)
+
+    # 审计信息
+    last_login = Column(DateTime)
+    created_at = Column(DateTime, default=func.now())
+    updated_at = Column(DateTime, default=func.now(), onupdate=func.now())

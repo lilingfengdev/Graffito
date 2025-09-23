@@ -18,6 +18,7 @@ from fastapi import FastAPI, Depends, HTTPException, status
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.security import OAuth2PasswordRequestForm
 from fastapi.responses import JSONResponse
+from fastapi.staticfiles import StaticFiles
 
 import jwt
 from passlib.context import CryptContext
@@ -26,6 +27,7 @@ from pydantic import BaseModel
 
 from config import get_settings
 from core.database import get_db
+from services.audit_service import AuditService
 
 
 # Security helpers
@@ -60,10 +62,14 @@ class UserOut(BaseModel):
     display_name: Optional[str] = None
     is_admin: bool
     is_superadmin: bool
+    # Extended for frontend compatibility
+    user_id: Optional[str] = None  # mirrors username for admin pages
+    role: Optional[str] = None     # 'super_admin' | 'senior_admin' | 'admin'
 
 
 class InviteCreateIn(BaseModel):
     expires_in_minutes: Optional[int] = 60
+    max_uses: Optional[int] = 1
 
 
 class RegisterViaInviteIn(BaseModel):
@@ -79,16 +85,43 @@ def orjson_dumps(v, *, default):
 
 app = FastAPI(default_response_class=JSONResponse)
 
+# Shared services (can be injected from main); if not injected, we'll create on startup
+audit_service: Optional[AuditService] = None
+_owns_audit_service: bool = False
+
+
+def set_services(audit: AuditService) -> None:
+    """Inject shared service instances created by the main app.
+
+    If provided, web backend will not re-initialize or shutdown them.
+    """
+    global audit_service, _owns_audit_service
+    audit_service = audit
+    _owns_audit_service = False
+
 
 # CORS
 _settings = get_settings()
+# 简化 CORS：若配置了 frontend_origin，则仅允许该来源；否则回退至列表配置
+try:
+    _frontend_origin = getattr(_settings.web, 'frontend_origin', None)
+except Exception:
+    _frontend_origin = None
+_allow_origins = [_frontend_origin] if _frontend_origin else _settings.web.cors_allow_origins
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=_settings.web.cors_allow_origins,
+    allow_origins=_allow_origins,
     allow_credentials=_settings.web.cors_allow_credentials,
     allow_methods=_settings.web.cors_allow_methods,
     allow_headers=_settings.web.cors_allow_headers,
 )
+
+# 静态资源与渲染图片目录
+try:
+    app.mount("/static", StaticFiles(directory="static", check_dir=False), name="static")
+    app.mount("/data", StaticFiles(directory="data", check_dir=False), name="data")
+except Exception:
+    pass
 
 
 def get_current_user_from_headers(authorization: Optional[str]) -> Dict[str, Any]:
@@ -109,6 +142,25 @@ def get_current_user_from_headers(authorization: Optional[str]) -> Dict[str, Any
 async def on_startup():
     # Ensure DB is initialized
     await get_db()
+    # Initialize shared services for audit endpoints if not injected
+    global audit_service, _owns_audit_service
+    if audit_service is None:
+        try:
+            audit_service = AuditService()
+            await audit_service.initialize()
+            _owns_audit_service = True
+        except Exception:
+            pass
+
+
+@app.on_event("shutdown")
+async def on_shutdown():
+    global audit_service, _owns_audit_service
+    if _owns_audit_service and audit_service is not None:
+        try:
+            await audit_service.shutdown()
+        except Exception:
+            pass
 
 
 @app.get("/health")
@@ -178,7 +230,7 @@ async def login(form_data: OAuth2PasswordRequestForm = Depends()):
     db = await get_db()
     async with db.get_session() as session:
         from sqlalchemy import select
-        from core.models import User
+        from core.models import User, AdminProfile
 
         stmt = select(User).where(User.username == form_data.username)
         result = await session.execute(stmt)
@@ -192,6 +244,19 @@ async def login(form_data: OAuth2PasswordRequestForm = Depends()):
             "is_admin": user.is_admin,
             "is_superadmin": user.is_superadmin,
         }, get_settings().web.access_token_expires_minutes)
+        # update last_login on AdminProfile
+        try:
+            prof = (await session.execute(select(AdminProfile).where(AdminProfile.user_id == user.id))).scalar_one_or_none()
+            now = datetime.utcnow()
+            if prof:
+                prof.last_login = now
+            else:
+                # create a lightweight profile to track last_login only
+                prof = AdminProfile(user_id=user.id, last_login=now)
+                session.add(prof)
+            await session.flush()
+        except Exception:
+            pass
         return TokenResponse(access_token=token)
 
 
@@ -205,19 +270,30 @@ async def me(authorization: Optional[str] = Header(default=None)):
     db = await get_db()
     async with db.get_session() as session:
         from sqlalchemy import select
-        from core.models import User
+        from core.models import User, AdminProfile
 
         stmt = select(User).where(User.id == user_id)
         result = await session.execute(stmt)
         user = result.scalar_one_or_none()
         if not user or not user.is_active:
             raise HTTPException(status_code=401, detail="User inactive")
+        # derive role
+        prof = (await session.execute(select(AdminProfile).where(AdminProfile.user_id == user.id))).scalar_one_or_none()
+        role = None
+        if user.is_superadmin:
+            role = "super_admin"
+        elif prof and prof.role:
+            role = prof.role
+        elif user.is_admin:
+            role = "admin"
         return UserOut(
             id=user.id,
             username=user.username,
             display_name=user.display_name,
             is_admin=user.is_admin,
             is_superadmin=user.is_superadmin,
+            user_id=user.username,
+            role=role,
         )
 
 
@@ -239,15 +315,28 @@ async def create_invite(body: InviteCreateIn, authorization: Optional[str] = Hea
         if body.expires_in_minutes and body.expires_in_minutes > 0:
             expires_at = datetime.utcnow() + timedelta(minutes=body.expires_in_minutes)
 
+        # 服务器端限制使用次数范围（1-1000）
+        _max_uses = body.max_uses if body.max_uses is not None else 1
+        if _max_uses < 1:
+            _max_uses = 1
+        if _max_uses > 1000:
+            _max_uses = 1000
+
         invite = InviteToken(
             token=token,
             created_by_user_id=int(payload["sub"]),
             expires_at=expires_at,
             is_active=True,
+            max_uses=_max_uses,
+            uses_count=0,
         )
         session.add(invite)
         await session.flush()
-        return {"token": token, "expires_at": expires_at.isoformat() if expires_at else None}
+        return {
+            "token": token,
+            "expires_at": expires_at.isoformat() if expires_at else None,
+            "max_uses": invite.max_uses,
+        }
 
 
 @app.post("/auth/register-invite", response_model=UserOut)
@@ -281,9 +370,15 @@ async def register_via_invite(body: RegisterViaInviteIn):
         session.add(user)
         await session.flush()
 
-        invite.used_by_user_id = user.id
-        invite.used_at = datetime.utcnow()
-        invite.is_active = False
+        # 增加使用次数并按上限失效
+        invite.uses_count = (invite.uses_count or 0) + 1
+        if invite.max_uses is None:
+            invite.used_by_user_id = user.id
+            invite.used_at = datetime.utcnow()
+            invite.is_active = False
+        else:
+            if invite.uses_count >= (invite.max_uses or 1):
+                invite.is_active = False
 
         return UserOut(
             id=user.id,
@@ -352,9 +447,7 @@ async def api_approve(submission_id: int, authorization: Optional[str] = Header(
     payload = get_current_user_from_headers(authorization)
     if not payload.get("is_admin"):
         raise HTTPException(status_code=403, detail="Admin required")
-    from services.audit_service import AuditService
-    service = AuditService()
-    res = await service.approve(submission_id, operator_id=str(payload.get("username")))
+    res = await audit_service.approve(submission_id, operator_id=str(payload.get("username")))
     if not res.get("success"):
         raise HTTPException(status_code=400, detail=res.get("message"))
     return res
@@ -365,9 +458,7 @@ async def api_reject(submission_id: int, body: AuditActionIn, authorization: Opt
     payload = get_current_user_from_headers(authorization)
     if not payload.get("is_admin"):
         raise HTTPException(status_code=403, detail="Admin required")
-    from services.audit_service import AuditService
-    service = AuditService()
-    res = await service.reject_with_message(submission_id, operator_id=str(payload.get("username")), extra=body.comment)
+    res = await audit_service.reject_with_message(submission_id, operator_id=str(payload.get("username")), extra=body.comment)
     if not res.get("success"):
         raise HTTPException(status_code=400, detail=res.get("message"))
     return res
@@ -378,9 +469,7 @@ async def api_toggle_anon(submission_id: int, authorization: Optional[str] = Hea
     payload = get_current_user_from_headers(authorization)
     if not payload.get("is_admin"):
         raise HTTPException(status_code=403, detail="Admin required")
-    from services.audit_service import AuditService
-    service = AuditService()
-    res = await service.toggle_anonymous(submission_id, operator_id=str(payload.get("username")))
+    res = await audit_service.toggle_anonymous(submission_id, operator_id=str(payload.get("username")))
     if not res.get("success"):
         raise HTTPException(status_code=400, detail=res.get("message"))
     return res
@@ -391,27 +480,660 @@ async def api_comment(submission_id: int, body: AuditActionIn, authorization: Op
     payload = get_current_user_from_headers(authorization)
     if not payload.get("is_admin"):
         raise HTTPException(status_code=403, detail="Admin required")
-    from services.audit_service import AuditService
-    service = AuditService()
-    res = await service.add_comment(submission_id, operator_id=str(payload.get("username")), comment=(body.comment or ""))
+    res = await audit_service.add_comment(submission_id, operator_id=str(payload.get("username")), comment=(body.comment or ""))
     if not res.get("success"):
         raise HTTPException(status_code=400, detail=res.get("message"))
     return res
 
 
-# Optional: serve frontend if exists (prefer dist/ then raw frontend dir)
-try:
-    from fastapi.staticfiles import StaticFiles
+# 扩展审核操作
+@app.post("/audit/{submission_id}/hold")
+async def api_hold(submission_id: int, authorization: Optional[str] = Header(default=None)):
+    payload = get_current_user_from_headers(authorization)
+    if not payload.get("is_admin"):
+        raise HTTPException(status_code=403, detail="Admin required")
+    res = await audit_service.hold(submission_id, operator_id=str(payload.get("username")))
+    if not res.get("success"):
+        raise HTTPException(status_code=400, detail=res.get("message"))
+    return res
 
-    root = Path(__file__).resolve().parent.parent
-    frontend_dist = root / "frontend" / "dist"
-    frontend_src = root / "frontend"
-    if frontend_dist.exists():
-        app.mount("/", StaticFiles(directory=str(frontend_dist), html=True), name="frontend")
-    elif frontend_src.exists():
-        app.mount("/", StaticFiles(directory=str(frontend_src), html=True), name="frontend-src")
-except Exception:
-    # static serving is optional
-    pass
+
+@app.post("/audit/{submission_id}/delete")
+async def api_delete(submission_id: int, authorization: Optional[str] = Header(default=None)):
+    payload = get_current_user_from_headers(authorization)
+    if not payload.get("is_admin"):
+        raise HTTPException(status_code=403, detail="Admin required")
+    res = await audit_service.delete(submission_id, operator_id=str(payload.get("username")))
+    if not res.get("success"):
+        raise HTTPException(status_code=400, detail=res.get("message"))
+    return res
+
+
+@app.post("/audit/{submission_id}/approve-immediate")
+async def api_approve_immediate(submission_id: int, authorization: Optional[str] = Header(default=None)):
+    payload = get_current_user_from_headers(authorization)
+    if not payload.get("is_admin"):
+        raise HTTPException(status_code=403, detail="Admin required")
+    res = await audit_service.approve_immediate(submission_id, operator_id=str(payload.get("username")))
+    if not res.get("success"):
+        raise HTTPException(status_code=400, detail=res.get("message"))
+    return res
+
+
+@app.post("/audit/{submission_id}/rerender")
+async def api_rerender(submission_id: int, authorization: Optional[str] = Header(default=None)):
+    payload = get_current_user_from_headers(authorization)
+    if not payload.get("is_admin"):
+        raise HTTPException(status_code=403, detail="Admin required")
+    res = await audit_service.rerender(submission_id, operator_id=str(payload.get("username")))
+    if not res.get("success"):
+        raise HTTPException(status_code=400, detail=res.get("message"))
+    return res
+
+
+@app.post("/audit/{submission_id}/refresh")
+async def api_refresh(submission_id: int, authorization: Optional[str] = Header(default=None)):
+    payload = get_current_user_from_headers(authorization)
+    if not payload.get("is_admin"):
+        raise HTTPException(status_code=403, detail="Admin required")
+    res = await audit_service.refresh(submission_id, operator_id=str(payload.get("username")))
+    if not res.get("success"):
+        raise HTTPException(status_code=400, detail=res.get("message"))
+    return res
+
+
+@app.post("/audit/{submission_id}/reply")
+async def api_reply(submission_id: int, body: AuditActionIn, authorization: Optional[str] = Header(default=None)):
+    payload = get_current_user_from_headers(authorization)
+    if not payload.get("is_admin"):
+        raise HTTPException(status_code=403, detail="Admin required")
+    res = await audit_service.reply_to_sender(submission_id, operator_id=str(payload.get("username")), extra=body.comment)
+    if not res.get("success"):
+        raise HTTPException(status_code=400, detail=res.get("message"))
+    return res
+
+
+@app.post("/audit/{submission_id}/blacklist")
+async def api_blacklist(submission_id: int, body: AuditActionIn, authorization: Optional[str] = Header(default=None)):
+    payload = get_current_user_from_headers(authorization)
+    if not payload.get("is_admin"):
+        raise HTTPException(status_code=403, detail="Admin required")
+    res = await audit_service.blacklist(submission_id, operator_id=str(payload.get("username")), extra=body.comment)
+    if not res.get("success"):
+        raise HTTPException(status_code=400, detail=res.get("message"))
+    return res
+
+
+# 投稿详情
+class SubmissionDetailOut(BaseModel):
+    id: int
+    sender_id: str
+    sender_nickname: Optional[str] = None
+    group_name: Optional[str] = None
+    status: str
+    is_anonymous: bool
+    is_safe: bool
+    is_complete: bool
+    publish_id: Optional[int] = None
+    # 前端历史数据中 raw_content/processed_content 可能是 list
+    raw_content: Optional[Any] = None
+    processed_content: Optional[Any] = None
+    llm_result: Optional[Any] = None
+    rendered_images: Optional[List[str]] = None
+    comment: Optional[str] = None
+    rejection_reason: Optional[str] = None
+    created_at: Optional[str] = None
+    updated_at: Optional[str] = None
+    processed_at: Optional[str] = None
+    published_at: Optional[str] = None
+
+
+@app.get("/audit/{submission_id}/detail", response_model=SubmissionDetailOut)
+async def get_submission_detail(submission_id: int, authorization: Optional[str] = Header(default=None)):
+    payload = get_current_user_from_headers(authorization)
+    if not payload.get("is_admin"):
+        raise HTTPException(status_code=403, detail="Admin required")
+    
+    db = await get_db()
+    async with db.get_session() as session:
+        from sqlalchemy import select
+        from core.models import Submission
+        
+        stmt = select(Submission).where(Submission.id == submission_id)
+        result = await session.execute(stmt)
+        submission = result.scalar_one_or_none()
+        
+        if not submission:
+            raise HTTPException(status_code=404, detail="Submission not found")
+            
+        return SubmissionDetailOut(
+            id=submission.id,
+            sender_id=submission.sender_id,
+            sender_nickname=submission.sender_nickname,
+            group_name=submission.group_name,
+            status=submission.status,
+            is_anonymous=bool(submission.is_anonymous),
+            is_safe=bool(submission.is_safe),
+            is_complete=bool(submission.is_complete),
+            publish_id=submission.publish_id,
+            raw_content=submission.raw_content,
+            processed_content=submission.processed_content,
+            llm_result=submission.llm_result,
+            rendered_images=submission.rendered_images,
+            comment=submission.comment,
+            rejection_reason=submission.rejection_reason,
+            created_at=submission.created_at.isoformat() if submission.created_at else None,
+            updated_at=submission.updated_at.isoformat() if submission.updated_at else None,
+            processed_at=submission.processed_at.isoformat() if submission.processed_at else None,
+            published_at=submission.published_at.isoformat() if submission.published_at else None,
+        )
+
+
+# 用户管理相关API
+class BlacklistUserIn(BaseModel):
+    user_id: str
+    group_name: str
+    reason: Optional[str] = None
+    expires_hours: Optional[int] = None  # 可选的过期时间（小时）
+
+
+class BlacklistOut(BaseModel):
+    id: int
+    user_id: str
+    group_name: str
+    reason: Optional[str] = None
+    operator_id: Optional[str] = None
+    created_at: str
+    expires_at: Optional[str] = None
+    is_active: bool
+
+
+@app.get("/management/blacklist", response_model=List[BlacklistOut])
+async def get_blacklist(authorization: Optional[str] = Header(default=None)):
+    payload = get_current_user_from_headers(authorization)
+    if not payload.get("is_admin"):
+        raise HTTPException(status_code=403, detail="Admin required")
+    
+    db = await get_db()
+    async with db.get_session() as session:
+        from sqlalchemy import select
+        from core.models import BlackList
+        
+        stmt = select(BlackList).order_by(BlackList.created_at.desc())
+        result = await session.execute(stmt)
+        blacklist_entries = result.scalars().all()
+        
+        return [
+            BlacklistOut(
+                id=entry.id,
+                user_id=entry.user_id,
+                group_name=entry.group_name,
+                reason=entry.reason,
+                operator_id=entry.operator_id,
+                created_at=entry.created_at.isoformat() if entry.created_at else "",
+                expires_at=entry.expires_at.isoformat() if entry.expires_at else None,
+                is_active=entry.is_active()
+            )
+            for entry in blacklist_entries
+        ]
+
+
+@app.post("/management/blacklist")
+async def add_to_blacklist(body: BlacklistUserIn, authorization: Optional[str] = Header(default=None)):
+    payload = get_current_user_from_headers(authorization)
+    if not payload.get("is_admin"):
+        raise HTTPException(status_code=403, detail="Admin required")
+    
+    db = await get_db()
+    async with db.get_session() as session:
+        from sqlalchemy import select
+        from core.models import BlackList
+        from datetime import timedelta
+        
+        # 检查是否已存在
+        stmt = select(BlackList).where(
+            BlackList.user_id == body.user_id,
+            BlackList.group_name == body.group_name
+        )
+        result = await session.execute(stmt)
+        existing = result.scalar_one_or_none()
+        
+        if existing:
+            raise HTTPException(status_code=400, detail="User already blacklisted")
+        
+        expires_at = None
+        if body.expires_hours and body.expires_hours > 0:
+            expires_at = datetime.utcnow() + timedelta(hours=body.expires_hours)
+        
+        blacklist_entry = BlackList(
+            user_id=body.user_id,
+            group_name=body.group_name,
+            reason=body.reason,
+            operator_id=str(payload.get("username")),
+            expires_at=expires_at
+        )
+        session.add(blacklist_entry)
+        await session.commit()
+        
+        return {"success": True, "message": "用户已加入黑名单"}
+
+
+@app.delete("/management/blacklist/{blacklist_id}")
+async def remove_from_blacklist(blacklist_id: int, authorization: Optional[str] = Header(default=None)):
+    payload = get_current_user_from_headers(authorization)
+    if not payload.get("is_admin"):
+        raise HTTPException(status_code=403, detail="Admin required")
+    
+    db = await get_db()
+    async with db.get_session() as session:
+        from sqlalchemy import select, delete
+        from core.models import BlackList
+        
+        # 先查找记录
+        stmt = select(BlackList).where(BlackList.id == blacklist_id)
+        result = await session.execute(stmt)
+        blacklist_entry = result.scalar_one_or_none()
+        
+        if not blacklist_entry:
+            raise HTTPException(status_code=404, detail="Blacklist entry not found")
+        
+        # 删除记录
+        delete_stmt = delete(BlackList).where(BlackList.id == blacklist_id)
+        await session.execute(delete_stmt)
+        await session.commit()
+        
+        return {"success": True, "message": "已从黑名单中移除"}
+
+
+# 管理员管理 API（与前端 UserManagement.vue 对接）
+class AdminOut(BaseModel):
+    id: int
+    user_id: str
+    nickname: Optional[str] = None
+    role: str
+    permissions: List[str] = []
+    is_active: bool
+    last_login: Optional[str] = None
+    created_at: Optional[str] = None
+
+
+class AdminCreateIn(BaseModel):
+    user_id: str
+    nickname: Optional[str] = None
+    role: str = "admin"
+    permissions: Optional[List[str]] = None
+    notes: Optional[str] = None
+
+
+class AdminUpdateIn(BaseModel):
+    user_id: str
+    nickname: Optional[str] = None
+    role: str
+    permissions: Optional[List[str]] = None
+    notes: Optional[str] = None
+
+
+@app.get("/management/admins", response_model=List[AdminOut])
+async def list_admins(authorization: Optional[str] = Header(default=None)):
+    payload = get_current_user_from_headers(authorization)
+    if not payload.get("is_admin"):
+        raise HTTPException(status_code=403, detail="Admin required")
+
+    db = await get_db()
+    async with db.get_session() as session:
+        from sqlalchemy import select, or_
+        from core.models import User, AdminProfile
+
+        users = (
+            await session.execute(
+                select(User).where(or_(User.is_admin == True, User.is_superadmin == True))
+            )
+        ).scalars().all()
+        profiles = (await session.execute(select(AdminProfile))).scalars().all() if users else []
+        uid_to_profile = {p.user_id: p for p in profiles}
+
+        out: List[AdminOut] = []
+        for u in users:
+            p = uid_to_profile.get(u.id)
+            role = "super_admin" if u.is_superadmin else (p.role if p and p.role else ("admin" if u.is_admin else "admin"))
+            last_login = p.last_login.isoformat() if p and p.last_login else None
+            created_at = u.created_at.isoformat() if u.created_at else None
+            out.append(AdminOut(
+                id=u.id,
+                user_id=u.username,
+                nickname=p.nickname if p and p.nickname else (u.display_name or None),
+                role=role,
+                permissions=(p.permissions or []) if p and p.permissions else [],
+                is_active=bool(u.is_active),
+                last_login=last_login,
+                created_at=created_at,
+            ))
+        return out
+
+
+@app.post("/management/admins")
+async def create_admin(body: AdminCreateIn, authorization: Optional[str] = Header(default=None)):
+    payload = get_current_user_from_headers(authorization)
+    if not payload.get("is_superadmin"):
+        raise HTTPException(status_code=403, detail="Only superadmin can create admins")
+
+    db = await get_db()
+    async with db.get_session() as session:
+        from sqlalchemy import select
+        from core.models import User, AdminProfile
+
+        # 仅允许为已注册用户授予管理员角色
+        target_username = body.user_id
+        u = (await session.execute(select(User).where(User.username == target_username))).scalar_one_or_none()
+        if not u:
+            raise HTTPException(status_code=404, detail="User not found. Please invite/register first.")
+
+        # 标记为管理员/超级管理员（仅当请求为 super_admin）
+        u.is_admin = True
+        if body.role == "super_admin":
+            u.is_superadmin = True
+
+        # 创建/更新 AdminProfile
+        prof = (await session.execute(select(AdminProfile).where(AdminProfile.user_id == u.id))).scalar_one_or_none()
+        if not prof:
+            prof = AdminProfile(user_id=u.id)
+            session.add(prof)
+        prof.nickname = body.nickname
+        prof.role = body.role if body.role in ("admin", "senior_admin", "super_admin") else "admin"
+        prof.permissions = body.permissions or ["user_management"]
+        prof.notes = body.notes
+
+        await session.flush()
+        return {"success": True, "message": "管理员创建成功"}
+
+
+@app.put("/management/admins/{admin_id}")
+async def update_admin(admin_id: int, body: AdminUpdateIn, authorization: Optional[str] = Header(default=None)):
+    payload = get_current_user_from_headers(authorization)
+    if not payload.get("is_admin"):
+        raise HTTPException(status_code=403, detail="Admin required")
+    if body.role == "super_admin" and not payload.get("is_superadmin"):
+        raise HTTPException(status_code=403, detail="Only superadmin can assign super_admin role")
+
+    db = await get_db()
+    async with db.get_session() as session:
+        from sqlalchemy import select
+        from core.models import User, AdminProfile
+
+        u = (await session.execute(select(User).where(User.id == admin_id))).scalar_one_or_none()
+        if not u:
+            raise HTTPException(status_code=404, detail="Admin not found")
+
+        # 更新 User 标记
+        u.is_admin = True
+        if body.role == "super_admin":
+            u.is_superadmin = True
+        if body.nickname is not None:
+            u.display_name = body.nickname or u.display_name
+
+        prof = (await session.execute(select(AdminProfile).where(AdminProfile.user_id == u.id))).scalar_one_or_none()
+        if not prof:
+            prof = AdminProfile(user_id=u.id)
+            session.add(prof)
+        prof.nickname = body.nickname if body.nickname is not None else prof.nickname
+        prof.role = body.role if body.role in ("admin", "senior_admin", "super_admin") else (prof.role or "admin")
+        prof.permissions = body.permissions if body.permissions is not None else (prof.permissions or [])
+        prof.notes = body.notes if body.notes is not None else prof.notes
+
+        await session.flush()
+        return {"success": True, "message": "管理员已更新"}
+
+
+class AdminStatusIn(BaseModel):
+    is_active: bool
+
+
+@app.patch("/management/admins/{admin_id}/status")
+async def toggle_admin_status(admin_id: int, body: AdminStatusIn, authorization: Optional[str] = Header(default=None)):
+    payload = get_current_user_from_headers(authorization)
+    if not payload.get("is_admin"):
+        raise HTTPException(status_code=403, detail="Admin required")
+
+    db = await get_db()
+    async with db.get_session() as session:
+        from sqlalchemy import select
+        from core.models import User
+
+        u = (await session.execute(select(User).where(User.id == admin_id))).scalar_one_or_none()
+        if not u:
+            raise HTTPException(status_code=404, detail="Admin not found")
+
+        # 仅超级管理员可禁用超级管理员
+        if u.is_superadmin and not payload.get("is_superadmin"):
+            raise HTTPException(status_code=403, detail="Only superadmin can disable superadmin")
+
+        u.is_active = bool(body.is_active)
+        await session.flush()
+        return {"success": True, "message": "状态已更新"}
+
+
+@app.delete("/management/admins/{admin_id}")
+async def delete_admin(admin_id: int, authorization: Optional[str] = Header(default=None)):
+    payload = get_current_user_from_headers(authorization)
+    if not payload.get("is_superadmin"):
+        raise HTTPException(status_code=403, detail="Only superadmin can delete admins")
+
+    db = await get_db()
+    async with db.get_session() as session:
+        from sqlalchemy import select, delete
+        from core.models import User, AdminProfile
+
+        u = (await session.execute(select(User).where(User.id == admin_id))).scalar_one_or_none()
+        if not u:
+            raise HTTPException(status_code=404, detail="Admin not found")
+        if u.is_superadmin:
+            raise HTTPException(status_code=400, detail="Cannot delete superadmin")
+
+        # 取消管理员权限，但保留用户账号
+        u.is_admin = False
+        u.is_superadmin = False
+        await session.execute(delete(AdminProfile).where(AdminProfile.user_id == u.id))
+        await session.flush()
+        return {"success": True, "message": "管理员已删除"}
+
+
+# 暂存区管理API
+class StoredPostOut(BaseModel):
+    id: int
+    submission_id: int
+    group_name: str
+    publish_id: int
+    priority: int
+    created_at: str
+    submission: Optional[SubmissionOut] = None
+
+
+@app.get("/management/stored-posts", response_model=List[StoredPostOut])
+async def get_stored_posts(group_name: Optional[str] = None, authorization: Optional[str] = Header(default=None)):
+    payload = get_current_user_from_headers(authorization)
+    if not payload.get("is_admin"):
+        raise HTTPException(status_code=403, detail="Admin required")
+    
+    db = await get_db()
+    async with db.get_session() as session:
+        from sqlalchemy import select
+        from core.models import StoredPost, Submission
+        
+        stmt = select(StoredPost).order_by(StoredPost.priority.desc(), StoredPost.created_at)
+        if group_name:
+            stmt = stmt.where(StoredPost.group_name == group_name)
+        
+        result = await session.execute(stmt)
+        stored_posts = result.scalars().all()
+        
+        # 获取对应的投稿信息
+        submission_ids = [sp.submission_id for sp in stored_posts]
+        if submission_ids:
+            sub_stmt = select(Submission).where(Submission.id.in_(submission_ids))
+            sub_result = await session.execute(sub_stmt)
+            submissions = {s.id: s for s in sub_result.scalars().all()}
+        else:
+            submissions = {}
+        
+        return [
+            StoredPostOut(
+                id=sp.id,
+                submission_id=sp.submission_id,
+                group_name=sp.group_name,
+                publish_id=sp.publish_id,
+                priority=sp.priority,
+                created_at=sp.created_at.isoformat() if sp.created_at else "",
+                submission=SubmissionOut(
+                    id=submissions[sp.submission_id].id,
+                    sender_id=submissions[sp.submission_id].sender_id,
+                    sender_nickname=submissions[sp.submission_id].sender_nickname,
+                    group_name=submissions[sp.submission_id].group_name,
+                    status=submissions[sp.submission_id].status,
+                    is_anonymous=bool(submissions[sp.submission_id].is_anonymous),
+                    is_safe=bool(submissions[sp.submission_id].is_safe),
+                    is_complete=bool(submissions[sp.submission_id].is_complete),
+                    publish_id=submissions[sp.submission_id].publish_id,
+                    created_at=submissions[sp.submission_id].created_at.isoformat() if submissions[sp.submission_id].created_at else None,
+                ) if sp.submission_id in submissions else None
+            )
+            for sp in stored_posts
+        ]
+
+
+@app.post("/management/stored-posts/publish")
+async def publish_stored_posts(group_name: str, authorization: Optional[str] = Header(default=None)):
+    payload = get_current_user_from_headers(authorization)
+    if not payload.get("is_admin"):
+        raise HTTPException(status_code=403, detail="Admin required")
+    
+    try:
+        from services.submission_service import SubmissionService
+        service = SubmissionService()
+        success = await service.publish_stored_posts(group_name)
+        
+        if success:
+            return {"success": True, "message": f"暂存区 {group_name} 发布成功"}
+        else:
+            return {"success": False, "message": "发布失败"}
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=f"发布失败: {str(e)}")
+
+
+@app.delete("/management/stored-posts/clear")
+async def clear_stored_posts(group_name: str, authorization: Optional[str] = Header(default=None)):
+    payload = get_current_user_from_headers(authorization)
+    if not payload.get("is_admin"):
+        raise HTTPException(status_code=403, detail="Admin required")
+    
+    db = await get_db()
+    async with db.get_session() as session:
+        from sqlalchemy import delete
+        from core.models import StoredPost
+        
+        delete_stmt = delete(StoredPost).where(StoredPost.group_name == group_name)
+        await session.execute(delete_stmt)
+        await session.commit()
+        
+        return {"success": True, "message": f"暂存区 {group_name} 已清空"}
+
+
+# 统计数据API
+class StatsOut(BaseModel):
+    total_submissions: int
+    pending_submissions: int
+    approved_submissions: int
+    published_submissions: int
+    rejected_submissions: int
+    stored_posts_count: int
+    blacklisted_users: int
+    active_groups: List[str]
+    
+    # 最近7天的数据
+    recent_submissions: Dict[str, int]  # 日期 -> 数量
+
+
+@app.get("/management/stats", response_model=StatsOut)
+async def get_stats(authorization: Optional[str] = Header(default=None)):
+    payload = get_current_user_from_headers(authorization)
+    if not payload.get("is_admin"):
+        raise HTTPException(status_code=403, detail="Admin required")
+    
+    db = await get_db()
+    async with db.get_session() as session:
+        from sqlalchemy import select, func, and_
+        from core.models import Submission, StoredPost, BlackList
+        from core.enums import SubmissionStatus
+        
+        # 基础统计
+        total_stmt = select(func.count(Submission.id))
+        total_result = await session.execute(total_stmt)
+        total_submissions = total_result.scalar() or 0
+        
+        pending_stmt = select(func.count(Submission.id)).where(
+            Submission.status.in_([SubmissionStatus.PENDING.value, SubmissionStatus.PROCESSING.value, SubmissionStatus.WAITING.value])
+        )
+        pending_result = await session.execute(pending_stmt)
+        pending_submissions = pending_result.scalar() or 0
+        
+        approved_stmt = select(func.count(Submission.id)).where(Submission.status == SubmissionStatus.APPROVED.value)
+        approved_result = await session.execute(approved_stmt)
+        approved_submissions = approved_result.scalar() or 0
+        
+        published_stmt = select(func.count(Submission.id)).where(Submission.status == SubmissionStatus.PUBLISHED.value)
+        published_result = await session.execute(published_stmt)
+        published_submissions = published_result.scalar() or 0
+        
+        rejected_stmt = select(func.count(Submission.id)).where(Submission.status == SubmissionStatus.REJECTED.value)
+        rejected_result = await session.execute(rejected_stmt)
+        rejected_submissions = rejected_result.scalar() or 0
+        
+        stored_stmt = select(func.count(StoredPost.id))
+        stored_result = await session.execute(stored_stmt)
+        stored_posts_count = stored_result.scalar() or 0
+        
+        blacklist_stmt = select(func.count(BlackList.id))
+        blacklist_result = await session.execute(blacklist_stmt)
+        blacklisted_users = blacklist_result.scalar() or 0
+        
+        # 活跃群组
+        groups_stmt = select(Submission.group_name).distinct().where(Submission.group_name.is_not(None))
+        groups_result = await session.execute(groups_stmt)
+        active_groups = [g for g in groups_result.scalars().all() if g]
+        
+        # 最近7天的投稿数据
+        from datetime import timedelta
+        seven_days_ago = datetime.utcnow() - timedelta(days=7)
+        recent_stmt = select(
+            func.date(Submission.created_at).label('date'),
+            func.count(Submission.id).label('count')
+        ).where(
+            Submission.created_at >= seven_days_ago
+        ).group_by(func.date(Submission.created_at))
+        
+        recent_result = await session.execute(recent_stmt)
+        recent_data = recent_result.all()
+        recent_submissions: Dict[str, int] = {}
+        for row in recent_data:
+            date_val = getattr(row, "date", None)
+            if isinstance(date_val, str):
+                date_str = date_val
+            elif hasattr(date_val, "strftime") and date_val is not None:  # date/datetime
+                date_str = date_val.strftime('%Y-%m-%d')
+            else:
+                date_str = str(date_val) if date_val is not None else ""
+            recent_submissions[date_str] = int(getattr(row, "count", 0) or 0)
+        
+        return StatsOut(
+            total_submissions=total_submissions,
+            pending_submissions=pending_submissions,
+            approved_submissions=approved_submissions,
+            published_submissions=published_submissions,
+            rejected_submissions=rejected_submissions,
+            stored_posts_count=stored_posts_count,
+            blacklisted_users=blacklisted_users,
+            active_groups=active_groups,
+            recent_submissions=recent_submissions
+        )
+
 
 

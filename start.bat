@@ -1,53 +1,80 @@
 @echo off
-REM XWall Windows启动脚本
+setlocal EnableExtensions
+chcp 65001 >nul 2>&1
 
+echo.
 echo ╔═══════════════════════════════════════════╗
 echo ║                XWall 启动脚本           ║
 echo ╚═══════════════════════════════════════════╝
+echo.
 
-REM 检查Python
+REM Check Python
 python --version >nul 2>&1
 if %errorlevel% neq 0 (
-    echo 错误: 未找到Python，请安装Python 3.9+
+    echo [ERROR] Python not found. Please install Python 3.9+
     pause
     exit /b 1
 )
 
-REM 创建虚拟环境（如果不存在）
+REM Create venv and install dependencies (first time only)
 if not exist "venv" (
-    echo 创建虚拟环境...
+    echo [INFO] Creating virtual environment...
     python -m venv venv
+    if %errorlevel% neq 0 (
+        echo [ERROR] Failed to create virtual environment
+        pause
+        exit /b 1
+    )
+    echo [INFO] Activating virtual environment...
+    call venv\Scripts\activate.bat
+    echo [INFO] Installing dependencies...
+    python -m pip install --upgrade pip >nul 2>&1
+    pip install -r requirements.txt --extra-index-url https://aioqzone.github.io/aioqzone-index/simple >nul 2>&1
+    playwright install chromium >nul 2>&1
+    if %errorlevel% neq 0 (
+        echo [ERROR] Failed to install dependencies
+        pause
+        exit /b 1
+    )
+) else (
+    echo [INFO] Activating virtual environment...
+    call venv\Scripts\activate.bat
+    echo [INFO] Virtual environment exists, skipping dependency installation
 )
 
-REM 激活虚拟环境
-echo 激活虚拟环境...
-call venv\Scripts\activate.bat
-
-REM 安装/更新依赖
-echo 检查依赖...
-python -m pip install --upgrade pip >nul
-pip install -r requirements.txt --extra-index-url https://aioqzone.github.io/aioqzone-index/simple >nul
-
-REM 检查配置文件
+REM Check config file
 if not exist "config\config.yaml" (
-    echo 配置文件不存在
-    echo 请创建并编辑 config\config.yaml 配置文件后重新启动
+    echo [ERROR] Config file not found
+    echo [INFO] Please create and edit config\config.yaml then restart
     pause
     exit /b 1
 )
 
-REM 创建必要的目录
+REM Create necessary directories
 if not exist "data" mkdir data
 if not exist "data\cache" mkdir data\cache
 if not exist "data\logs" mkdir data\logs
 if not exist "data\cookies" mkdir data\cookies
 
-REM 初始化数据库
-echo 初始化数据库...
-python cli.py db-init
+REM Initialize database (only if not exists or forced)
+set "FORCE_DB_INIT="
+if /I "%1"=="--init-db" set "FORCE_DB_INIT=1"
+if /I "%1"=="-i" set "FORCE_DB_INIT=1"
 
-REM 启动主程序
-echo 启动 XWall...
+if defined FORCE_DB_INIT (
+    echo [INFO] Force initializing database...
+    python cli.py db-init
+) else (
+    if not exist "data\xwall.db" (
+        echo [INFO] Initializing database...
+        python cli.py db-init
+    ) else (
+        echo [INFO] Database exists, skipping initialization
+    )
+)
+
+REM Start main program
+echo [INFO] Starting XWall...
 set DRIVER=~fastapi
 python main.py
 

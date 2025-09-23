@@ -63,6 +63,15 @@ class Database:
         # 创建所有表
         async with self.engine.begin() as conn:
             await conn.run_sync(Base.metadata.create_all)
+            # 轻量迁移：为 invite_tokens 增加 max_uses 与 uses_count（若不存在）
+            try:
+                await conn.execute(text("ALTER TABLE invite_tokens ADD COLUMN max_uses INTEGER"))
+            except Exception:
+                pass
+            try:
+                await conn.execute(text("ALTER TABLE invite_tokens ADD COLUMN uses_count INTEGER DEFAULT 0"))
+            except Exception:
+                pass
             
         logger.info(f"数据库初始化完成: {db_url}")
         

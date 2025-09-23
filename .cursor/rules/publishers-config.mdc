@@ -1,4 +1,42 @@
 ---
+description: 发布器（publishers）配置与实现约定
+---
+
+# 发布器配置与实现约定（publishers-config）
+
+适用范围：`publishers/*` 及其配置 `config/publishers/*.yml`。
+
+## 发现与注册
+- 发布器基类位于 [publishers/base.py](mdc:publishers/base.py)，动态发现与注册见 [publishers/loader.py](mdc:publishers/loader.py)。
+- 新增平台时，在 `publishers/<platform>/publisher.py` 中实现具体发布逻辑，并保证被加载器发现。
+
+## 内容组装
+- 文本统一通过 `BasePublisher.prepare_content()` 生成：
+  - 是否添加编号/序号
+  - 是否包含 @ 提及
+  - 分段文本策略
+  - 外部链接拼接策略
+- 以上行为由平台配置文件控制：
+  - 哔哩哔哩：[config/publishers/bilibili.yml](mdc:config/publishers/bilibili.yml)
+  - QQ 空间：[config/publishers/qzone.yml](mdc:config/publishers/qzone.yml)
+  - 小红书：[config/publishers/rednote.yml](mdc:config/publishers/rednote.yml)
+
+## 输入依赖
+- 依赖处理管道写回的字段：
+  - `submission.processed_content`（HTML）
+  - `submission.rendered_images`（图片路径/句柄）
+  - 可选：`submission.llm_result`（补充标签/话题/外链）
+
+## 错误处理
+- 对平台接口错误进行分级记录并可重试；避免一次失败导致整体中断。
+- 谨慎处理频率限制与鉴权失败；必要时退避重试。
+
+## 配置结构建议
+- 鉴权：`access_key` / `cookies` / `token` 等敏感字段
+- 文本：`include_index`、`allow_mentions`、`segment_strategy`、`link_strategy`
+- 图片：`max_images`、`image_format`、`quality`
+- 发布策略：`retry`、`backoff`、`timeout`
+---
 alwaysApply: false
 description: 发布器（publishers）配置与实现约定
 globs: publishers/**/*.py,config/publishers/*.yml

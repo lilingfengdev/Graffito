@@ -113,12 +113,13 @@ class ContentRenderer(ProcessorPlugin):
                             'height': min(page_height, height - i * page_height)
                         }
                     )
-                    images.append(str(image_path))
+                    # 统一 URL 使用正斜杠，便于前端与静态服务
+                    images.append(str(image_path).replace('\\', '/'))
             else:
                 # 单页截图
                 image_path = output_dir / "page_01.png"
                 await page.screenshot(path=str(image_path), full_page=True)
-                images.append(str(image_path))
+                images.append(str(image_path).replace('\\', '/'))
                 
             await page.close()
             

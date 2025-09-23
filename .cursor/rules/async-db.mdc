@@ -1,4 +1,57 @@
 ---
+description: 异步数据库访问与会话管理约束
+---
+
+# 异步数据库访问与会话管理约束（async-db）
+
+适用范围：所有访问数据库的模块，尤其是 `processors/*`、`publishers/*`、`receivers/*`。
+
+## 引用与单例
+- 使用 [core/database.py](mdc:core/database.py) 提供的单例工厂管理 `AsyncEngine` 与 `async_sessionmaker`。
+- 仅通过公开方法获取会话，避免在模块顶层创建长期持有的会话实例。
+
+## 会话与事务
+- 首选模式：
+  - `async with get_db_session() as session:` 获取会话
+  - `async with session.begin():` 显式事务边界（读写）
+- 只读操作可在事务外执行，但推荐统一置于 `session.begin()` 的上下文中以简化一致性。
+
+## 协程与并发
+- 严禁在同步上下文中直接调用异步会话方法；确保调用栈为 async。
+- 在并发任务中为每个任务单独获取会话；不要跨任务共享 `Session`。
+
+## ORM 模型与关系
+- 模型定义位于 [core/models.py](mdc:core/models.py)。
+- 查询时避免 N+1：优先使用 `selectinload`/`joinedload` 根据场景选择。
+
+## 提交与回滚
+- 使用 `session.begin()` 自动提交/回滚；手动提交仅在必要时调用 `await session.commit()`。
+- 捕获异常时，允许 `session.begin()` 自动回滚；不要在 finally 中无条件提交。
+
+## 连接与性能
+- 避免在热路径中频繁创建引擎；引擎由单例维护。
+- 批量写入尽量使用 `session.execute(insert(...).values([...]))` 或者 `bulk_save_objects`（谨慎对待回写主键/事件）。
+
+## 典型用法
+
+```python
+from core.database import get_db_session
+from sqlalchemy import select
+from core.models import Submission
+
+async def load_waiting_submissions(limit: int = 50):
+    async with get_db_session() as session:
+        async with session.begin():
+            stmt = select(Submission).where(Submission.status == 'WAITING').limit(limit)
+            result = await session.execute(stmt)
+            return result.scalars().all()
+```
+
+## 禁止事项
+- 在模块级持有 `Session` 或跨请求/任务复用同一 `Session`。
+- 在 `async for`/回调中泄漏未关闭会话上下文。
+- 同步函数中通过 `asyncio.run` 调用数据库操作。
+---
 alwaysApply: false
 description: 异步数据库访问与会话管理约束
 globs: core/**/*.py,services/**/*.py,processors/**/*.py,publishers/**/*.py,receivers/**/*.py

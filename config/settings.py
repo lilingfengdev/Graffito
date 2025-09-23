@@ -101,7 +101,9 @@ class WebConfig(BaseModel):
     """Web 后端配置"""
     enabled: bool = True
     host: str = "0.0.0.0"
-    port: int = 8082
+    port: int = 8083
+    # 简化 CORS：可仅设置前端域名（含协议与端口），例如 "http://localhost:5173"
+    frontend_origin: Optional[str] = None
     jwt_secret_key: str = "change-this-secret"
     jwt_algorithm: str = "HS256"
     access_token_expires_minutes: int = 12 * 60
