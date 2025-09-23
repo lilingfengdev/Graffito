@@ -16,6 +16,7 @@ from humanfriendly import format_size
 import qrcode
 
 from core.plugin import ProcessorPlugin
+from config.settings import get_settings
 
 
 class HTMLRenderer(ProcessorPlugin):
@@ -23,6 +24,7 @@ class HTMLRenderer(ProcessorPlugin):
     
     def __init__(self):
         super().__init__("html_renderer", {})
+        self.settings = get_settings()
         self.template = self.load_template()
         # 初始化 LinkifyIt
         self._linkify = LinkifyIt()
@@ -92,7 +94,7 @@ class HTMLRenderer(ProcessorPlugin):
             --shadow-lg: 0 10px 15px -3px rgb(0 0 0 / 0.1), 0 4px 6px -4px rgb(0 0 0 / 0.1);
             
             /* 字体系统 */
-            --font-family: 'Inter', -apple-system, BlinkMacSystemFont, 'Segoe UI', 'PingFang SC', 'Hiragino Sans GB', 'Microsoft YaHei', 'Helvetica Neue', Helvetica, Arial, sans-serif;
+            --font-family: {{ font_family }};
             --font-size-xs: 12px;
             --font-size-sm: 14px;
             --font-size-md: 16px;
@@ -587,7 +589,8 @@ class HTMLRenderer(ProcessorPlugin):
             watermark_text=watermark_text,
             show_avatar=show_avatar,
             render_time=datetime.now().strftime("%Y-%m-%d %H:%M"),
-            wall_mark=data.get('wall_mark') or 'XWall'
+            wall_mark=data.get('wall_mark') or 'XWall',
+            font_family=self.settings.rendering.font_family
         )
         
         return html

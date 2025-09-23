@@ -117,6 +117,19 @@ processing:
 
 
 
+# 渲染配置
+
+rendering:
+
+  # 自定义字体族，支持多个字体回退
+  # 示例：中文字体优先
+  # font_family: "'思源黑体', 'Source Han Sans', 'PingFang SC', 'Microsoft YaHei', sans-serif"
+  # 示例：西文字体优先  
+  # font_family: "'Inter', 'Roboto', 'Helvetica Neue', 'PingFang SC', 'Microsoft YaHei', sans-serif"
+  font_family: "'Inter', -apple-system, BlinkMacSystemFont, 'Segoe UI', 'PingFang SC', 'Hiragino Sans GB', 'Microsoft YaHei', 'Helvetica Neue', Helvetica, Arial, sans-serif"
+
+
+
 # 队列配置（用于定时发送任务的持久化队列）
 
 # backend 取值：AsyncSQLiteQueue | AsyncQueue | MySQLQueue

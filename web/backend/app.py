@@ -9,7 +9,6 @@ CORS is enabled; static frontend can be served from ../frontend/dist if built.
 """
 
 import asyncio
-import logging
 from datetime import datetime, timedelta
 from pathlib import Path
 from typing import Optional, List, Dict, Any
@@ -23,9 +22,6 @@ from fastapi.staticfiles import StaticFiles
 
 import jwt
 from passlib.context import CryptContext
-
-# 抑制 passlib bcrypt 版本兼容性警告
-logging.getLogger("passlib").setLevel(logging.ERROR)
 
 from pydantic import BaseModel
 

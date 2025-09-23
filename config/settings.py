@@ -158,6 +158,13 @@ class ProcessingConfig(BaseModel):
     max_concurrent: int = 10
 
 
+class RenderingConfig(BaseModel):
+    """渲染配置"""
+    
+    # 自定义字体族，支持多个字体回退
+    font_family: str = "'Inter', -apple-system, BlinkMacSystemFont, 'Segoe UI', 'PingFang SC', 'Hiragino Sans GB', 'Microsoft YaHei', 'Helvetica Neue', Helvetica, Arial, sans-serif"
+
+
 class QQReceiverConfig(BaseModel):
     """QQ接收器配置"""
 
@@ -364,6 +371,8 @@ class Settings(BaseSettings):
     llm: LLMConfig = LLMConfig()
 
     processing: ProcessingConfig = ProcessingConfig()
+
+    rendering: RenderingConfig = RenderingConfig()
 
     receivers: Dict[str, Any] = Field(default_factory=dict)
 
