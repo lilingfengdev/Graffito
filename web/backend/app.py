@@ -30,6 +30,10 @@ from pydantic import BaseModel
 from config import get_settings
 from core.database import get_db
 from services.audit_service import AuditService
+import os
+import sys
+import socket
+import platform
 
 
 # Security helpers
@@ -66,7 +70,7 @@ class UserOut(BaseModel):
     is_superadmin: bool
     # Extended for frontend compatibility
     user_id: Optional[str] = None  # mirrors username for admin pages
-    role: Optional[str] = None     # 'super_admin' | 'senior_admin' | 'admin'
+    role: Optional[str] = None     # 'admin' | 'user'
 
 
 class InviteCreateIn(BaseModel):
@@ -323,22 +327,15 @@ async def me(authorization: Optional[str] = Header(default=None)):
     db = await get_db()
     async with db.get_session() as session:
         from sqlalchemy import select
-        from core.models import User, AdminProfile
+        from core.models import User
 
         stmt = select(User).where(User.id == user_id)
         result = await session.execute(stmt)
         user = result.scalar_one_or_none()
         if not user or not user.is_active:
             raise HTTPException(status_code=401, detail="用户已被禁用")
-        # derive role
-        prof = (await session.execute(select(AdminProfile).where(AdminProfile.user_id == user.id))).scalar_one_or_none()
-        role = None
-        if user.is_superadmin:
-            role = "super_admin"
-        elif prof and prof.role:
-            role = prof.role
-        elif user.is_admin:
-            role = "admin"
+        # Simplified role model: admin | user
+        role = "admin" if user.is_admin else "user"
         return UserOut(
             id=user.id,
             username=user.username,
@@ -355,8 +352,8 @@ async def me(authorization: Optional[str] = Header(default=None)):
 @rl(getattr(settings.web.rate_limit, "create_invite", None))
 async def create_invite(request: Request, body: InviteCreateIn, authorization: Optional[str] = Header(default=None)):
     payload = get_current_user_from_headers(authorization)
-    if not payload.get("is_superadmin"):
-        raise HTTPException(status_code=403, detail="仅超级管理员可创建邀请码")
+    if not payload.get("is_admin"):
+        raise HTTPException(status_code=403, detail="需要管理员权限")
 
     db = await get_db()
     async with db.get_session() as session:
@@ -414,12 +411,12 @@ async def register_via_invite(request: Request, body: RegisterViaInviteIn):
         if result.scalar_one_or_none():
             raise HTTPException(status_code=400, detail="用户名已存在")
 
-        # Create admin user
+        # Create normal user (reviewer)
         user = User(
             username=body.username,
             display_name=body.display_name,
             password_hash=hash_password(body.password),
-            is_admin=True,
+            is_admin=False,
             is_superadmin=False,
             is_active=True,
         )
@@ -462,8 +459,7 @@ class SubmissionOut(BaseModel):
 @app.get("/audit/submissions", response_model=List[SubmissionOut])
 async def list_submissions(status_filter: Optional[str] = None, limit: int = 50, authorization: Optional[str] = Header(default=None)):
     payload = get_current_user_from_headers(authorization)
-    if not payload.get("is_admin"):
-        raise HTTPException(status_code=403, detail="需要管理员权限") 
+    # Any authenticated active user can review
 
     db = await get_db()
     async with db.get_session() as session:
@@ -501,8 +497,6 @@ class AuditActionIn(BaseModel):
 @app.post("/audit/{submission_id}/approve")
 async def api_approve(submission_id: int, authorization: Optional[str] = Header(default=None)):
     payload = get_current_user_from_headers(authorization)
-    if not payload.get("is_admin"):
-        raise HTTPException(status_code=403, detail="需要管理员权限")
     res = await audit_service.approve(submission_id, operator_id=str(payload.get("username")))
     if not res.get("success"):
         raise HTTPException(status_code=400, detail=res.get("message"))
@@ -512,8 +506,6 @@ async def api_approve(submission_id: int, authorization: Optional[str] = Header(
 @app.post("/audit/{submission_id}/reject")
 async def api_reject(submission_id: int, body: AuditActionIn, authorization: Optional[str] = Header(default=None)):
     payload = get_current_user_from_headers(authorization)
-    if not payload.get("is_admin"):
-        raise HTTPException(status_code=403, detail="需要管理员权限")
     res = await audit_service.reject_with_message(submission_id, operator_id=str(payload.get("username")), extra=body.comment)
     if not res.get("success"):
         raise HTTPException(status_code=400, detail=res.get("message"))
@@ -523,8 +515,6 @@ async def api_reject(submission_id: int, body: AuditActionIn, authorization: Opt
 @app.post("/audit/{submission_id}/toggle-anon")
 async def api_toggle_anon(submission_id: int, authorization: Optional[str] = Header(default=None)):
     payload = get_current_user_from_headers(authorization)
-    if not payload.get("is_admin"):
-        raise HTTPException(status_code=403, detail="需要管理员权限")
     res = await audit_service.toggle_anonymous(submission_id, operator_id=str(payload.get("username")))
     if not res.get("success"):
         raise HTTPException(status_code=400, detail=res.get("message"))
@@ -534,8 +524,6 @@ async def api_toggle_anon(submission_id: int, authorization: Optional[str] = Hea
 @app.post("/audit/{submission_id}/comment")
 async def api_comment(submission_id: int, body: AuditActionIn, authorization: Optional[str] = Header(default=None)):
     payload = get_current_user_from_headers(authorization)
-    if not payload.get("is_admin"):
-        raise HTTPException(status_code=403, detail="需要管理员权限")
     res = await audit_service.add_comment(submission_id, operator_id=str(payload.get("username")), comment=(body.comment or ""))
     if not res.get("success"):
         raise HTTPException(status_code=400, detail=res.get("message"))
@@ -546,8 +534,6 @@ async def api_comment(submission_id: int, body: AuditActionIn, authorization: Op
 @app.post("/audit/{submission_id}/hold")
 async def api_hold(submission_id: int, authorization: Optional[str] = Header(default=None)):
     payload = get_current_user_from_headers(authorization)
-    if not payload.get("is_admin"):
-        raise HTTPException(status_code=403, detail="需要管理员权限")
     res = await audit_service.hold(submission_id, operator_id=str(payload.get("username")))
     if not res.get("success"):
         raise HTTPException(status_code=400, detail=res.get("message"))
@@ -557,8 +543,6 @@ async def api_hold(submission_id: int, authorization: Optional[str] = Header(def
 @app.post("/audit/{submission_id}/delete")
 async def api_delete(submission_id: int, authorization: Optional[str] = Header(default=None)):
     payload = get_current_user_from_headers(authorization)
-    if not payload.get("is_admin"):
-        raise HTTPException(status_code=403, detail="需要管理员权限")
     res = await audit_service.delete(submission_id, operator_id=str(payload.get("username")))
     if not res.get("success"):
         raise HTTPException(status_code=400, detail=res.get("message"))
@@ -568,8 +552,6 @@ async def api_delete(submission_id: int, authorization: Optional[str] = Header(d
 @app.post("/audit/{submission_id}/approve-immediate")
 async def api_approve_immediate(submission_id: int, authorization: Optional[str] = Header(default=None)):
     payload = get_current_user_from_headers(authorization)
-    if not payload.get("is_admin"):
-        raise HTTPException(status_code=403, detail="需要管理员权限")
     res = await audit_service.approve_immediate(submission_id, operator_id=str(payload.get("username")))
     if not res.get("success"):
         raise HTTPException(status_code=400, detail=res.get("message"))
@@ -579,8 +561,6 @@ async def api_approve_immediate(submission_id: int, authorization: Optional[str]
 @app.post("/audit/{submission_id}/rerender")
 async def api_rerender(submission_id: int, authorization: Optional[str] = Header(default=None)):
     payload = get_current_user_from_headers(authorization)
-    if not payload.get("is_admin"):
-        raise HTTPException(status_code=403, detail="需要管理员权限")
     res = await audit_service.rerender(submission_id, operator_id=str(payload.get("username")))
     if not res.get("success"):
         raise HTTPException(status_code=400, detail=res.get("message"))
@@ -590,8 +570,6 @@ async def api_rerender(submission_id: int, authorization: Optional[str] = Header
 @app.post("/audit/{submission_id}/refresh")
 async def api_refresh(submission_id: int, authorization: Optional[str] = Header(default=None)):
     payload = get_current_user_from_headers(authorization)
-    if not payload.get("is_admin"):
-        raise HTTPException(status_code=403, detail="需要管理员权限")
     res = await audit_service.refresh(submission_id, operator_id=str(payload.get("username")))
     if not res.get("success"):
         raise HTTPException(status_code=400, detail=res.get("message"))
@@ -601,8 +579,6 @@ async def api_refresh(submission_id: int, authorization: Optional[str] = Header(
 @app.post("/audit/{submission_id}/reply")
 async def api_reply(submission_id: int, body: AuditActionIn, authorization: Optional[str] = Header(default=None)):
     payload = get_current_user_from_headers(authorization)
-    if not payload.get("is_admin"):
-        raise HTTPException(status_code=403, detail="需要管理员权限")
     res = await audit_service.reply_to_sender(submission_id, operator_id=str(payload.get("username")), extra=body.comment)
     if not res.get("success"):
         raise HTTPException(status_code=400, detail=res.get("message"))
@@ -612,8 +588,6 @@ async def api_reply(submission_id: int, body: AuditActionIn, authorization: Opti
 @app.post("/audit/{submission_id}/blacklist")
 async def api_blacklist(submission_id: int, body: AuditActionIn, authorization: Optional[str] = Header(default=None)):
     payload = get_current_user_from_headers(authorization)
-    if not payload.get("is_admin"):
-        raise HTTPException(status_code=403, detail="需要管理员权限")
     res = await audit_service.blacklist(submission_id, operator_id=str(payload.get("username")), extra=body.comment)
     if not res.get("success"):
         raise HTTPException(status_code=400, detail=res.get("message"))
@@ -647,8 +621,7 @@ class SubmissionDetailOut(BaseModel):
 @app.get("/audit/{submission_id}/detail", response_model=SubmissionDetailOut)
 async def get_submission_detail(submission_id: int, authorization: Optional[str] = Header(default=None)):
     payload = get_current_user_from_headers(authorization)
-    if not payload.get("is_admin"):
-        raise HTTPException(status_code=403, detail="需要管理员权限")
+    # Any authenticated active user can review
     
     db = await get_db()
     async with db.get_session() as session:
@@ -816,7 +789,7 @@ class AdminOut(BaseModel):
 class AdminCreateIn(BaseModel):
     user_id: str
     nickname: Optional[str] = None
-    role: str = "admin"
+    role: Optional[str] = None
     permissions: Optional[List[str]] = None
     notes: Optional[str] = None
 
@@ -824,7 +797,7 @@ class AdminCreateIn(BaseModel):
 class AdminUpdateIn(BaseModel):
     user_id: str
     nickname: Optional[str] = None
-    role: str
+    role: Optional[str] = None
     permissions: Optional[List[str]] = None
     notes: Optional[str] = None
 
@@ -851,7 +824,7 @@ async def list_admins(authorization: Optional[str] = Header(default=None)):
         out: List[AdminOut] = []
         for u in users:
             p = uid_to_profile.get(u.id)
-            role = "super_admin" if u.is_superadmin else (p.role if p and p.role else ("admin" if u.is_admin else "admin"))
+            role = "admin"
             last_login = p.last_login.isoformat() if p and p.last_login else None
             created_at = u.created_at.isoformat() if u.created_at else None
             out.append(AdminOut(
@@ -859,7 +832,7 @@ async def list_admins(authorization: Optional[str] = Header(default=None)):
                 user_id=u.username,
                 nickname=p.nickname if p and p.nickname else (u.display_name or None),
                 role=role,
-                permissions=(p.permissions or []) if p and p.permissions else [],
+                permissions=[],
                 is_active=bool(u.is_active),
                 last_login=last_login,
                 created_at=created_at,
@@ -870,8 +843,8 @@ async def list_admins(authorization: Optional[str] = Header(default=None)):
 @app.post("/management/admins")
 async def create_admin(body: AdminCreateIn, authorization: Optional[str] = Header(default=None)):
     payload = get_current_user_from_headers(authorization)
-    if not payload.get("is_superadmin"):
-        raise HTTPException(status_code=403, detail="仅超级管理员可创建管理员")
+    if not payload.get("is_admin"):
+        raise HTTPException(status_code=403, detail="需要管理员权限")
 
     db = await get_db()
     async with db.get_session() as session:
@@ -884,10 +857,9 @@ async def create_admin(body: AdminCreateIn, authorization: Optional[str] = Heade
         if not u:
             raise HTTPException(status_code=404, detail="用户不存在，请先邀请/注册用户")
 
-        # 标记为管理员/超级管理员（仅当请求为 super_admin）
+        # 标记为管理员
         u.is_admin = True
-        if body.role == "super_admin":
-            u.is_superadmin = True
+        u.is_superadmin = False
 
         # 创建/更新 AdminProfile
         prof = (await session.execute(select(AdminProfile).where(AdminProfile.user_id == u.id))).scalar_one_or_none()
@@ -895,8 +867,9 @@ async def create_admin(body: AdminCreateIn, authorization: Optional[str] = Heade
             prof = AdminProfile(user_id=u.id)
             session.add(prof)
         prof.nickname = body.nickname
-        prof.role = body.role if body.role in ("admin", "senior_admin", "super_admin") else "admin"
-        prof.permissions = body.permissions or ["user_management"]
+        # Simplified role/permissions model
+        prof.role = "admin"
+        prof.permissions = []
         prof.notes = body.notes
 
         await session.flush()
@@ -908,8 +881,6 @@ async def update_admin(admin_id: int, body: AdminUpdateIn, authorization: Option
     payload = get_current_user_from_headers(authorization)
     if not payload.get("is_admin"):
         raise HTTPException(status_code=403, detail="需要管理员权限")
-    if body.role == "super_admin" and not payload.get("is_superadmin"):
-        raise HTTPException(status_code=403, detail="仅超级管理员可分配超级管理员角色")
 
     db = await get_db()
     async with db.get_session() as session:
@@ -920,10 +891,9 @@ async def update_admin(admin_id: int, body: AdminUpdateIn, authorization: Option
         if not u:
             raise HTTPException(status_code=404, detail="管理员未找到")
 
-        # 更新 User 标记
+        # 更新基本信息（简化角色/权限）
         u.is_admin = True
-        if body.role == "super_admin":
-            u.is_superadmin = True
+        u.is_superadmin = False
         if body.nickname is not None:
             u.display_name = body.nickname or u.display_name
 
@@ -932,8 +902,8 @@ async def update_admin(admin_id: int, body: AdminUpdateIn, authorization: Option
             prof = AdminProfile(user_id=u.id)
             session.add(prof)
         prof.nickname = body.nickname if body.nickname is not None else prof.nickname
-        prof.role = body.role if body.role in ("admin", "senior_admin", "super_admin") else (prof.role or "admin")
-        prof.permissions = body.permissions if body.permissions is not None else (prof.permissions or [])
+        prof.role = "admin"
+        prof.permissions = []
         prof.notes = body.notes if body.notes is not None else prof.notes
 
         await session.flush()
@@ -959,9 +929,9 @@ async def toggle_admin_status(admin_id: int, body: AdminStatusIn, authorization:
         if not u:
             raise HTTPException(status_code=404, detail="管理员未找到")
 
-        # 仅超级管理员可禁用超级管理员
-        if u.is_superadmin and not payload.get("is_superadmin"):
-            raise HTTPException(status_code=403, detail="仅超级管理员可禁用超级管理员")
+        # 防止用户禁用自身
+        if u.id == int(payload.get("sub")):
+            raise HTTPException(status_code=400, detail="不能禁用自己")
 
         u.is_active = bool(body.is_active)
         await session.flush()
@@ -971,8 +941,8 @@ async def toggle_admin_status(admin_id: int, body: AdminStatusIn, authorization:
 @app.delete("/management/admins/{admin_id}")
 async def delete_admin(admin_id: int, authorization: Optional[str] = Header(default=None)):
     payload = get_current_user_from_headers(authorization)
-    if not payload.get("is_superadmin"):
-        raise HTTPException(status_code=403, detail="仅超级管理员可删除管理员")
+    if not payload.get("is_admin"):
+        raise HTTPException(status_code=403, detail="需要管理员权限")
 
     db = await get_db()
     async with db.get_session() as session:
@@ -982,8 +952,9 @@ async def delete_admin(admin_id: int, authorization: Optional[str] = Header(defa
         u = (await session.execute(select(User).where(User.id == admin_id))).scalar_one_or_none()
         if not u:
             raise HTTPException(status_code=404, detail="管理员未找到")
-        if u.is_superadmin:
-            raise HTTPException(status_code=400, detail="无法删除超级管理员")
+        # 防止删除自己
+        if u.id == int(payload.get("sub")):
+            raise HTTPException(status_code=400, detail="不能删除自己")
 
         # 取消管理员权限，但保留用户账号
         u.is_admin = False
@@ -1105,7 +1076,9 @@ class StatsOut(BaseModel):
     active_groups: List[str]
     
     # 最近7天的数据
-    recent_submissions: Dict[str, int]  # 日期 -> 数量
+    recent_submissions: Dict[str, int]  # 日期 -> 数量（7天）
+    # 最近30天的数据
+    recent_30d_submissions: Dict[str, int]  # 日期 -> 数量（30天）
 
 
 @app.get("/management/stats", response_model=StatsOut)
@@ -1156,29 +1129,44 @@ async def get_stats(authorization: Optional[str] = Header(default=None)):
         groups_result = await session.execute(groups_stmt)
         active_groups = [g for g in groups_result.scalars().all() if g]
         
-        # 最近7天的投稿数据
+        # 最近30天的投稿数据（一次查询，前端同时需要 7/30 天）
         from datetime import timedelta
-        seven_days_ago = datetime.utcnow() - timedelta(days=7)
-        recent_stmt = select(
+        thirty_days_ago = datetime.utcnow() - timedelta(days=30)
+        recent_30_stmt = select(
             func.date(Submission.created_at).label('date'),
             func.count(Submission.id).label('count')
         ).where(
-            Submission.created_at >= seven_days_ago
+            Submission.created_at >= thirty_days_ago
         ).group_by(func.date(Submission.created_at))
-        
-        recent_result = await session.execute(recent_stmt)
-        recent_data = recent_result.all()
+
+        recent_30_result = await session.execute(recent_30_stmt)
+        recent_30_rows = recent_30_result.all()
+
+        # 构建 30 天完整日期 -> 数量 字典，缺失日期补 0
+        def _normalize_date(v) -> str:
+            if isinstance(v, str):
+                return v
+            if hasattr(v, "strftime") and v is not None:
+                return v.strftime('%Y-%m-%d')
+            return str(v) if v is not None else ""
+
+        raw_map: Dict[str, int] = {}
+        for row in recent_30_rows:
+            date_str = _normalize_date(getattr(row, 'date', None))
+            raw_map[date_str] = int(getattr(row, 'count', 0) or 0)
+
+        # 生成连续 30 天与 7 天的序列
+        today = datetime.utcnow().date()
+        recent_30d_submissions: Dict[str, int] = {}
         recent_submissions: Dict[str, int] = {}
-        for row in recent_data:
-            date_val = getattr(row, "date", None)
-            if isinstance(date_val, str):
-                date_str = date_val
-            elif hasattr(date_val, "strftime") and date_val is not None:  # date/datetime
-                date_str = date_val.strftime('%Y-%m-%d')
-            else:
-                date_str = str(date_val) if date_val is not None else ""
-            recent_submissions[date_str] = int(getattr(row, "count", 0) or 0)
-        
+        for i in range(30):
+            d = today - timedelta(days=29 - i)
+            key = d.strftime('%Y-%m-%d')
+            recent_30d_submissions[key] = int(raw_map.get(key, 0))
+            # 同时构建最近7天（最后7个点）
+            if i >= 23:  # 30-7 = 23
+                recent_submissions[key] = int(raw_map.get(key, 0))
+
         return StatsOut(
             total_submissions=total_submissions,
             pending_submissions=pending_submissions,
@@ -1188,8 +1176,163 @@ async def get_stats(authorization: Optional[str] = Header(default=None)):
             stored_posts_count=stored_posts_count,
             blacklisted_users=blacklisted_users,
             active_groups=active_groups,
-            recent_submissions=recent_submissions
+            recent_submissions=recent_submissions,
+            recent_30d_submissions=recent_30d_submissions,
         )
 
+
+
+# 系统状态API（管理员可访问）
+class SystemStatusOut(BaseModel):
+    system: Dict[str, Any]
+    cpu: Dict[str, Any]
+    memory: Dict[str, Any]
+    swap: Dict[str, Any]
+    disks: List[Dict[str, Any]]
+    network: Dict[str, Any]
+    process: Dict[str, Any]
+    timestamp: str
+
+
+@app.get("/management/system/status", response_model=SystemStatusOut)
+async def get_system_status(authorization: Optional[str] = Header(default=None)):
+    payload = get_current_user_from_headers(authorization)
+    if not payload.get("is_admin"):
+        raise HTTPException(status_code=403, detail="需要管理员权限")
+
+    try:
+        import psutil  # type: ignore
+    except ImportError:
+        raise HTTPException(status_code=500, detail="服务器缺少 psutil 依赖，请安装后重试")
+
+    # CPU 信息
+    try:
+        cpu_percent = float(psutil.cpu_percent(interval=None))
+        per_cpu_percent = [float(x) for x in psutil.cpu_percent(interval=None, percpu=True)]
+    except Exception:
+        cpu_percent = 0.0
+        per_cpu_percent = []
+
+    try:
+        load_avg = os.getloadavg()  # type: ignore[attr-defined]
+        load_avg_out: Optional[List[float]] = [float(x) for x in load_avg]
+    except Exception:
+        load_avg_out = None
+
+    # 内存信息
+    vm = psutil.virtual_memory()
+    mem_info = {
+        "total": int(getattr(vm, "total", 0)),
+        "available": int(getattr(vm, "available", 0)),
+        "used": int(getattr(vm, "used", 0)),
+        "percent": float(getattr(vm, "percent", 0.0)),
+        "free": int(getattr(vm, "free", 0)),
+        "buffers": int(getattr(vm, "buffers", 0) or 0),
+        "cached": int(getattr(vm, "cached", 0) or 0),
+    }
+
+    # 交换内存
+    sm = psutil.swap_memory()
+    swap_info = {
+        "total": int(getattr(sm, "total", 0)),
+        "used": int(getattr(sm, "used", 0)),
+        "free": int(getattr(sm, "free", 0)),
+        "percent": float(getattr(sm, "percent", 0.0)),
+        "sin": int(getattr(sm, "sin", 0) or 0),
+        "sout": int(getattr(sm, "sout", 0) or 0),
+    }
+
+    # 磁盘信息
+    disks: List[Dict[str, Any]] = []
+    try:
+        for part in psutil.disk_partitions(all=False):
+            try:
+                usage = psutil.disk_usage(part.mountpoint)
+            except Exception:
+                continue
+            total = int(getattr(usage, "total", 0))
+            if total <= 0:
+                continue
+            disks.append({
+                "device": getattr(part, "device", None) or part.mountpoint,
+                "mountpoint": getattr(part, "mountpoint", ""),
+                "fstype": getattr(part, "fstype", None),
+                "total": total,
+                "used": int(getattr(usage, "used", 0)),
+                "free": int(getattr(usage, "free", 0)),
+                "percent": float(getattr(usage, "percent", 0.0)),
+            })
+    except Exception:
+        pass
+
+    # 网络
+    try:
+        nio = psutil.net_io_counters()
+        net_info = {
+            "bytes_sent": int(getattr(nio, "bytes_sent", 0)),
+            "bytes_recv": int(getattr(nio, "bytes_recv", 0)),
+            "packets_sent": int(getattr(nio, "packets_sent", 0)),
+            "packets_recv": int(getattr(nio, "packets_recv", 0)),
+            "errin": int(getattr(nio, "errin", 0)),
+            "errout": int(getattr(nio, "errout", 0)),
+            "dropin": int(getattr(nio, "dropin", 0)),
+            "dropout": int(getattr(nio, "dropout", 0)),
+        }
+    except Exception:
+        net_info = {"bytes_sent": 0, "bytes_recv": 0, "packets_sent": 0, "packets_recv": 0}
+
+    # 进程
+    try:
+        proc = psutil.Process(os.getpid())
+        pmem = proc.memory_info()
+        proc_info = {
+            "pid": proc.pid,
+            "cpu_percent": float(proc.cpu_percent(interval=None) or 0.0),
+            "memory_rss": int(getattr(pmem, "rss", 0)),
+            "memory_vms": int(getattr(pmem, "vms", 0)),
+            "open_files": len(proc.open_files() or []),
+            "num_threads": int(proc.num_threads() or 0),
+        }
+    except Exception:
+        proc_info = {"pid": os.getpid(), "cpu_percent": 0.0, "memory_rss": 0, "memory_vms": 0}
+
+    # 系统
+    try:
+        boot_ts = getattr(psutil, "boot_time", lambda: None)()
+        boot_time_iso = datetime.utcfromtimestamp(boot_ts).isoformat() + "Z" if boot_ts else None
+        uptime_seconds = int((datetime.utcnow().timestamp() - boot_ts)) if boot_ts else None
+    except Exception:
+        boot_time_iso = None
+        uptime_seconds = None
+
+    system_info = {
+        "platform": platform.platform(),
+        "system": platform.system(),
+        "release": platform.release(),
+        "version": platform.version(),
+        "machine": platform.machine(),
+        "processor": platform.processor(),
+        "python_version": sys.version.split(" ")[0],
+        "hostname": socket.gethostname(),
+        "boot_time": boot_time_iso,
+        "uptime_seconds": uptime_seconds,
+    }
+
+    return SystemStatusOut(
+        system=system_info,
+        cpu={
+            "physical_cores": int(getattr(psutil, "cpu_count", lambda logical=False: 0)(logical=False) or 0),
+            "total_cores": int(getattr(psutil, "cpu_count", lambda logical=True: 0)(logical=True) or 0),
+            "cpu_percent": cpu_percent,
+            "per_cpu_percent": per_cpu_percent,
+            "load_avg": load_avg_out,
+        },
+        memory=mem_info,
+        swap=swap_info,
+        disks=disks,
+        network=net_info,
+        process=proc_info,
+        timestamp=datetime.utcnow().isoformat() + "Z",
+    )
 
 

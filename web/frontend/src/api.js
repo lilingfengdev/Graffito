@@ -45,3 +45,6 @@ api.interceptors.response.use(
 
 export default api
 
+
+// Admin: system status
+export const getSystemStatus = () => api.get('/management/system/status')

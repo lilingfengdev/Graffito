@@ -6,8 +6,8 @@
         <div class="page-title">
           <h1>用户管理</h1>
           <div class="title-stats">
-            <el-tag type="danger" size="large">黑名单 {{ blacklist.length }} 人</el-tag>
-            <el-tag type="primary" size="large">管理员 {{ admins.length }} 人</el-tag>
+            <el-tag type="danger" size="large">黑名单 {{ filteredBlacklist.length }} 人</el-tag>
+            <el-tag type="primary" size="large">管理员 {{ filteredAdmins.length }} 人</el-tag>
           </div>
         </div>
         
@@ -16,7 +16,7 @@
             type="primary" 
             :icon="Refresh"
             @click="refreshCurrentTab"
-            :loading="loading"
+            :loading="blacklistState.loading || adminState.loading"
             round
           >
             刷新
@@ -38,11 +38,11 @@
               </div>
               <div class="tab-actions">
                 <el-input
-                  v-model="searchText"
+                  v-model="blacklistState.searchText"
                   placeholder="搜索用户ID或群组"
                   :prefix-icon="Search"
                   style="width: 200px; margin-right: 12px;"
-                  @input="handleSearch"
+                  @input="handleBlacklistSearch"
                   clearable
                 />
                 <el-button 
@@ -57,8 +57,8 @@
 
             <!-- 黑名单表格 -->
             <el-table 
-              :data="filteredBlacklist" 
-              v-loading="loading"
+              :data="paginatedBlacklist" 
+              v-loading="blacklistState.loading"
               class="blacklist-table"
               stripe
               :header-cell-style="headerCellStyle"
@@ -156,19 +156,22 @@
             <!-- 分页 -->
             <div class="pagination-container">
               <el-pagination
-                v-model:current-page="currentPage"
-                :page-size="pageSize"
+                v-model:current-page="blacklistState.currentPage"
+                :page-size="blacklistState.pageSize"
                 :total="filteredBlacklist.length"
-                layout="total, prev, pager, next, jumper"
-                @current-change="handlePageChange"
+                layout="prev, pager, next"
+                @current-change="handleBlacklistPageChange"
                 background
               />
+              <div class="pagination-info">
+                共 {{ filteredBlacklist.length }} 条记录，当前第 {{ blacklistState.currentPage }} 页
+              </div>
             </div>
           </div>
         </el-tab-pane>
 
         <!-- 管理员管理 -->
-        <el-tab-pane label="管理员管理" name="admins" v-if="isSupperAdmin">
+        <el-tab-pane label="管理员管理" name="admins" v-if="currentUser.isAdmin">
           <div class="tab-content">
             <div class="tab-header">
               <div class="tab-title">
@@ -177,7 +180,7 @@
               </div>
               <div class="tab-actions">
                 <el-input
-                  v-model="adminSearchText"
+                  v-model="adminState.searchText"
                   placeholder="搜索用户ID或昵称"
                   :prefix-icon="Search"
                   style="width: 200px; margin-right: 12px;"
@@ -196,8 +199,8 @@
 
             <!-- 管理员表格 -->
             <el-table 
-              :data="filteredAdmins" 
-              v-loading="adminLoading"
+              :data="paginatedAdmins" 
+              v-loading="adminState.loading"
               class="admin-table"
               stripe
               :header-cell-style="headerCellStyle"
@@ -205,7 +208,7 @@
               <el-table-column prop="user_id" label="用户ID" width="150">
                 <template #default="{ row }">
                   <div class="user-cell">
-                    <el-avatar :size="32" :style="{ backgroundColor: getRoleColor(row.role) }">
+                    <el-avatar :size="32" :style="{ backgroundColor: '#3498db' }">
                       {{ row.nickname ? row.nickname[0] : row.user_id[0] }}
                     </el-avatar>
                     <span class="user-id">{{ row.user_id }}</span>
@@ -217,29 +220,6 @@
                 <template #default="{ row }">
                   <span v-if="row.nickname">{{ row.nickname }}</span>
                   <span v-else class="no-nickname">未设置</span>
-                </template>
-              </el-table-column>
-              
-              <el-table-column prop="role" label="角色" width="120">
-                <template #default="{ row }">
-                  <el-tag :type="getRoleTagType(row.role)" size="small">
-                    {{ getRoleText(row.role) }}
-                  </el-tag>
-                </template>
-              </el-table-column>
-              
-              <el-table-column prop="permissions" label="权限" min-width="200">
-                <template #default="{ row }">
-                  <div class="permissions">
-                    <el-tag 
-                      v-for="permission in row.permissions" 
-                      :key="permission"
-                      size="small"
-                      style="margin-right: 4px; margin-bottom: 4px;"
-                    >
-                      {{ getPermissionText(permission) }}
-                    </el-tag>
-                  </div>
                 </template>
               </el-table-column>
               
@@ -275,7 +255,7 @@
                       size="small"
                       :icon="Edit"
                       @click="editAdmin(row)"
-                      :disabled="row.role === 'super_admin' && row.user_id !== currentUserId"
+                      :disabled="false"
                     >
                       编辑
                     </el-button>
@@ -284,7 +264,7 @@
                       size="small"
                       :icon="row.is_active ? 'Lock' : 'Unlock'"
                       @click="toggleAdminStatus(row)"
-                      :disabled="row.role === 'super_admin'"
+                      :disabled="row.user_id === currentUser.id"
                     >
                       {{ row.is_active ? '禁用' : '启用' }}
                     </el-button>
@@ -293,7 +273,7 @@
                       size="small"
                       :icon="Delete"
                       @click="deleteAdmin(row.id)"
-                      :disabled="row.role === 'super_admin' || row.user_id === currentUserId"
+                      :disabled="row.user_id === currentUser.id"
                     >
                       删除
                     </el-button>
@@ -305,14 +285,238 @@
             <!-- 分页 -->
             <div class="pagination-container">
               <el-pagination
-                v-model:current-page="adminCurrentPage"
-                :page-size="adminPageSize"
+                v-model:current-page="adminState.currentPage"
+                :page-size="adminState.pageSize"
                 :total="filteredAdmins.length"
-                layout="total, prev, pager, next, jumper"
+                layout="prev, pager, next"
                 @current-change="handleAdminPageChange"
                 background
               />
+              <div class="pagination-info">
+                共 {{ filteredAdmins.length }} 条记录，当前第 {{ adminState.currentPage }} 页
+              </div>
             </div>
+          </div>
+        </el-tab-pane>
+
+        <!-- 系统状态（管理员可见） -->
+        <el-tab-pane label="系统状态" name="system" v-if="currentUser.isAdmin">
+          <div class="tab-content">
+            <div class="tab-header">
+              <div class="tab-title">
+                <h3>系统状态</h3>
+                <el-tag type="success" v-if="systemState.data">
+                  更新于 {{ formatTime(systemState.data.timestamp) }}
+                </el-tag>
+              </div>
+              <div class="tab-actions">
+                <el-switch
+                  v-model="systemState.autoRefresh"
+                  active-text="自动刷新"
+                  @change="handleAutoRefreshChange"
+                />
+                <el-button 
+                  type="primary" 
+                  :icon="Refresh"
+                  @click="loadSystemStatus"
+                  :loading="systemState.loading"
+                >
+                  刷新
+                </el-button>
+              </div>
+            </div>
+
+            <el-row :gutter="16">
+              <el-col :span="6">
+                <div class="stat-item">
+                  <div class="stat-number">{{ formatPercent(systemState.data?.cpu?.cpu_percent) }}</div>
+                  <div class="stat-label">CPU 使用率</div>
+                </div>
+              </el-col>
+              <el-col :span="6">
+                <div class="stat-item">
+                  <div class="stat-number">{{ formatPercent(systemState.data?.memory?.percent) }}</div>
+                  <div class="stat-label">内存占用</div>
+                </div>
+              </el-col>
+              <el-col :span="6">
+                <div class="stat-item">
+                  <div class="stat-number">{{ formatPercent(systemState.data?.swap?.percent) }}</div>
+                  <div class="stat-label">交换分区</div>
+                </div>
+              </el-col>
+              <el-col :span="6">
+                <div class="stat-item">
+                  <div class="stat-number">{{ formatDuration(systemState.data?.system?.uptime_seconds) }}</div>
+                  <div class="stat-label">已运行</div>
+                </div>
+              </el-col>
+            </el-row>
+
+            <el-card class="system-section-card" shadow="hover">
+              <template #header>
+                <div class="section-header">
+                  <div class="section-title">
+                    <el-icon class="section-icon"><Monitor /></el-icon>
+                    <span>CPU 详情</span>
+                  </div>
+                  <div v-if="systemState.data?.cpu?.load_avg" class="section-meta">
+                    负载: {{ systemState.data.cpu.load_avg.join(', ') }}
+                  </div>
+                </div>
+              </template>
+              <div v-if="systemState.data" class="section-content">
+                <div class="progress-container">
+                  <el-progress :percentage="Math.round(systemState.data.cpu.cpu_percent || 0)" 
+                              :color="getProgressColor(systemState.data.cpu.cpu_percent)"
+                              :stroke-width="8" />
+                </div>
+                <div v-if="systemState.data.cpu.per_cpu_percent && systemState.data.cpu.per_cpu_percent.length" class="cpu-cores">
+                  <div v-for="(p, idx) in systemState.data.cpu.per_cpu_percent" :key="idx" class="cpu-core-item">
+                    <div class="cpu-core-label">CPU {{ idx }}</div>
+                    <el-progress :percentage="Math.round(p)" 
+                                :color="getProgressColor(p)"
+                                :stroke-width="6" />
+                  </div>
+                </div>
+              </div>
+              <div v-else v-loading="systemState.loading" class="loading-placeholder"></div>
+            </el-card>
+
+            <el-card class="system-section-card" shadow="hover">
+              <template #header>
+                <div class="section-header">
+                  <div class="section-title">
+                    <el-icon class="section-icon"><Cpu /></el-icon>
+                    <span>内存使用</span>
+                  </div>
+                </div>
+              </template>
+              <div v-if="systemState.data" class="section-content">
+                <div class="memory-info">
+                  <el-progress :percentage="Math.round(systemState.data.memory.percent || 0)" 
+                              :color="getProgressColor(systemState.data.memory.percent)"
+                              :stroke-width="8"
+                              :text-inside="true" />
+                  <div class="memory-details">
+                    <span class="memory-used">已用: {{ formatBytes(systemState.data.memory.used) }}</span>
+                    <span class="memory-total">总计: {{ formatBytes(systemState.data.memory.total) }}</span>
+                  </div>
+                </div>
+              </div>
+              <div v-else v-loading="systemState.loading" class="loading-placeholder"></div>
+            </el-card>
+
+            <el-card class="system-section-card" shadow="hover">
+              <template #header>
+                <div class="section-header">
+                  <div class="section-title">
+                    <el-icon class="section-icon"><FolderOpened /></el-icon>
+                    <span>磁盘状态</span>
+                  </div>
+                </div>
+              </template>
+              <div class="section-content">
+                <el-table :data="systemState.data?.disks || []" 
+                         v-loading="systemState.loading" 
+                         stripe 
+                         class="system-table">
+                  <el-table-column prop="device" label="设备" width="140" />
+                  <el-table-column prop="mountpoint" label="挂载点" width="120" />
+                  <el-table-column label="总容量" width="120">
+                    <template #default="{ row }">{{ formatBytes(row.total) }}</template>
+                  </el-table-column>
+                  <el-table-column label="使用情况" min-width="360">
+                    <template #default="{ row }">
+                      <div class="disk-usage">
+                        <div class="disk-progress-wrapper">
+                          <el-progress :percentage="Math.round(row.percent || 0)" 
+                                      :color="getProgressColor(row.percent)"
+                                      :stroke-width="10"
+                                      :text-inside="true" />
+                        </div>
+                        <div class="disk-details">
+                          <span>已用: {{ formatBytes(row.used) }}</span>
+                          <span>可用: {{ formatBytes(row.free) }}</span>
+                        </div>
+                      </div>
+                    </template>
+                  </el-table-column>
+                </el-table>
+              </div>
+            </el-card>
+
+            <el-card class="system-section-card" shadow="hover">
+              <template #header>
+                <div class="section-header">
+                  <div class="section-title">
+                    <el-icon class="section-icon"><Connection /></el-icon>
+                    <span>网络状态</span>
+                  </div>
+                </div>
+              </template>
+              <div v-if="systemState.data" class="section-content">
+                <div class="network-grid">
+                  <div class="network-item">
+                    <div class="network-label">发送流量</div>
+                    <div class="network-value">{{ formatBytes(systemState.data.network.bytes_sent) }}</div>
+                  </div>
+                  <div class="network-item">
+                    <div class="network-label">接收流量</div>
+                    <div class="network-value">{{ formatBytes(systemState.data.network.bytes_recv) }}</div>
+                  </div>
+                  <div class="network-item">
+                    <div class="network-label">发送包数</div>
+                    <div class="network-value">{{ systemState.data.network.packets_sent.toLocaleString() }}</div>
+                  </div>
+                  <div class="network-item">
+                    <div class="network-label">接收包数</div>
+                    <div class="network-value">{{ systemState.data.network.packets_recv.toLocaleString() }}</div>
+                  </div>
+                </div>
+              </div>
+              <div v-else v-loading="systemState.loading" class="loading-placeholder"></div>
+            </el-card>
+
+            <el-card class="system-section-card" shadow="hover">
+              <template #header>
+                <div class="section-header">
+                  <div class="section-title">
+                    <el-icon class="section-icon"><Setting /></el-icon>
+                    <span>进程信息</span>
+                  </div>
+                </div>
+              </template>
+              <div v-if="systemState.data" class="section-content">
+                <div class="process-grid">
+                  <div class="process-item">
+                    <div class="process-label">进程ID</div>
+                    <div class="process-value">{{ systemState.data.process.pid }}</div>
+                  </div>
+                  <div class="process-item">
+                    <div class="process-label">CPU占用</div>
+                    <div class="process-value">{{ formatPercent(systemState.data.process.cpu_percent) }}</div>
+                  </div>
+                  <div class="process-item">
+                    <div class="process-label">物理内存</div>
+                    <div class="process-value">{{ formatBytes(systemState.data.process.memory_rss) }}</div>
+                  </div>
+                  <div class="process-item">
+                    <div class="process-label">虚拟内存</div>
+                    <div class="process-value">{{ formatBytes(systemState.data.process.memory_vms) }}</div>
+                  </div>
+                  <div class="process-item">
+                    <div class="process-label">线程数</div>
+                    <div class="process-value">{{ systemState.data.process.num_threads }}</div>
+                  </div>
+                  <div class="process-item">
+                    <div class="process-label">打开文件</div>
+                    <div class="process-value">{{ systemState.data.process.open_files }}</div>
+                  </div>
+                </div>
+              </div>
+              <div v-else v-loading="systemState.loading" class="loading-placeholder"></div>
+            </el-card>
           </div>
         </el-tab-pane>
       </el-tabs>
@@ -438,26 +642,7 @@
             placeholder="请输入管理员昵称（可选）"
           />
         </el-form-item>
-        <el-form-item label="角色" prop="role">
-          <el-select 
-            v-model="addAdminForm.role" 
-            placeholder="请选择管理员角色"
-            style="width: 100%"
-          >
-            <el-option label="普通管理员" value="admin" />
-            <el-option label="高级管理员" value="senior_admin" />
-            <el-option label="超级管理员" value="super_admin" v-if="currentUserRole === 'super_admin'" />
-          </el-select>
-        </el-form-item>
-        <el-form-item label="权限" prop="permissions">
-          <el-checkbox-group v-model="addAdminForm.permissions">
-            <el-checkbox label="user_management">用户管理</el-checkbox>
-            <el-checkbox label="content_review">内容审核</el-checkbox>
-            <el-checkbox label="system_config">系统配置</el-checkbox>
-            <el-checkbox label="data_export">数据导出</el-checkbox>
-            <el-checkbox label="log_view">日志查看</el-checkbox>
-          </el-checkbox-group>
-        </el-form-item>
+        <!-- 简化：不再选择角色与权限，默认赋予管理员 -->
         <el-form-item label="备注">
           <el-input 
             v-model="addAdminForm.notes" 
@@ -469,7 +654,7 @@
       </el-form>
       <template #footer>
         <el-button @click="showAddAdminDialog = false">取消</el-button>
-        <el-button type="primary" @click="addAdmin" :loading="adminSubmitting">
+        <el-button type="primary" @click="addAdmin" :loading="adminState.submitting">
           确定
         </el-button>
       </template>
@@ -491,27 +676,7 @@
             placeholder="请输入管理员昵称（可选）"
           />
         </el-form-item>
-        <el-form-item label="角色" prop="role">
-          <el-select 
-            v-model="editAdminForm.role" 
-            placeholder="请选择管理员角色"
-            style="width: 100%"
-            :disabled="editAdminForm.user_id === currentUserId || editAdminForm.role === 'super_admin'"
-          >
-            <el-option label="普通管理员" value="admin" />
-            <el-option label="高级管理员" value="senior_admin" />
-            <el-option label="超级管理员" value="super_admin" v-if="currentUserRole === 'super_admin'" />
-          </el-select>
-        </el-form-item>
-        <el-form-item label="权限" prop="permissions">
-          <el-checkbox-group v-model="editAdminForm.permissions" :disabled="editAdminForm.role === 'super_admin'">
-            <el-checkbox label="user_management">用户管理</el-checkbox>
-            <el-checkbox label="content_review">内容审核</el-checkbox>
-            <el-checkbox label="system_config">系统配置</el-checkbox>
-            <el-checkbox label="data_export">数据导出</el-checkbox>
-            <el-checkbox label="log_view">日志查看</el-checkbox>
-          </el-checkbox-group>
-        </el-form-item>
+        <!-- 简化：不再编辑角色与权限 -->
         <el-form-item label="备注">
           <el-input 
             v-model="editAdminForm.notes" 
@@ -523,7 +688,7 @@
       </el-form>
       <template #footer>
         <el-button @click="showEditAdminDialog = false">取消</el-button>
-        <el-button type="primary" @click="updateAdmin" :loading="adminSubmitting">
+        <el-button type="primary" @click="updateAdmin" :loading="adminState.submitting">
           保存
         </el-button>
       </template>
@@ -532,39 +697,222 @@
 </template>
 
 <script setup>
-import { ref, onMounted, computed, nextTick } from 'vue'
+import { ref, onMounted, computed, nextTick, reactive, watch, onBeforeUnmount } from 'vue'
 import { ElMessage, ElMessageBox } from 'element-plus'
 import { 
-  Plus, Refresh, Search, View, CircleCheck, Delete, Edit, Lock, Unlock
+  Plus, Refresh, Search, View, CircleCheck, Delete, Edit, Lock, Unlock,
+  Monitor, Cpu, FolderOpened, Connection, Setting
 } from '@element-plus/icons-vue'
 import moment from 'moment'
 import api from '../api'
 
+// --- 辅助函数与组合式函数 ---
+
+/**
+ * 封装API调用，自动处理加载状态和错误提示
+ * @param {Function} apiCall - 要执行的API调用函数
+ * @param {object} options - 配置项
+ * @param {string} [options.loadingState] - 控制加载状态的ref
+ * @param {string} [options.successMessage] - 成功后的提示信息
+ * @param {string} [options.errorMessage] - 失败时的默认提示信息
+ */
+const callApi = async (apiCall, { loadingState, successMessage, errorMessage = '操作失败' } = {}) => {
+  if (loadingState) loadingState.value = true
+  try {
+    const response = await apiCall()
+    if (successMessage) ElMessage.success(response.data.message || successMessage)
+    return response.data
+  } catch (error) {
+    ElMessage.error(error.response?.data?.detail || errorMessage)
+    console.error(error)
+    throw error
+  } finally {
+    if (loadingState) loadingState.value = false
+  }
+}
+
+/**
+ * 创建一个管理表格数据的组合式函数
+ * @param {Array<string>} searchKeys - 用于客户端搜索的字段名数组
+ * @param {number} initialPageSize - 初始每页条目数
+ */
+function useDataTable(searchKeys = [], initialPageSize = 20) {
+  const state = reactive({
+    data: [],
+    loading: false,
+    searchText: '',
+    currentPage: 1,
+    pageSize: initialPageSize,
+  })
+
+  const filteredData = computed(() => {
+    if (!state.searchText) {
+      return state.data
+    }
+    const search = state.searchText.toLowerCase()
+    return state.data.filter(item =>
+      searchKeys.some(key => {
+        const value = item[key]
+        return value && String(value).toLowerCase().includes(search)
+      })
+    )
+  })
+
+  const paginatedData = computed(() => {
+    const start = (state.currentPage - 1) * state.pageSize
+    const end = start + state.pageSize
+    return filteredData.value.slice(start, end)
+  })
+
+  const handleSearch = () => {
+    state.currentPage = 1
+  }
+
+  const handlePageChange = (page) => {
+    state.currentPage = page
+  }
+  
+  const setData = (data) => {
+    state.data = data
+  }
+
+  return {
+    state,
+    filteredData,
+    paginatedData,
+    handleSearch,
+    handlePageChange,
+    setData,
+  }
+}
+
+// --- 组件状态定义 ---
+
 // 基础状态
-const loading = ref(false)
 const submitting = ref(false)
 const loadingUser = ref(false)
 const activeTab = ref('blacklist')
-
-// 黑名单相关
-const blacklist = ref([])
 const activeGroups = ref([])
-const searchText = ref('')
-const currentPage = ref(1)
-const pageSize = ref(20)
-
-// 管理员相关
-const admins = ref([])
-const adminLoading = ref(false)
-const adminSubmitting = ref(false)
-const adminSearchText = ref('')
-const adminCurrentPage = ref(1)
-const adminPageSize = ref(20)
 
 // 当前用户信息
-const currentUserId = ref('')
-const currentUserRole = ref('')
-const isSupperAdmin = ref(false)
+const currentUser = reactive({
+  id: '',
+  role: '',
+  isAdmin: computed(() => currentUser.role === 'admin')
+})
+
+// 表格状态管理
+const { 
+  state: blacklistState, 
+  filteredData: filteredBlacklist,
+  paginatedData: paginatedBlacklist,
+  handleSearch: handleBlacklistSearch, 
+  handlePageChange: handleBlacklistPageChange,
+  setData: setBlacklistData
+} = useDataTable(['user_id', 'group_name'])
+
+const { 
+  state: adminState, 
+  filteredData: filteredAdmins,
+  paginatedData: paginatedAdmins,
+  handleSearch: handleAdminSearch, 
+  handlePageChange: handleAdminPageChange,
+  setData: setAdminsData
+} = useDataTable(['user_id', 'nickname'])
+
+
+// 系统状态
+const systemState = reactive({
+  data: null,
+  loading: false,
+  autoRefresh: true,
+  intervalMs: 5000,
+  lastUpdated: null,
+})
+let systemTimer = null
+
+const loadSystemStatus = async () => {
+  const data = await callApi(() => api.get('/management/system/status'), {
+    loadingState: systemState.loading,
+    errorMessage: '加载系统状态失败'
+  })
+  if (data) {
+    systemState.data = data
+    systemState.lastUpdated = data.timestamp || new Date().toISOString()
+  }
+}
+
+const startAutoRefresh = () => {
+  stopAutoRefresh()
+  if (!systemState.autoRefresh) return
+  systemTimer = setInterval(() => {
+    if (activeTab.value === 'system') {
+      loadSystemStatus()
+    }
+  }, systemState.intervalMs)
+}
+
+const stopAutoRefresh = () => {
+  if (systemTimer) {
+    clearInterval(systemTimer)
+    systemTimer = null
+  }
+}
+
+const handleAutoRefreshChange = () => {
+  if (systemState.autoRefresh) startAutoRefresh()
+  else stopAutoRefresh()
+}
+
+const formatBytes = (bytes) => {
+  if (bytes === null || bytes === undefined) return '-'
+  let val = Number(bytes)
+  const units = ['B', 'KB', 'MB', 'GB', 'TB']
+  let i = 0
+  while (val >= 1024 && i < units.length - 1) {
+    val = val / 1024
+    i++
+  }
+  const fixed = val >= 10 || i === 0 ? 0 : 1
+  return `${val.toFixed(fixed)} ${units[i]}`
+}
+
+const formatPercent = (p) => {
+  return typeof p === 'number' ? `${Math.round(p)}%` : '-'
+}
+
+const formatDuration = (seconds) => {
+  if (seconds === null || seconds === undefined) return '-'
+  const s = Number(seconds)
+  const d = Math.floor(s / 86400)
+  const h = Math.floor((s % 86400) / 3600)
+  const m = Math.floor((s % 3600) / 60)
+  const parts = []
+  if (d) parts.push(`${d}天`)
+  if (h) parts.push(`${h}小时`)
+  if (m) parts.push(`${m}分钟`)
+  return parts.join(' ') || `${s}秒`
+}
+
+const getProgressColor = (percent) => {
+  const p = Number(percent) || 0
+  if (p < 50) return '#67c23a'  // 绿色
+  if (p < 80) return '#e6a23c'  // 橙色
+  return '#f56c6c'              // 红色
+}
+
+watch(activeTab, async (val) => {
+  if (val === 'system' && currentUser.isAdmin) {
+    await loadSystemStatus()
+    startAutoRefresh()
+  } else {
+    stopAutoRefresh()
+  }
+})
+
+onBeforeUnmount(() => {
+  stopAutoRefresh()
+})
 
 // 对话框相关
 const showAddDialog = ref(false)
@@ -586,22 +934,18 @@ const addForm = ref({
   expires_hours: 24
 })
 
-// 添加管理员表单
+// 添加管理员表单（简化）
 const addAdminForm = ref({
   user_id: '',
   nickname: '',
-  role: 'admin',
-  permissions: ['user_management'],
   notes: ''
 })
 
-// 编辑管理员表单
+// 编辑管理员表单（简化）
 const editAdminForm = ref({
   id: '',
   user_id: '',
   nickname: '',
-  role: '',
-  permissions: [],
   notes: ''
 })
 
@@ -610,156 +954,133 @@ const adminFormRules = {
   user_id: [
     { required: true, message: '请输入用户ID', trigger: 'blur' },
     { pattern: /^\d+$/, message: '用户ID必须是数字', trigger: 'blur' }
-  ],
-  role: [
-    { required: true, message: '请选择角色', trigger: 'change' }
-  ],
-  permissions: [
-    { type: 'array', min: 1, message: '请至少选择一个权限', trigger: 'change' }
   ]
 }
 
-// 计算属性
-const filteredBlacklist = computed(() => {
-  if (!searchText.value) {
-    return blacklist.value
-  }
-  
-  const search = searchText.value.toLowerCase()
-  return blacklist.value.filter(item => 
-    item.user_id.toLowerCase().includes(search) ||
-    item.group_name.toLowerCase().includes(search)
-  )
-})
+// --- 计算属性与样式 ---
 
-const filteredAdmins = computed(() => {
-  if (!adminSearchText.value) {
-    return admins.value
-  }
-  
-  const search = adminSearchText.value.toLowerCase()
-  return admins.value.filter(item => 
-    item.user_id.toLowerCase().includes(search) ||
-    (item.nickname && item.nickname.toLowerCase().includes(search))
-  )
-})
-
-// 样式相关
 const headerCellStyle = computed(() => ({
   background: 'var(--el-bg-color-page)',
   color: 'var(--el-text-color-primary)',
   fontWeight: '600'
 }))
 
-// 方法
+// --- 数据加载方法 ---
+
 const loadBlacklist = async () => {
-  loading.value = true
-  try {
-    const { data } = await api.get('/management/blacklist')
-    blacklist.value = data
-  } catch (error) {
-    ElMessage.error('加载黑名单失败')
-    console.error(error)
-  } finally {
-    loading.value = false
-  }
+  const data = await callApi(() => api.get('/management/blacklist'), { 
+    loadingState: blacklistState.loading, 
+    errorMessage: '加载黑名单失败' 
+  })
+  if (data) setBlacklistData(data)
+}
+
+const loadAdmins = async () => {
+  const data = await callApi(() => api.get('/management/admins'), {
+    loadingState: adminState.loading,
+    errorMessage: '加载管理员列表失败'
+  })
+  if (data) setAdminsData(data)
 }
 
 const loadActiveGroups = async () => {
-  try {
-    const { data } = await api.get('/management/stats')
-    activeGroups.value = data.active_groups
-  } catch (error) {
-    console.error('加载活跃群组失败:', error)
+  const data = await callApi(() => api.get('/management/stats'), {
+    errorMessage: '加载活跃群组失败'
+  })
+  if (data) activeGroups.value = data.active_groups
+}
+
+const loadCurrentUser = async () => {
+  const data = await callApi(() => api.get('/auth/me'), {
+    errorMessage: '获取用户信息失败'
+  })
+  if (data) {
+    currentUser.id = data.user_id
+    currentUser.role = data.role
   }
 }
+
+// --- 通用操作方法 ---
+
+const handleActionWithConfirmation = async ({ title, message, type = 'warning', confirmButtonText = '确定', apiCall, onSuccess, successMessage }) => {
+  try {
+    await ElMessageBox.confirm(message, title, { type, confirmButtonText, cancelButtonText: '取消' })
+    await callApi(apiCall, { successMessage })
+    if (onSuccess) await onSuccess()
+  } catch (error) {
+    // ElMessageBox.confirm throws on cancel, which we can ignore.
+    // callApi handles and logs other errors.
+  }
+}
+
+// --- 黑名单管理方法 ---
 
 const addToBlacklist = async () => {
   if (!addForm.value.user_id || !addForm.value.group_name) {
-    ElMessage.warning('请填写完整信息')
+    ElMessage.warning('请填写用户ID和群组')
     return
   }
   
-  submitting.value = true
-  try {
-    const data = {
-      user_id: addForm.value.user_id,
-      group_name: addForm.value.group_name,
-      reason: addForm.value.reason
-    }
-    
-    if (addForm.value.expire_type === 'temporary') {
-      data.expires_hours = addForm.value.expires_hours
-    }
-    
-    const result = await api.post('/management/blacklist', data)
-    ElMessage.success(result.data.message || '添加成功')
-    showAddDialog.value = false
-    resetAddForm()
-    await loadBlacklist()
-  } catch (error) {
-    ElMessage.error(error.response?.data?.detail || '添加失败')
-  } finally {
-    submitting.value = false
+  const payload = {
+    user_id: addForm.value.user_id,
+    group_name: addForm.value.group_name,
+    reason: addForm.value.reason,
+    expires_hours: addForm.value.expire_type === 'temporary' ? addForm.value.expires_hours : null
   }
+  
+  await callApi(() => api.post('/management/blacklist', payload), {
+    loadingState: submitting,
+    successMessage: '添加成功',
+    errorMessage: '添加失败'
+  })
+
+  showAddDialog.value = false
+  resetAddForm()
+  await loadBlacklist()
 }
 
-const removeFromBlacklist = async (blacklistId) => {
-  try {
-    await ElMessageBox.confirm('确定要解禁该用户吗？', '确认操作', {
-      type: 'warning'
-    })
-    
-    const result = await api.delete(`/management/blacklist/${blacklistId}`)
-    ElMessage.success(result.data.message || '解禁成功')
-    await loadBlacklist()
-  } catch (error) {
-    if (error.dismiss !== 'cancel') {
-      ElMessage.error(error.response?.data?.detail || '解禁失败')
-    }
-  }
+const removeFromBlacklist = (blacklistId) => {
+  handleActionWithConfirmation({
+    title: '确认操作',
+    message: '确定要解禁该用户吗？',
+    apiCall: () => api.delete(`/management/blacklist/${blacklistId}`),
+    onSuccess: loadBlacklist,
+    successMessage: '解禁成功'
+  })
 }
 
-const deleteBlacklistEntry = async (blacklistId) => {
-  try {
-    await ElMessageBox.confirm('确定要删除该黑名单记录吗？', '确认删除', {
-      type: 'warning'
-    })
-    
-    const result = await api.delete(`/management/blacklist/${blacklistId}`)
-    ElMessage.success(result.data.message || '删除成功')
-    await loadBlacklist()
-  } catch (error) {
-    if (error.dismiss !== 'cancel') {
-      ElMessage.error(error.response?.data?.detail || '删除失败')
-    }
-  }
+const deleteBlacklistEntry = (blacklistId) => {
+  handleActionWithConfirmation({
+    title: '确认删除',
+    message: '确定要删除该黑名单记录吗？此操作不可撤销。',
+    type: 'error',
+    apiCall: () => api.delete(`/management/blacklist/${blacklistId}`),
+    onSuccess: loadBlacklist,
+    successMessage: '删除成功'
+  })
 }
 
 const viewUserDetail = async (userId) => {
-  loadingUser.value = true
   showUserDialog.value = true
-  
+  selectedUser.value = null
+  loadingUser.value = true
   try {
-    // 这里可以调用用户详情API，现在先模拟数据
+    // TODO: 待后端实现用户详情API
+    await new Promise(resolve => setTimeout(resolve, 500)); // 模拟网络延迟
     selectedUser.value = {
       user_id: userId,
-      nickname: '用户昵称',
-      qq_level: 'VIP 6',
+      nickname: '模拟用户昵称',
+      qq_level: 'VIP 7',
       qzone_status: '正常',
-      stats: {
-        total: 15,
-        published: 12,
-        rejected: 2,
-        pending: 1
-      }
-    }
+      stats: { total: 25, published: 20, rejected: 3, pending: 2 }
+    };
   } catch (error) {
-    ElMessage.error('加载用户详情失败')
+    ElMessage.error('加载用户详情失败');
   } finally {
-    loadingUser.value = false
+    loadingUser.value = false;
   }
 }
+
 
 const resetAddForm = () => {
   addForm.value = {
@@ -771,52 +1092,30 @@ const resetAddForm = () => {
   }
 }
 
-const handleSearch = () => {
-  currentPage.value = 1
-}
+// --- 管理员管理方法 ---
 
-const handlePageChange = (page) => {
-  currentPage.value = page
-}
-
-const formatTime = (timeStr) => {
-  return moment(timeStr).format('YYYY-MM-DD HH:mm')
-}
-
-// 管理员相关方法
-const loadAdmins = async () => {
-  adminLoading.value = true
+const submitAdminForm = async (formRef, apiCall) => {
+  if (!formRef.value) return
   try {
-    const { data } = await api.get('/management/admins')
-    admins.value = data
-  } catch (error) {
-    ElMessage.error('加载管理员列表失败')
-    console.error(error)
-  } finally {
-    adminLoading.value = false
+    await formRef.value.validate()
+  } catch {
+    return // Validation failed
   }
+  
+  await callApi(apiCall, {
+    loadingState: adminState.submitting,
+    successMessage: '操作成功'
+  })
+  
+  return true
 }
 
 const addAdmin = async () => {
-  if (!addAdminFormRef.value) return
-  
-  try {
-    await addAdminFormRef.value.validate()
-  } catch {
-    return
-  }
-  
-  adminSubmitting.value = true
-  try {
-    const result = await api.post('/management/admins', addAdminForm.value)
-    ElMessage.success(result.data.message || '添加管理员成功')
+  const success = await submitAdminForm(addAdminFormRef, () => api.post('/management/admins', addAdminForm.value))
+  if (success) {
     showAddAdminDialog.value = false
     resetAddAdminForm()
     await loadAdmins()
-  } catch (error) {
-    ElMessage.error(error.response?.data?.detail || '添加管理员失败')
-  } finally {
-    adminSubmitting.value = false
   }
 }
 
@@ -825,157 +1124,78 @@ const editAdmin = (admin) => {
     id: admin.id,
     user_id: admin.user_id,
     nickname: admin.nickname || '',
-    role: admin.role,
-    permissions: [...admin.permissions],
     notes: admin.notes || ''
   }
   showEditAdminDialog.value = true
 }
 
 const updateAdmin = async () => {
-  if (!editAdminFormRef.value) return
-  
-  try {
-    await editAdminFormRef.value.validate()
-  } catch {
-    return
-  }
-  
-  adminSubmitting.value = true
-  try {
-    const result = await api.put(`/management/admins/${editAdminForm.value.id}`, editAdminForm.value)
-    ElMessage.success(result.data.message || '更新管理员成功')
+  const success = await submitAdminForm(editAdminFormRef, () => api.put(`/management/admins/${editAdminForm.value.id}`, editAdminForm.value))
+  if (success) {
     showEditAdminDialog.value = false
     await loadAdmins()
-  } catch (error) {
-    ElMessage.error(error.response?.data?.detail || '更新管理员失败')
-  } finally {
-    adminSubmitting.value = false
   }
 }
 
-const toggleAdminStatus = async (admin) => {
-  try {
-    const action = admin.is_active ? '禁用' : '启用'
-    await ElMessageBox.confirm(`确定要${action}该管理员吗？`, '确认操作', {
-      type: 'warning'
-    })
-    
-    const result = await api.patch(`/management/admins/${admin.id}/status`, {
-      is_active: !admin.is_active
-    })
-    ElMessage.success(result.data.message || `${action}成功`)
-    await loadAdmins()
-  } catch (error) {
-    if (error.dismiss !== 'cancel') {
-      ElMessage.error(error.response?.data?.detail || '操作失败')
-    }
-  }
+const toggleAdminStatus = (admin) => {
+  const action = admin.is_active ? '禁用' : '启用'
+  handleActionWithConfirmation({
+    title: '确认操作',
+    message: `确定要${action}该管理员吗？`,
+    apiCall: () => api.patch(`/management/admins/${admin.id}/status`, { is_active: !admin.is_active }),
+    onSuccess: loadAdmins,
+    successMessage: `${action}成功`
+  })
 }
 
-const deleteAdmin = async (adminId) => {
-  try {
-    await ElMessageBox.confirm('确定要删除该管理员吗？此操作不可撤销！', '确认删除', {
-      type: 'error',
-      confirmButtonText: '确定删除',
-      cancelButtonText: '取消'
-    })
-    
-    const result = await api.delete(`/management/admins/${adminId}`)
-    ElMessage.success(result.data.message || '删除成功')
-    await loadAdmins()
-  } catch (error) {
-    if (error.dismiss !== 'cancel') {
-      ElMessage.error(error.response?.data?.detail || '删除失败')
-    }
-  }
+const deleteAdmin = (adminId) => {
+  handleActionWithConfirmation({
+    title: '确认删除',
+    message: '确定要删除该管理员吗？此操作不可撤销！',
+    type: 'error',
+    confirmButtonText: '确定删除',
+    apiCall: () => api.delete(`/management/admins/${adminId}`),
+    onSuccess: loadAdmins,
+    successMessage: '删除成功'
+  })
 }
 
 const resetAddAdminForm = () => {
-  addAdminForm.value = {
-    user_id: '',
-    nickname: '',
-    role: 'admin',
-    permissions: ['user_management'],
-    notes: ''
-  }
   if (addAdminFormRef.value) {
     addAdminFormRef.value.resetFields()
   }
-}
-
-const handleAdminSearch = () => {
-  adminCurrentPage.value = 1
-}
-
-const handleAdminPageChange = (page) => {
-  adminCurrentPage.value = page
-}
-
-// 工具方法
-const getRoleColor = (role) => {
-  const colors = {
-    'super_admin': '#e74c3c',
-    'senior_admin': '#f39c12',
-    'admin': '#3498db'
+  addAdminForm.value = {
+    user_id: '',
+    nickname: '',
+    notes: ''
   }
-  return colors[role] || '#95a5a6'
 }
 
-const getRoleTagType = (role) => {
-  const types = {
-    'super_admin': 'danger',
-    'senior_admin': 'warning',
-    'admin': 'primary'
-  }
-  return types[role] || 'info'
+// --- 工具与格式化方法 ---
+
+const formatTime = (timeStr) => {
+  return timeStr ? moment(timeStr).format('YYYY-MM-DD HH:mm') : '-'
 }
 
-const getRoleText = (role) => {
-  const texts = {
-    'super_admin': '超级管理员',
-    'senior_admin': '高级管理员',
-    'admin': '普通管理员'
-  }
-  return texts[role] || '未知'
-}
-
-const getPermissionText = (permission) => {
-  const texts = {
-    'user_management': '用户管理',
-    'content_review': '内容审核',
-    'system_config': '系统配置',
-    'data_export': '数据导出',
-    'log_view': '日志查看'
-  }
-  return texts[permission] || permission
-}
+// 简化后不再需要角色/权限文案
 
 const refreshCurrentTab = async () => {
   if (activeTab.value === 'blacklist') {
     await loadBlacklist()
   } else if (activeTab.value === 'admins') {
     await loadAdmins()
+  } else if (activeTab.value === 'system') {
+    await loadSystemStatus()
   }
 }
 
-// 获取当前用户信息
-const loadCurrentUser = async () => {
-  try {
-    const { data } = await api.get('/auth/me')
-    currentUserId.value = data.user_id
-    currentUserRole.value = data.role
-    isSupperAdmin.value = data.role === 'super_admin'
-  } catch (error) {
-    console.error('获取用户信息失败:', error)
-  }
-}
+// --- 生命周期钩子 ---
 
 onMounted(async () => {
   await loadCurrentUser()
   await loadBlacklist()
   await loadActiveGroups()
-  if (isSupperAdmin.value) {
+  if (currentUser.isAdmin) {
     await loadAdmins()
   }
 })
@@ -985,19 +1205,19 @@ onMounted(async () => {
 .user-management {
   max-width: 1400px;
   margin: 0 auto;
-  padding: 20px;
-  background: var(--el-bg-color-page);
+  padding: var(--xw-space-5);
+  background: var(--xw-bg-secondary);
   min-height: 100vh;
 }
 
 /* 页面头部样式 */
 .page-header {
-  background: linear-gradient(135deg, var(--el-color-primary), var(--el-color-primary-light-5));
-  border-radius: 16px;
-  padding: 24px 32px;
-  margin-bottom: 24px;
+  background: linear-gradient(135deg, var(--xw-primary), var(--xw-primary-light));
+  border-radius: var(--xw-radius-xl);
+  padding: var(--xw-space-6) var(--xw-space-8);
+  margin-bottom: var(--xw-space-6);
   color: white;
-  box-shadow: 0 8px 32px rgba(0, 0, 0, 0.1);
+  box-shadow: var(--xw-shadow-lg);
 }
 
 .header-content {
@@ -1005,12 +1225,12 @@ onMounted(async () => {
   justify-content: space-between;
   align-items: center;
   flex-wrap: wrap;
-  gap: 16px;
+  gap: var(--xw-space-4);
 }
 
 .page-title h1 {
   margin: 0;
-  font-size: 32px;
+  font-size: var(--xw-text-3xl);
   font-weight: 700;
   color: white;
   text-shadow: 0 2px 4px rgba(0, 0, 0, 0.1);
@@ -1018,22 +1238,23 @@ onMounted(async () => {
 
 .title-stats {
   display: flex;
-  gap: 12px;
-  margin-top: 8px;
+  gap: var(--xw-space-3);
+  margin-top: var(--xw-space-2);
   flex-wrap: wrap;
 }
 
 .header-actions {
   display: flex;
   align-items: center;
-  gap: 12px;
+  gap: var(--xw-space-3);
 }
 
 /* 主卡片样式 */
 .main-card {
-  border-radius: 16px;
-  box-shadow: 0 4px 24px rgba(0, 0, 0, 0.06);
-  border: 1px solid var(--el-border-color-light);
+  background: var(--xw-card-bg);
+  border-radius: var(--xw-radius-xl);
+  box-shadow: 0 4px 20px rgba(0, 0, 0, 0.08);
+  border: none;
   overflow: hidden;
 }
 
@@ -1048,9 +1269,20 @@ onMounted(async () => {
 
 .management-tabs :deep(.el-tabs__header) {
   margin: 0;
-  background: var(--el-bg-color);
-  border-bottom: 1px solid var(--el-border-color-light);
-  padding: 0 24px;
+  background: var(--xw-bg-primary);
+  border-bottom: none;
+  padding: 0 var(--xw-space-6);
+  position: relative;
+}
+
+.management-tabs :deep(.el-tabs__header)::after {
+  content: '';
+  position: absolute;
+  bottom: 0;
+  left: var(--xw-space-6);
+  right: var(--xw-space-6);
+  height: 1px;
+  background: linear-gradient(90deg, transparent, var(--xw-border-tertiary), transparent);
 }
 
 .management-tabs :deep(.el-tabs__nav) {
@@ -1058,22 +1290,27 @@ onMounted(async () => {
 }
 
 .management-tabs :deep(.el-tabs__item) {
-  font-size: 16px;
+  font-size: var(--xw-text-base);
   font-weight: 500;
-  padding: 0 24px;
+  padding: 0 var(--xw-space-6);
   height: 56px;
   line-height: 56px;
-  color: var(--el-text-color-regular);
+  color: var(--xw-text-secondary);
+  transition: var(--xw-transition);
+}
+
+.management-tabs :deep(.el-tabs__item:hover) {
+  color: var(--xw-primary);
 }
 
 .management-tabs :deep(.el-tabs__item.is-active) {
-  color: var(--el-color-primary);
+  color: var(--xw-primary);
   font-weight: 600;
 }
 
 .management-tabs :deep(.el-tabs__active-bar) {
   height: 3px;
-  background: var(--el-color-primary);
+  background: var(--xw-primary);
 }
 
 .management-tabs :deep(.el-tabs__content) {
@@ -1081,90 +1318,125 @@ onMounted(async () => {
 }
 
 .management-tabs :deep(.el-tab-pane) {
-  padding: 24px;
+  padding: var(--xw-space-6);
 }
 
 /* Tab内容样式 */
 .tab-content {
-  background: var(--el-bg-color);
+  background: var(--xw-bg-primary);
+  padding: var(--xw-space-2);
+  border-radius: var(--xw-radius-lg);
 }
 
 .tab-header {
   display: flex;
   justify-content: space-between;
   align-items: center;
-  margin-bottom: 24px;
-  padding-bottom: 16px;
-  border-bottom: 2px solid var(--el-border-color-extra-light);
+  margin: var(--xw-space-4) var(--xw-space-4) var(--xw-space-6);
+  padding-bottom: var(--xw-space-4);
+  border-bottom: none;
+  position: relative;
+}
+
+.tab-header::after {
+  content: '';
+  position: absolute;
+  bottom: 0;
+  left: 0;
+  right: 0;
+  height: 2px;
+  background: linear-gradient(90deg, var(--xw-primary-lightest), var(--xw-primary-lighter), var(--xw-primary-lightest));
+  border-radius: var(--xw-radius-sm);
 }
 
 .tab-title {
   display: flex;
   align-items: center;
-  gap: 16px;
+  gap: var(--xw-space-4);
 }
 
 .tab-title h3 {
   margin: 0;
-  color: var(--el-text-color-primary);
-  font-size: 20px;
+  color: var(--xw-text-primary);
+  font-size: var(--xw-text-xl);
   font-weight: 600;
 }
 
 .tab-actions {
   display: flex;
   align-items: center;
-  gap: 12px;
+  gap: var(--xw-space-3);
   flex-wrap: wrap;
 }
 
 /* 表格样式 */
 .blacklist-table,
 .admin-table {
-  background: var(--el-bg-color);
-  border-radius: 12px;
+  background: var(--xw-bg-primary);
+  border-radius: var(--xw-radius-lg);
   overflow: hidden;
-  box-shadow: 0 2px 12px rgba(0, 0, 0, 0.04);
+  border: none;
+  margin: 0 var(--xw-space-4);
+  box-shadow: 0 2px 8px rgba(0, 0, 0, 0.06);
 }
 
 .blacklist-table :deep(.el-table__header),
 .admin-table :deep(.el-table__header) {
-  background: var(--el-fill-color-light);
+  background: linear-gradient(135deg, var(--xw-bg-tertiary), var(--xw-bg-secondary));
+}
+
+.blacklist-table :deep(.el-table__header th),
+.admin-table :deep(.el-table__header th) {
+  font-weight: 600;
+  color: var(--xw-text-primary);
+  border: none;
+  position: relative;
+}
+
+.blacklist-table :deep(.el-table__header th):not(:last-child)::after,
+.admin-table :deep(.el-table__header th):not(:last-child)::after {
+  content: '';
+  position: absolute;
+  right: 0;
+  top: 25%;
+  bottom: 25%;
+  width: 1px;
+  background: var(--xw-border-quaternary);
 }
 
 .blacklist-table :deep(.el-table__row):hover,
 .admin-table :deep(.el-table__row):hover {
-  background: var(--el-fill-color-extra-light);
+  background: var(--xw-bg-secondary);
 }
 
 .blacklist-table :deep(.el-table__row.el-table__row--striped),
 .admin-table :deep(.el-table__row.el-table__row--striped) {
-  background: var(--el-fill-color-blank);
+  background: var(--xw-bg-secondary);
 }
 
 .blacklist-table :deep(.el-table__row.el-table__row--striped):hover,
 .admin-table :deep(.el-table__row.el-table__row--striped):hover {
-  background: var(--el-fill-color-extra-light);
+  background: var(--xw-bg-tertiary);
 }
 
 /* 用户单元格样式 */
 .user-cell {
   display: flex;
   align-items: center;
-  gap: 12px;
+  gap: var(--xw-space-3);
 }
 
 .user-id {
   font-weight: 500;
-  color: var(--el-text-color-primary);
-  font-size: 14px;
+  color: var(--xw-text-primary);
+  font-size: var(--xw-text-sm);
 }
 
 /* 权限标签样式 */
 .permissions {
   display: flex;
   flex-wrap: wrap;
-  gap: 4px;
+  gap: var(--xw-space-1);
 }
 
 /* 状态样式 */
@@ -1172,182 +1444,318 @@ onMounted(async () => {
 .no-operator,
 .no-nickname,
 .no-login {
-  color: var(--el-text-color-placeholder);
+  color: var(--xw-text-quaternary);
   font-style: italic;
-  font-size: 13px;
+  font-size: var(--xw-text-sm);
 }
 
 /* 操作按钮样式 */
 .action-buttons {
   display: flex;
-  gap: 6px;
+  gap: var(--xw-space-2);
   flex-wrap: wrap;
 }
 
 .action-buttons .el-button {
-  font-size: 12px;
-  padding: 6px 12px;
-  border-radius: 6px;
+  font-size: var(--xw-text-xs);
+  padding: var(--xw-space-2) var(--xw-space-3);
+  border-radius: var(--xw-radius);
+  border: none;
+  transition: var(--xw-transition);
+  box-shadow: none;
+}
+
+.action-buttons .el-button:hover {
+  transform: translateY(-1px);
+  box-shadow: 0 2px 8px rgba(0, 0, 0, 0.12);
+}
+
+/* 统一按钮样式 */
+:deep(.el-button) {
+  border-radius: var(--xw-radius-lg);
+  border: none;
+  font-weight: 500;
+  transition: var(--xw-transition);
+}
+
+:deep(.el-button--primary) {
+  background: linear-gradient(135deg, var(--xw-primary), var(--xw-primary-dark));
+  box-shadow: 0 2px 4px rgba(0, 0, 0, 0.1);
+}
+
+:deep(.el-button--primary:hover) {
+  background: linear-gradient(135deg, var(--xw-primary-light), var(--xw-primary));
+  transform: translateY(-1px);
+  box-shadow: 0 4px 12px rgba(0, 0, 0, 0.15);
+}
+
+:deep(.el-button--success) {
+  background: linear-gradient(135deg, #67c23a, #5daf34);
+  box-shadow: 0 2px 4px rgba(0, 0, 0, 0.1);
+}
+
+:deep(.el-button--warning) {
+  background: linear-gradient(135deg, #e6a23c, #cf9236);
+  box-shadow: 0 2px 4px rgba(0, 0, 0, 0.1);
+}
+
+:deep(.el-button--danger) {
+  background: linear-gradient(135deg, #f56c6c, #e85656);
+  box-shadow: 0 2px 4px rgba(0, 0, 0, 0.1);
 }
 
 /* 分页器样式 */
 .pagination-container {
   display: flex;
-  justify-content: center;
-  margin-top: 32px;
-  padding-top: 24px;
-  border-top: 1px solid var(--el-border-color-extra-light);
+  flex-direction: column;
+  align-items: center;
+  gap: var(--xw-space-3);
+  margin: var(--xw-space-8) var(--xw-space-4) var(--xw-space-4);
+  padding-top: var(--xw-space-6);
+  border-top: 1px solid var(--xw-border-tertiary);
+}
+
+.pagination-info {
+  color: var(--xw-text-secondary);
+  font-size: var(--xw-text-sm);
+  text-align: center;
 }
 
 /* 用户详情样式 */
 .user-detail {
-  padding: 16px 0;
+  padding: var(--xw-space-4) 0;
 }
 
 .user-stats {
-  margin-top: 24px;
+  margin-top: var(--xw-space-6);
 }
 
 .user-stats h4 {
-  margin: 0 0 16px 0;
-  color: var(--el-text-color-primary);
-  font-size: 16px;
+  margin: 0 0 var(--xw-space-4) 0;
+  color: var(--xw-text-primary);
+  font-size: var(--xw-text-base);
   font-weight: 600;
 }
 
 .stat-item {
   text-align: center;
-  padding: 20px 16px;
-  background: linear-gradient(135deg, var(--el-fill-color-light), var(--el-fill-color-extra-light));
-  border-radius: 12px;
-  border: 1px solid var(--el-border-color-extra-light);
-  transition: all 0.3s ease;
+  padding: var(--xw-space-5) var(--xw-space-4);
+  background: linear-gradient(135deg, var(--xw-bg-secondary), var(--xw-bg-tertiary));
+  border-radius: var(--xw-radius-lg);
+  border: 1px solid var(--xw-border-tertiary);
+  transition: var(--xw-transition);
 }
 
 .stat-item:hover {
   transform: translateY(-2px);
-  box-shadow: 0 4px 16px rgba(0, 0, 0, 0.08);
+  box-shadow: var(--xw-shadow-md);
 }
 
 .stat-number {
-  font-size: 28px;
+  font-size: var(--xw-text-2xl);
   font-weight: 700;
-  color: var(--el-color-primary);
+  color: var(--xw-primary);
   line-height: 1;
   text-shadow: 0 1px 2px rgba(0, 0, 0, 0.05);
 }
 
 .stat-label {
-  font-size: 14px;
-  color: var(--el-text-color-secondary);
-  margin-top: 6px;
+  font-size: var(--xw-text-sm);
+  color: var(--xw-text-secondary);
+  margin-top: var(--xw-space-2);
   font-weight: 500;
 }
 
 /* 对话框样式优化 */
 :deep(.el-dialog) {
-  border-radius: 16px;
-  box-shadow: 0 20px 40px rgba(0, 0, 0, 0.15);
+  background: var(--xw-bg-primary);
+  border-radius: var(--xw-radius-xl);
+  box-shadow: 0 20px 60px rgba(0, 0, 0, 0.12);
+  border: none;
 }
 
 :deep(.el-dialog__header) {
-  background: linear-gradient(135deg, var(--el-color-primary), var(--el-color-primary-light-3));
+  background: linear-gradient(135deg, var(--xw-primary), var(--xw-primary-light));
   color: white;
-  padding: 20px 24px;
-  border-radius: 16px 16px 0 0;
+  padding: var(--xw-space-5) var(--xw-space-6);
+  border-radius: var(--xw-radius-xl) var(--xw-radius-xl) 0 0;
 }
 
 :deep(.el-dialog__title) {
   color: white;
   font-weight: 600;
-  font-size: 18px;
+  font-size: var(--xw-text-lg);
 }
 
 :deep(.el-dialog__body) {
-  padding: 24px;
+  padding: var(--xw-space-6);
+  background: var(--xw-bg-primary);
 }
 
 :deep(.el-dialog__footer) {
-  padding: 16px 24px 24px;
-  background: var(--el-fill-color-extra-light);
-  border-radius: 0 0 16px 16px;
+  padding: var(--xw-space-4) var(--xw-space-6) var(--xw-space-6);
+  background: var(--xw-bg-secondary);
+  border-radius: 0 0 var(--xw-radius-xl) var(--xw-radius-xl);
 }
 
 /* 表单样式优化 */
 :deep(.el-form-item__label) {
   font-weight: 600;
-  color: var(--el-text-color-primary);
+  color: var(--xw-text-primary);
+  font-size: var(--xw-text-sm);
 }
 
 :deep(.el-input__wrapper) {
-  border-radius: 8px;
-  box-shadow: 0 2px 4px rgba(0, 0, 0, 0.04);
+  background: var(--xw-bg-primary);
+  border: 1px solid var(--xw-border-tertiary);
+  border-radius: var(--xw-radius-lg);
+  box-shadow: none;
+  transition: var(--xw-transition);
+}
+
+:deep(.el-input__wrapper:hover) {
+  border-color: var(--xw-primary-lighter);
+  background: var(--xw-bg-secondary);
+}
+
+:deep(.el-input__wrapper.is-focus) {
+  border-color: var(--xw-primary);
+  background: var(--xw-bg-primary);
+  box-shadow: 0 0 0 2px var(--xw-primary-lightest);
 }
 
 :deep(.el-select .el-input__wrapper) {
-  border-radius: 8px;
+  border-radius: var(--xw-radius-lg);
+}
+
+:deep(.el-textarea__inner) {
+  background: var(--xw-bg-primary);
+  border: 1px solid var(--xw-border-tertiary);
+  border-radius: var(--xw-radius-lg);
+  box-shadow: none;
+  transition: var(--xw-transition);
+}
+
+:deep(.el-textarea__inner:hover) {
+  border-color: var(--xw-primary-lighter);
+  background: var(--xw-bg-secondary);
+}
+
+:deep(.el-textarea__inner:focus) {
+  border-color: var(--xw-primary);
+  background: var(--xw-bg-primary);
+  box-shadow: 0 0 0 2px var(--xw-primary-lightest);
 }
 
 :deep(.el-checkbox-group) {
   display: grid;
   grid-template-columns: repeat(auto-fit, minmax(120px, 1fr));
-  gap: 12px;
+  gap: var(--xw-space-3);
 }
 
 :deep(.el-checkbox) {
   margin-right: 0;
 }
 
+:deep(.el-checkbox__input.is-checked .el-checkbox__inner) {
+  background-color: var(--xw-primary);
+  border-color: var(--xw-primary);
+}
+
+:deep(.el-radio__input.is-checked .el-radio__inner) {
+  background-color: var(--xw-primary);
+  border-color: var(--xw-primary);
+}
+
+/* 标签样式优化 */
+:deep(.el-tag) {
+  border: none;
+  border-radius: var(--xw-radius);
+  font-weight: 500;
+}
+
+/* 选择器下拉菜单优化 */
+:deep(.el-select-dropdown) {
+  border: none;
+  border-radius: var(--xw-radius-lg);
+  box-shadow: 0 8px 32px rgba(0, 0, 0, 0.12);
+}
+
+:deep(.el-select-dropdown__item:hover) {
+  background-color: var(--xw-bg-tertiary);
+}
+
 /* 深色模式优化 */
-:root[class*="dark"] .page-header {
-  background: linear-gradient(135deg, var(--el-color-primary-dark-2), var(--el-color-primary));
+html.dark .page-header {
+  background: linear-gradient(135deg, var(--xw-primary-dark), var(--xw-primary));
   box-shadow: 0 8px 32px rgba(0, 0, 0, 0.3);
 }
 
-:root[class*="dark"] .main-card {
-  background: var(--el-bg-color);
-  border: 1px solid var(--el-border-color);
-  box-shadow: 0 4px 24px rgba(0, 0, 0, 0.2);
+html.dark .main-card {
+  background: var(--xw-card-bg);
+  border: none;
+  box-shadow: 0 8px 32px rgba(0, 0, 0, 0.25);
 }
 
-:root[class*="dark"] .stat-item {
-  background: linear-gradient(135deg, var(--el-fill-color), var(--el-fill-color-light));
-  border: 1px solid var(--el-border-color);
+html.dark .stat-item {
+  background: linear-gradient(135deg, var(--xw-bg-secondary), var(--xw-bg-tertiary));
+  border: 1px solid var(--xw-border-primary);
+}
+
+html.dark .blacklist-table,
+html.dark .admin-table {
+  background: var(--xw-bg-secondary);
+  border: none;
+  box-shadow: 0 2px 12px rgba(0, 0, 0, 0.15);
+}
+
+html.dark :deep(.el-dialog) {
+  background: var(--xw-bg-secondary);
+  box-shadow: 0 20px 40px rgba(0, 0, 0, 0.4);
+}
+
+html.dark :deep(.el-dialog__body) {
+  background: var(--xw-bg-secondary);
+}
+
+html.dark :deep(.el-dialog__footer) {
+  background: var(--xw-bg-tertiary);
 }
 
 /* 响应式设计 */
 @media (max-width: 1200px) {
   .user-management {
-    padding: 16px;
+    padding: var(--xw-space-4);
   }
   
   .page-header {
-    padding: 20px 24px;
+    padding: var(--xw-space-5) var(--xw-space-6);
   }
   
   .page-title h1 {
-    font-size: 28px;
+    font-size: var(--xw-text-2xl);
   }
 }
 
 @media (max-width: 768px) {
   .user-management {
-    padding: 12px;
+    padding: var(--xw-space-3);
   }
   
   .page-header {
-    padding: 16px 20px;
-    margin-bottom: 16px;
+    padding: var(--xw-space-4) var(--xw-space-5);
+    margin-bottom: var(--xw-space-4);
+    border-radius: var(--xw-radius-lg);
   }
   
   .header-content {
     flex-direction: column;
-    gap: 16px;
+    gap: var(--xw-space-4);
     align-items: stretch;
   }
   
   .page-title h1 {
-    font-size: 24px;
+    font-size: var(--xw-text-2xl);
   }
   
   .title-stats {
@@ -1358,14 +1766,28 @@ onMounted(async () => {
     justify-content: center;
   }
   
+  .main-card {
+    border-radius: var(--xw-radius-lg);
+  }
+  
   .management-tabs :deep(.el-tab-pane) {
-    padding: 16px;
+    padding: var(--xw-space-4);
+  }
+  
+  .management-tabs :deep(.el-tabs__item) {
+    padding: 0 var(--xw-space-4);
+    font-size: var(--xw-text-sm);
   }
   
   .tab-header {
     flex-direction: column;
-    gap: 16px;
+    gap: var(--xw-space-4);
     align-items: stretch;
+    margin-bottom: var(--xw-space-4);
+  }
+  
+  .tab-title h3 {
+    font-size: var(--xw-text-lg);
   }
   
   .tab-actions {
@@ -1375,131 +1797,238 @@ onMounted(async () => {
   /* 表格移动端适配 */
   .blacklist-table,
   .admin-table {
-    font-size: 13px;
+    font-size: var(--xw-text-sm);
+    border-radius: var(--xw-radius);
   }
   
   .blacklist-table :deep(.el-table__cell),
   .admin-table :deep(.el-table__cell) {
-    padding: 8px 4px;
+    padding: var(--xw-space-2) var(--xw-space-1);
+  }
+  
+  .user-cell {
+    gap: var(--xw-space-2);
+  }
+  
+  .user-cell .el-avatar {
+    width: 24px;
+    height: 24px;
+    font-size: var(--xw-text-xs);
   }
   
   .user-id {
-    font-size: 12px;
+    font-size: var(--xw-text-xs);
   }
   
   .action-buttons {
     flex-direction: column;
-    gap: 4px;
+    gap: var(--xw-space-1);
   }
   
   .action-buttons .el-button {
     font-size: 11px;
-    padding: 4px 8px;
+    padding: var(--xw-space-1) var(--xw-space-2);
+    width: 100%;
   }
   
   /* 对话框移动端适配 */
   :deep(.el-dialog) {
     width: 90% !important;
     margin: 5vh auto;
+    border-radius: var(--xw-radius-lg);
+  }
+  
+  :deep(.el-dialog__header) {
+    padding: var(--xw-space-4) var(--xw-space-5);
+    border-radius: var(--xw-radius-lg) var(--xw-radius-lg) 0 0;
+  }
+  
+  :deep(.el-dialog__body) {
+    padding: var(--xw-space-4);
+  }
+  
+  :deep(.el-dialog__footer) {
+    padding: var(--xw-space-3) var(--xw-space-4) var(--xw-space-4);
+    border-radius: 0 0 var(--xw-radius-lg) var(--xw-radius-lg);
   }
   
   .user-stats .el-row {
-    gap: 8px;
+    gap: var(--xw-space-2);
   }
   
   .stat-item {
-    padding: 12px 8px;
+    padding: var(--xw-space-3) var(--xw-space-2);
+    border-radius: var(--xw-radius);
   }
   
   .stat-number {
-    font-size: 20px;
+    font-size: var(--xw-text-xl);
   }
   
   .stat-label {
-    font-size: 12px;
+    font-size: var(--xw-text-xs);
   }
   
   /* 分页器移动端适配 */
-  :deep(.el-pagination .el-pagination__total),
-  :deep(.el-pagination .el-pagination__jump) {
-    display: none;
+  .pagination-container {
+    margin-top: var(--xw-space-6);
+    padding-top: var(--xw-space-4);
   }
+  
+  .pagination-info {
+    font-size: var(--xw-text-xs);
+  }
+  
 }
 
 /* 超小屏幕适配 */
 @media (max-width: 480px) {
   .user-management {
-    padding: 8px;
+    padding: var(--xw-space-2);
   }
   
   .page-header {
-    padding: 12px 16px;
+    padding: var(--xw-space-3) var(--xw-space-4);
+    border-radius: var(--xw-radius);
   }
   
   .page-title h1 {
-    font-size: 20px;
+    font-size: var(--xw-text-xl);
+  }
+  
+  .title-stats {
+    gap: var(--xw-space-2);
+  }
+  
+  .title-stats .el-tag {
+    font-size: var(--xw-text-xs);
+  }
+  
+  .main-card {
+    border-radius: var(--xw-radius);
+    box-shadow: var(--xw-shadow-sm);
   }
   
   .management-tabs :deep(.el-tabs__item) {
-    font-size: 14px;
-    padding: 0 12px;
+    font-size: var(--xw-text-sm);
+    padding: 0 var(--xw-space-3);
+    height: 48px;
+    line-height: 48px;
   }
   
   .management-tabs :deep(.el-tab-pane) {
-    padding: 12px;
+    padding: var(--xw-space-3);
+  }
+  
+  .tab-header {
+    margin-bottom: var(--xw-space-3);
+    padding-bottom: var(--xw-space-3);
   }
   
   .tab-title h3 {
-    font-size: 16px;
+    font-size: var(--xw-text-base);
+  }
+  
+  .tab-actions {
+    flex-direction: column;
+    width: 100%;
+  }
+  
+  .tab-actions .el-input {
+    width: 100% !important;
+  }
+  
+  .tab-actions .el-button {
+    width: 100%;
   }
   
   /* 表格内容更紧凑 */
   .blacklist-table :deep(.el-table__cell),
   .admin-table :deep(.el-table__cell) {
-    padding: 6px 2px;
+    padding: var(--xw-space-1) 2px;
+    font-size: var(--xw-text-xs);
   }
   
   .blacklist-table,
   .admin-table {
-    font-size: 11px;
+    font-size: var(--xw-text-xs);
   }
   
   .action-buttons .el-button {
     font-size: 10px;
-    padding: 3px 6px;
+    padding: 3px var(--xw-space-2);
+  }
+  
+  .permissions {
+    gap: 2px;
+  }
+  
+  .permissions .el-tag {
+    font-size: 10px;
+    padding: 2px 4px;
   }
   
   /* 对话框超小屏适配 */
   :deep(.el-dialog) {
     width: 95% !important;
     margin: 3vh auto;
+    border-radius: var(--xw-radius);
+  }
+  
+  :deep(.el-dialog__header) {
+    padding: var(--xw-space-3);
+    border-radius: var(--xw-radius) var(--xw-radius) 0 0;
+  }
+  
+  :deep(.el-dialog__title) {
+    font-size: var(--xw-text-base);
   }
   
   :deep(.el-dialog__body) {
-    padding: 16px;
+    padding: var(--xw-space-3);
+  }
+  
+  :deep(.el-dialog__footer) {
+    padding: var(--xw-space-2) var(--xw-space-3) var(--xw-space-3);
+    border-radius: 0 0 var(--xw-radius) var(--xw-radius);
   }
   
   :deep(.el-form-item) {
-    margin-bottom: 16px;
+    margin-bottom: var(--xw-space-3);
+  }
+  
+  :deep(.el-form-item__label) {
+    font-size: var(--xw-text-xs);
   }
   
   :deep(.el-checkbox-group) {
     grid-template-columns: 1fr;
+    gap: var(--xw-space-2);
   }
   
   .user-stats .el-col {
-    margin-bottom: 8px;
+    margin-bottom: var(--xw-space-2);
   }
   
   .stat-item {
-    padding: 8px 6px;
+    padding: var(--xw-space-2);
   }
   
   .stat-number {
-    font-size: 16px;
+    font-size: var(--xw-text-lg);
   }
   
   .stat-label {
+    font-size: 10px;
+  }
+  
+  /* 分页器更紧凑 */
+  .pagination-container {
+    margin-top: var(--xw-space-4);
+    padding-top: var(--xw-space-3);
+  }
+  
+  .pagination-info {
     font-size: 10px;
   }
 }
@@ -1508,16 +2037,368 @@ onMounted(async () => {
 .blacklist-table,
 .admin-table,
 .main-card,
-.page-header {
-  transition: all 0.3s ease;
+.page-header,
+.tab-content {
+  transition: var(--xw-transition-slow);
 }
 
-.action-buttons .el-button {
-  transition: all 0.2s ease;
+.stat-item,
+.action-buttons .el-button,
+.tab-header,
+:deep(.el-tag),
+:deep(.el-button) {
+  transition: var(--xw-transition);
 }
 
-.action-buttons .el-button:hover {
+/* 微交互优化 */
+.main-card:hover {
+  transform: translateY(-2px);
+  box-shadow: 0 8px 40px rgba(0, 0, 0, 0.12);
+}
+
+.tab-content:hover .blacklist-table,
+.tab-content:hover .admin-table {
   transform: translateY(-1px);
-  box-shadow: 0 2px 8px rgba(0, 0, 0, 0.15);
+}
+
+html.dark .main-card:hover {
+  transform: translateY(-2px);
+  box-shadow: 0 12px 48px rgba(0, 0, 0, 0.35);
+}
+
+/* 系统状态面板样式 */
+.system-section-card {
+  background: var(--xw-bg-primary);
+  border: 1px solid var(--xw-border-quaternary);
+  border-radius: var(--xw-radius-xl);
+  margin: var(--xw-space-4);
+  overflow: hidden;
+  transition: var(--xw-transition);
+}
+
+.system-section-card:hover {
+  border-color: var(--xw-primary-lighter);
+  transform: translateY(-2px);
+  box-shadow: 0 8px 32px rgba(0, 0, 0, 0.08);
+}
+
+.system-section-card :deep(.el-card__header) {
+  background: linear-gradient(135deg, var(--xw-bg-secondary), var(--xw-bg-tertiary));
+  border-bottom: 1px solid var(--xw-border-quaternary);
+  padding: var(--xw-space-4) var(--xw-space-5);
+}
+
+.section-header {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+}
+
+.section-title {
+  display: flex;
+  align-items: center;
+  gap: var(--xw-space-2);
+  font-weight: 600;
+  color: var(--xw-text-primary);
+  font-size: var(--xw-text-base);
+}
+
+.section-icon {
+  color: var(--xw-primary);
+  font-size: var(--xw-text-lg);
+}
+
+.section-meta {
+  font-size: var(--xw-text-sm);
+  color: var(--xw-text-secondary);
+}
+
+.section-content {
+  padding: var(--xw-space-5);
+}
+
+.loading-placeholder {
+  min-height: 120px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+}
+
+/* CPU 详情样式 */
+.progress-container {
+  margin-bottom: var(--xw-space-4);
+}
+
+.cpu-cores {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(200px, 1fr));
+  gap: var(--xw-space-3);
+  margin-top: var(--xw-space-4);
+}
+
+.cpu-core-item {
+  padding: var(--xw-space-3);
+  background: var(--xw-bg-secondary);
+  border-radius: var(--xw-radius);
+  border: 1px solid var(--xw-border-quaternary);
+}
+
+.cpu-core-label {
+  font-size: var(--xw-text-sm);
+  color: var(--xw-text-secondary);
+  margin-bottom: var(--xw-space-2);
+  font-weight: 500;
+}
+
+/* 内存使用样式 */
+.memory-info {
+  text-align: center;
+}
+
+.memory-details {
+  display: flex;
+  justify-content: space-between;
+  margin-top: var(--xw-space-3);
+  padding: var(--xw-space-3);
+  background: var(--xw-bg-secondary);
+  border-radius: var(--xw-radius);
+  border: 1px solid var(--xw-border-quaternary);
+}
+
+.memory-used,
+.memory-total {
+  font-size: var(--xw-text-sm);
+  color: var(--xw-text-secondary);
+  font-weight: 500;
+}
+
+/* 磁盘状态样式 */
+.system-table {
+  background: transparent;
+  border: none;
+}
+
+.system-table :deep(.el-table__header) {
+  background: var(--xw-bg-tertiary);
+}
+
+.system-table :deep(.el-table__row:hover) {
+  background: var(--xw-bg-secondary);
+}
+
+.disk-usage {
+  display: flex;
+  flex-direction: column;
+  gap: var(--xw-space-3);
+}
+
+.disk-progress-wrapper {
+  width: 100%;
+  min-width: 300px;
+}
+
+.disk-progress-wrapper :deep(.el-progress) {
+  width: 100%;
+}
+
+.disk-progress-wrapper :deep(.el-progress-bar) {
+  padding-right: 0;
+}
+
+.disk-progress-wrapper :deep(.el-progress-bar__outer) {
+  background-color: var(--xw-bg-tertiary);
+  border: 1px solid var(--xw-border-quaternary);
+  border-radius: var(--xw-radius);
+  height: 24px;
+}
+
+.disk-progress-wrapper :deep(.el-progress-bar__inner) {
+  border-radius: var(--xw-radius);
+  transition: var(--xw-transition);
+}
+
+.disk-progress-wrapper :deep(.el-progress__text) {
+  font-size: var(--xw-text-sm);
+  font-weight: 600;
+  color: white;
+  text-shadow: 0 1px 2px rgba(0, 0, 0, 0.3);
+}
+
+.disk-details {
+  display: flex;
+  justify-content: space-between;
+  font-size: var(--xw-text-sm);
+  color: var(--xw-text-secondary);
+  padding: var(--xw-space-2);
+  background: var(--xw-bg-secondary);
+  border-radius: var(--xw-radius);
+  border: 1px solid var(--xw-border-quaternary);
+}
+
+/* 网络状态样式 */
+.network-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(200px, 1fr));
+  gap: var(--xw-space-4);
+}
+
+.network-item {
+  padding: var(--xw-space-4);
+  background: linear-gradient(135deg, var(--xw-bg-secondary), var(--xw-bg-tertiary));
+  border-radius: var(--xw-radius-lg);
+  border: 1px solid var(--xw-border-quaternary);
+  text-align: center;
+  transition: var(--xw-transition);
+}
+
+.network-item:hover {
+  transform: translateY(-2px);
+  box-shadow: 0 4px 16px rgba(0, 0, 0, 0.06);
+}
+
+.network-label {
+  font-size: var(--xw-text-sm);
+  color: var(--xw-text-secondary);
+  margin-bottom: var(--xw-space-2);
+  font-weight: 500;
+}
+
+.network-value {
+  font-size: var(--xw-text-lg);
+  font-weight: 600;
+  color: var(--xw-primary);
+}
+
+/* 进程信息样式 */
+.process-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(180px, 1fr));
+  gap: var(--xw-space-4);
+}
+
+.process-item {
+  padding: var(--xw-space-4);
+  background: linear-gradient(135deg, var(--xw-bg-secondary), var(--xw-bg-tertiary));
+  border-radius: var(--xw-radius-lg);
+  border: 1px solid var(--xw-border-quaternary);
+  text-align: center;
+  transition: var(--xw-transition);
+}
+
+.process-item:hover {
+  transform: translateY(-2px);
+  box-shadow: 0 4px 16px rgba(0, 0, 0, 0.06);
+}
+
+.process-label {
+  font-size: var(--xw-text-sm);
+  color: var(--xw-text-secondary);
+  margin-bottom: var(--xw-space-2);
+  font-weight: 500;
+}
+
+.process-value {
+  font-size: var(--xw-text-base);
+  font-weight: 600;
+  color: var(--xw-text-primary);
+}
+
+/* 深色模式优化 */
+html.dark .system-section-card {
+  background: var(--xw-bg-secondary);
+  border-color: var(--xw-border-primary);
+}
+
+html.dark .system-section-card:hover {
+  border-color: var(--xw-primary);
+  box-shadow: 0 8px 32px rgba(0, 0, 0, 0.3);
+}
+
+html.dark .system-section-card :deep(.el-card__header) {
+  background: linear-gradient(135deg, var(--xw-bg-tertiary), var(--xw-bg-quaternary));
+  border-bottom-color: var(--xw-border-primary);
+}
+
+html.dark .cpu-core-item,
+html.dark .memory-details,
+html.dark .network-item,
+html.dark .process-item {
+  background: linear-gradient(135deg, var(--xw-bg-tertiary), var(--xw-bg-quaternary));
+  border-color: var(--xw-border-primary);
+}
+
+/* 响应式设计 */
+@media (max-width: 768px) {
+  .system-section-card {
+    margin: var(--xw-space-3);
+  }
+  
+  .section-content {
+    padding: var(--xw-space-3);
+  }
+  
+  .cpu-cores,
+  .network-grid,
+  .process-grid {
+    grid-template-columns: 1fr;
+    gap: var(--xw-space-2);
+  }
+  
+  .memory-details {
+    flex-direction: column;
+    gap: var(--xw-space-2);
+    text-align: center;
+  }
+  
+  .disk-details {
+    flex-direction: column;
+    gap: var(--xw-space-1);
+    text-align: center;
+  }
+  
+  .disk-progress-wrapper {
+    min-width: 200px;
+  }
+  
+  .disk-progress-wrapper :deep(.el-progress-bar__outer) {
+    height: 20px;
+  }
+  
+  .disk-progress-wrapper :deep(.el-progress__text) {
+    font-size: var(--xw-text-xs);
+  }
+}
+
+/* 打印样式优化 */
+@media print {
+  .page-header {
+    background: none;
+    color: var(--xw-text-primary);
+    border: 1px solid var(--xw-border-primary);
+  }
+  
+  .page-title h1 {
+    color: var(--xw-text-primary);
+  }
+  
+  .header-actions,
+  .action-buttons,
+  .pagination-container {
+    display: none;
+  }
+  
+  .blacklist-table,
+  .admin-table,
+  .system-table {
+    box-shadow: none;
+    border: 1px solid var(--xw-border-primary);
+  }
+  
+  .system-section-card {
+    box-shadow: none;
+    border: 1px solid var(--xw-border-primary);
+    break-inside: avoid;
+    margin-bottom: var(--xw-space-4);
+  }
 }
 </style>

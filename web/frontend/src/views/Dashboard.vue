@@ -24,7 +24,11 @@
         <el-card class="chart-card" shadow="hover">
           <template #header>
             <div class="card-header">
-              <span class="card-title">最近7天投稿趋势</span>
+              <span class="card-title">最近投稿趋势</span>
+              <el-radio-group v-model="trendRange" size="small">
+                <el-radio-button label="7">7天</el-radio-button>
+                <el-radio-button label="30">30天</el-radio-button>
+              </el-radio-group>
               <el-button 
                 type="primary" 
                 :icon="Refresh" 
@@ -178,7 +182,7 @@
 </template>
 
 <script setup>
-import { ref, onMounted, computed } from 'vue'
+import { ref, onMounted, computed, watch } from 'vue'
 import { 
   Document, User, Box, TrendCharts, 
   DataAnalysis, Refresh, Warning
@@ -195,6 +199,7 @@ const statsData = ref({})
 const recentSubmissions = ref([])
 const chartCanvas = ref(null)
 let chart = null
+const trendRange = ref('30')
 
 // 计算属性
 const stats = computed(() => [
@@ -285,7 +290,7 @@ const loadRecentSubmissions = async () => {
 }
 
 const updateChart = () => {
-  if (!chartCanvas.value || !statsData.value.recent_submissions) return
+  if (!chartCanvas.value || !statsData.value) return
   
   const ctx = chartCanvas.value.getContext('2d')
   
@@ -293,7 +298,9 @@ const updateChart = () => {
     chart.destroy()
   }
   
-  const recentData = statsData.value.recent_submissions
+  const recentData = trendRange.value === '30' 
+    ? (statsData.value.recent_30d_submissions || {})
+    : (statsData.value.recent_submissions || {})
   const dates = Object.keys(recentData).sort()
   const values = dates.map(date => recentData[date])
   
@@ -341,6 +348,10 @@ const updateChart = () => {
     }
   })
 }
+
+watch(trendRange, () => {
+  updateChart()
+})
 
 const getStatusType = (status) => {
   const typeMap = {
