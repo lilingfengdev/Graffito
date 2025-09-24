@@ -369,14 +369,14 @@
                 <div class="progress-container">
                   <el-progress :percentage="Math.round(systemState.data.cpu.cpu_percent || 0)" 
                               :color="getProgressColor(systemState.data.cpu.cpu_percent)"
-                              :stroke-width="8" />
+                              :stroke-width="20" />
                 </div>
                 <div v-if="systemState.data.cpu.per_cpu_percent && systemState.data.cpu.per_cpu_percent.length" class="cpu-cores">
                   <div v-for="(p, idx) in systemState.data.cpu.per_cpu_percent" :key="idx" class="cpu-core-item">
                     <div class="cpu-core-label">CPU {{ idx }}</div>
                     <el-progress :percentage="Math.round(p)" 
                                 :color="getProgressColor(p)"
-                                :stroke-width="6" />
+                                :stroke-width="16" />
                   </div>
                 </div>
               </div>
@@ -396,7 +396,7 @@
                 <div class="memory-info">
                   <el-progress :percentage="Math.round(systemState.data.memory.percent || 0)" 
                               :color="getProgressColor(systemState.data.memory.percent)"
-                              :stroke-width="8"
+                              :stroke-width="24"
                               :text-inside="true" />
                   <div class="memory-details">
                     <span class="memory-used">已用: {{ formatBytes(systemState.data.memory.used) }}</span>
@@ -432,7 +432,7 @@
                         <div class="disk-progress-wrapper">
                           <el-progress :percentage="Math.round(row.percent || 0)" 
                                       :color="getProgressColor(row.percent)"
-                                      :stroke-width="10"
+                                      :stroke-width="32"
                                       :text-inside="true" />
                         </div>
                         <div class="disk-details">
@@ -2129,6 +2129,15 @@ html.dark .main-card:hover {
   margin-bottom: var(--xw-space-4);
 }
 
+.progress-container :deep(.el-progress-bar__outer) {
+  height: 20px !important;
+}
+
+.progress-container :deep(.el-progress__text) {
+  font-size: 14px !important;
+  line-height: 20px !important;
+}
+
 .cpu-cores {
   display: grid;
   grid-template-columns: repeat(auto-fit, minmax(200px, 1fr));
@@ -2150,9 +2159,27 @@ html.dark .main-card:hover {
   font-weight: 500;
 }
 
+.cpu-core-item :deep(.el-progress-bar__outer) {
+  height: 16px !important;
+}
+
+.cpu-core-item :deep(.el-progress__text) {
+  font-size: 12px !important;
+  line-height: 16px !important;
+}
+
 /* 内存使用样式 */
 .memory-info {
   text-align: center;
+}
+
+.memory-info :deep(.el-progress-bar__outer) {
+  height: 24px !important;
+}
+
+.memory-info :deep(.el-progress__text) {
+  font-size: 14px !important;
+  line-height: 24px !important;
 }
 
 .memory-details {
@@ -2209,7 +2236,7 @@ html.dark .main-card:hover {
   background-color: var(--xw-bg-tertiary);
   border: 1px solid var(--xw-border-quaternary);
   border-radius: var(--xw-radius);
-  height: 24px;
+  height: 32px;
 }
 
 .disk-progress-wrapper :deep(.el-progress-bar__inner) {
@@ -2218,10 +2245,11 @@ html.dark .main-card:hover {
 }
 
 .disk-progress-wrapper :deep(.el-progress__text) {
-  font-size: var(--xw-text-sm);
+  font-size: 14px;
   font-weight: 600;
   color: white;
   text-shadow: 0 1px 2px rgba(0, 0, 0, 0.3);
+  line-height: 32px;
 }
 
 .disk-details {
@@ -2361,11 +2389,12 @@ html.dark .process-item {
   }
   
   .disk-progress-wrapper :deep(.el-progress-bar__outer) {
-    height: 20px;
+    height: 28px;
   }
   
   .disk-progress-wrapper :deep(.el-progress__text) {
-    font-size: var(--xw-text-xs);
+    font-size: 12px;
+    line-height: 28px;
   }
 }
 

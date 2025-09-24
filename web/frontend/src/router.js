@@ -38,7 +38,7 @@ const routes = [
         path: 'users',
         name: 'UserManagement',
         component: UserManagement,
-        meta: { title: '用户管理', icon: 'User' }
+        meta: { title: '用户管理', icon: 'User', requiresAdmin: true }
       },
       {
         path: 'stored',
@@ -55,13 +55,41 @@ const router = createRouter({
   routes
 })
 
-router.beforeEach((to, from, next) => {
+router.beforeEach(async (to, from, next) => {
   const token = localStorage.getItem('token')
   const isAuthPage = to.path === '/login' || to.path === '/register'
+  
   if (!token && !isAuthPage) {
     next('/login')
   } else if (token && isAuthPage) {
     next('/')
+  } else if (token && to.meta.requiresAdmin) {
+    // 检查管理员权限
+    try {
+      const userStr = localStorage.getItem('user')
+      if (userStr) {
+        const user = JSON.parse(userStr)
+        if (!user.is_admin) {
+          // 非管理员用户，重定向到首页
+          next('/')
+        } else {
+          next()
+        }
+      } else {
+        // 如果没有用户信息，尝试从 API 获取
+        const { default: api } = await import('./api')
+        const { data } = await api.get('/auth/me')
+        localStorage.setItem('user', JSON.stringify(data))
+        if (!data.is_admin) {
+          next('/')
+        } else {
+          next()
+        }
+      }
+    } catch (error) {
+      console.error('权限检查失败:', error)
+      next('/')
+    }
   } else {
     next()
   }

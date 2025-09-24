@@ -8,7 +8,6 @@ from sqlalchemy import (
 )
 from sqlalchemy.ext.declarative import declarative_base
 from sqlalchemy.orm import relationship
-from sqlalchemy.sql import func
 
 from .enums import SubmissionStatus, AuditAction
 
@@ -48,8 +47,8 @@ class Submission(Base):
     rejection_reason = Column(Text)  # 拒绝原因
     
     # 时间戳
-    created_at = Column(DateTime, default=func.now())
-    updated_at = Column(DateTime, default=func.now(), onupdate=func.now())
+    created_at = Column(DateTime, default=datetime.now)
+    updated_at = Column(DateTime, default=datetime.now, onupdate=datetime.now)
     processed_at = Column(DateTime)
     published_at = Column(DateTime)
     
@@ -92,7 +91,7 @@ class AuditLog(Base):
     action = Column(String(20), nullable=False)  # 操作类型
     comment = Column(Text)  # 操作说明
     extra_data = Column(JSON)  # 额外数据
-    created_at = Column(DateTime, default=func.now())
+    created_at = Column(DateTime, default=datetime.now)
     
     # 关联
     submission = relationship("Submission", back_populates="audit_logs")
@@ -119,7 +118,7 @@ class BlackList(Base):
     group_name = Column(String(50), nullable=False)  # 在哪个组被拉黑
     reason = Column(Text)  # 拉黑原因
     operator_id = Column(String(20))  # 操作员
-    created_at = Column(DateTime, default=func.now())
+    created_at = Column(DateTime, default=datetime.now)
     expires_at = Column(DateTime)  # 过期时间，NULL表示永久
     
     # 唯一约束
@@ -144,7 +143,7 @@ class StoredPost(Base):
     publish_id = Column(Integer, nullable=False)  # 发布编号
     priority = Column(Integer, default=0)  # 优先级
     scheduled_time = Column(DateTime)  # 计划发送时间
-    created_at = Column(DateTime, default=func.now())
+    created_at = Column(DateTime, default=datetime.now)
     
     def to_dict(self) -> Dict[str, Any]:
         """转换为字典"""
@@ -169,7 +168,7 @@ class MessageCache(Base):
     message_id = Column(String(50))  # 消息ID
     message_content = Column(JSON)  # 消息内容
     message_time = Column(Float)  # 消息时间戳
-    created_at = Column(DateTime, default=func.now())
+    created_at = Column(DateTime, default=datetime.now)
     
     # 索引
     __table_args__ = (
@@ -198,7 +197,7 @@ class PublishRecord(Base):
     error_message = Column(Text)
     
     # 时间
-    created_at = Column(DateTime, default=func.now())
+    created_at = Column(DateTime, default=datetime.now)
     
     def to_dict(self) -> Dict[str, Any]:
         """转换为字典"""
@@ -228,8 +227,8 @@ class User(Base):
     is_superadmin = Column(Boolean, default=False, index=True)
     is_active = Column(Boolean, default=True, index=True)
 
-    created_at = Column(DateTime, default=func.now())
-    updated_at = Column(DateTime, default=func.now(), onupdate=func.now())
+    created_at = Column(DateTime, default=datetime.now)
+    updated_at = Column(DateTime, default=datetime.now, onupdate=datetime.now)
 
     def to_dict(self) -> Dict[str, Any]:
         return {
@@ -254,7 +253,7 @@ class InviteToken(Base):
     expires_at = Column(DateTime)
     used_at = Column(DateTime)
     is_active = Column(Boolean, default=True, index=True)
-    created_at = Column(DateTime, default=func.now())
+    created_at = Column(DateTime, default=datetime.now)
     # 使用次数限制：若为空则兼容旧逻辑（单次使用，以 used_at 判定）
     max_uses = Column(Integer)
     uses_count = Column(Integer, default=0)
@@ -262,8 +261,8 @@ class InviteToken(Base):
     def is_valid(self) -> bool:
         if not self.is_active:
             return False
-        # 过期校验（与创建时保持 UTC 一致）
-        if self.expires_at is not None and not (datetime.utcnow() < self.expires_at):
+        # 过期校验
+        if self.expires_at is not None and not (datetime.now() < self.expires_at):
             return False
         # 兼容旧数据：未设置 max_uses 时，沿用 used_at 单次使用逻辑
         if self.max_uses is None:
@@ -292,5 +291,5 @@ class AdminProfile(Base):
 
     # 审计信息
     last_login = Column(DateTime)
-    created_at = Column(DateTime, default=func.now())
-    updated_at = Column(DateTime, default=func.now(), onupdate=func.now())
+    created_at = Column(DateTime, default=datetime.now)
+    updated_at = Column(DateTime, default=datetime.now, onupdate=datetime.now)

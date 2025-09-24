@@ -295,10 +295,19 @@ const userInitial = computed(() => {
 })
 
 const menuRoutes = computed(() => {
-  return router.getRoutes()
+  const routes = router.getRoutes()
     .find(r => r.path === '/')
     ?.children
     ?.filter(child => !child.meta?.hidden) || []
+  
+  // 根据用户权限过滤路由
+  return routes.filter(route => {
+    // 如果路由需要管理员权限，但用户不是管理员，则不显示
+    if (route.meta?.requiresAdmin && !user.value?.is_admin) {
+      return false
+    }
+    return true
+  })
 })
 
 // 移动端检测方法
@@ -342,6 +351,7 @@ const handleUserCommand = (command) => {
 
 const logout = () => {
   localStorage.removeItem('token')
+  localStorage.removeItem('user')
   router.push('/login')
   ElMessage.success('已退出登录')
 }
@@ -350,6 +360,8 @@ const fetchUserInfo = async () => {
   try {
     const { data } = await api.get('/auth/me')
     user.value = data
+    // 保存用户信息到 localStorage，供路由守卫使用
+    localStorage.setItem('user', JSON.stringify(data))
   } catch (error) {
     console.error('获取用户信息失败:', error)
   }

@@ -549,28 +549,43 @@ const getImageUrl = (imagePath) => {
     const p = rel.startsWith('/') ? rel : `/${rel}`
     return API_BASE ? `${API_BASE}${p}` : p
   }
+  // 将 token 以查询参数方式附加到 /data/ 资源，适配 <img> 不带头的场景
+  const withTokenIfData = (url) => {
+    if (!url) return url
+    // 仅对指向 /data/ 的相对或同源 URL 添加 token
+    try {
+      const isDataPath = /(^\/data\/)|(^.*\/data\/)/.test(url)
+      if (!isDataPath) return url
+      const token = localStorage.getItem('token')
+      if (!token) return url
+      const sep = url.includes('?') ? '&' : '?'
+      return `${url}${sep}access_token=${encodeURIComponent(token)}`
+    } catch {
+      return url
+    }
+  }
   if (typeof imagePath === 'string') {
     if (imagePath.startsWith('http') || imagePath.startsWith('data:image')) return imagePath
     const normalized = imagePath.replace(/\\/g, '/')
     if (normalized.includes('data/cache/rendered')) {
-      return toApiUrl(normalized)
+      return withTokenIfData(toApiUrl(normalized))
     }
-    return toApiUrl(`images/${normalized}`)
+    return withTokenIfData(toApiUrl(`images/${normalized}`))
   }
   const url = imagePath.url || imagePath.src
   const path = imagePath.path || imagePath.local_path
   if (url) {
     if (typeof url === 'string' && url.includes('data/cache/rendered')) {
-      return toApiUrl(url.replace(/\\/g, '/'))
+      return withTokenIfData(toApiUrl(url.replace(/\\/g, '/')))
     }
-    return url
+    return withTokenIfData(url)
   }
   if (path) {
     const normalized = String(path).replace(/\\/g, '/')
     if (normalized.includes('data/cache/rendered')) {
-      return toApiUrl(normalized)
+      return withTokenIfData(toApiUrl(normalized))
     }
-    return toApiUrl(`images/${normalized}`)
+    return withTokenIfData(toApiUrl(`images/${normalized}`))
   }
   return ''
 }

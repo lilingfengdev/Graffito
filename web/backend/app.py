@@ -43,7 +43,7 @@ pwd_context = CryptContext(schemes=["bcrypt"], deprecated="auto")
 def create_access_token(data: dict, expires_delta_minutes: int) -> str:
     settings = get_settings()
     to_encode = data.copy()
-    expire = datetime.utcnow() + timedelta(minutes=expires_delta_minutes)
+    expire = datetime.now() + timedelta(minutes=expires_delta_minutes)
     to_encode.update({"exp": expire})
     return jwt.encode(to_encode, settings.web.jwt_secret_key, algorithm=settings.web.jwt_algorithm)
 
@@ -172,7 +172,56 @@ app.add_middleware(
 # 静态资源与渲染图片目录
 try:
     app.mount("/static", StaticFiles(directory="static", check_dir=False), name="static")
-    app.mount("/data", StaticFiles(directory="data", check_dir=False), name="data")
+    # 受保护的静态资源（需要登录）：/data
+    class AuthenticatedStaticFiles(StaticFiles):
+        async def __call__(self, scope, receive, send):
+            # 仅处理 HTTP 请求
+            if scope.get("type") != "http":
+                await super().__call__(scope, receive, send)
+                return
+
+            # 优先从 Authorization 头获取 Bearer Token；兼容查询参数 token/access_token
+            auth_value: Optional[str] = None
+            try:
+                raw_headers = dict(scope.get("headers") or [])
+                raw_auth = raw_headers.get(b"authorization")
+                if raw_auth:
+                    auth_value = raw_auth.decode()
+            except Exception:
+                auth_value = None
+
+            if not auth_value:
+                try:
+                    from urllib.parse import parse_qs
+                    qs = (scope.get("query_string") or b"").decode()
+                    if qs:
+                        q = parse_qs(qs)
+                        token = (q.get("token") or q.get("access_token") or [None])[0]
+                        if token:
+                            auth_value = f"Bearer {token}"
+                except Exception:
+                    pass
+
+            if not auth_value:
+                resp = JSONResponse({"detail": "未认证"}, status_code=status.HTTP_401_UNAUTHORIZED)
+                await resp(scope, receive, send)
+                return
+
+            # 复用现有的 JWT 校验逻辑
+            try:
+                get_current_user_from_headers(auth_value)
+            except HTTPException as exc:
+                resp = JSONResponse({"detail": exc.detail}, status_code=exc.status_code)
+                await resp(scope, receive, send)
+                return
+            except Exception:
+                resp = JSONResponse({"detail": "无效的登录凭证"}, status_code=status.HTTP_401_UNAUTHORIZED)
+                await resp(scope, receive, send)
+                return
+
+            await super().__call__(scope, receive, send)
+
+    app.mount("/data", AuthenticatedStaticFiles(directory="data", check_dir=False), name="data")
 except Exception:
     pass
 
@@ -304,7 +353,7 @@ async def login(request: Request, form_data: OAuth2PasswordRequestForm = Depends
         # update last_login on AdminProfile
         try:
             prof = (await session.execute(select(AdminProfile).where(AdminProfile.user_id == user.id))).scalar_one_or_none()
-            now = datetime.utcnow()
+            now = datetime.now()
             if prof:
                 prof.last_login = now
             else:
@@ -364,7 +413,7 @@ async def create_invite(request: Request, body: InviteCreateIn, authorization: O
         token = secrets.token_urlsafe(32)
         expires_at = None
         if body.expires_in_minutes and body.expires_in_minutes > 0:
-            expires_at = datetime.utcnow() + timedelta(minutes=body.expires_in_minutes)
+            expires_at = datetime.now() + timedelta(minutes=body.expires_in_minutes)
 
         # 服务器端限制使用次数范围（1-1000）
         _max_uses = body.max_uses if body.max_uses is not None else 1
@@ -427,7 +476,7 @@ async def register_via_invite(request: Request, body: RegisterViaInviteIn):
         invite.uses_count = (invite.uses_count or 0) + 1
         if invite.max_uses is None:
             invite.used_by_user_id = user.id
-            invite.used_at = datetime.utcnow()
+            invite.used_at = datetime.now()
             invite.is_active = False
         else:
             if invite.uses_count >= (invite.max_uses or 1):
@@ -732,7 +781,7 @@ async def add_to_blacklist(body: BlacklistUserIn, authorization: Optional[str] =
         
         expires_at = None
         if body.expires_hours and body.expires_hours > 0:
-            expires_at = datetime.utcnow() + timedelta(hours=body.expires_hours)
+            expires_at = datetime.now() + timedelta(hours=body.expires_hours)
         
         blacklist_entry = BlackList(
             user_id=body.user_id,
@@ -977,9 +1026,6 @@ class StoredPostOut(BaseModel):
 
 @app.get("/management/stored-posts", response_model=List[StoredPostOut])
 async def get_stored_posts(group_name: Optional[str] = None, authorization: Optional[str] = Header(default=None)):
-    payload = get_current_user_from_headers(authorization)
-    if not payload.get("is_admin"):
-        raise HTTPException(status_code=403, detail="需要管理员权限")
     
     db = await get_db()
     async with db.get_session() as session:
@@ -1083,10 +1129,6 @@ class StatsOut(BaseModel):
 
 @app.get("/management/stats", response_model=StatsOut)
 async def get_stats(authorization: Optional[str] = Header(default=None)):
-    payload = get_current_user_from_headers(authorization)
-    if not payload.get("is_admin"):
-        raise HTTPException(status_code=403, detail="需要管理员权限")
-    
     db = await get_db()
     async with db.get_session() as session:
         from sqlalchemy import select, func, and_
@@ -1131,7 +1173,7 @@ async def get_stats(authorization: Optional[str] = Header(default=None)):
         
         # 最近30天的投稿数据（一次查询，前端同时需要 7/30 天）
         from datetime import timedelta
-        thirty_days_ago = datetime.utcnow() - timedelta(days=30)
+        thirty_days_ago = datetime.now() - timedelta(days=30)
         recent_30_stmt = select(
             func.date(Submission.created_at).label('date'),
             func.count(Submission.id).label('count')
@@ -1156,7 +1198,7 @@ async def get_stats(authorization: Optional[str] = Header(default=None)):
             raw_map[date_str] = int(getattr(row, 'count', 0) or 0)
 
         # 生成连续 30 天与 7 天的序列
-        today = datetime.utcnow().date()
+        today = datetime.now().date()
         recent_30d_submissions: Dict[str, int] = {}
         recent_submissions: Dict[str, int] = {}
         for i in range(30):
@@ -1299,8 +1341,8 @@ async def get_system_status(authorization: Optional[str] = Header(default=None))
     # 系统
     try:
         boot_ts = getattr(psutil, "boot_time", lambda: None)()
-        boot_time_iso = datetime.utcfromtimestamp(boot_ts).isoformat() + "Z" if boot_ts else None
-        uptime_seconds = int((datetime.utcnow().timestamp() - boot_ts)) if boot_ts else None
+        boot_time_iso = datetime.fromtimestamp(boot_ts).isoformat() if boot_ts else None
+        uptime_seconds = int((datetime.now().timestamp() - boot_ts)) if boot_ts else None
     except Exception:
         boot_time_iso = None
         uptime_seconds = None
@@ -1332,7 +1374,8 @@ async def get_system_status(authorization: Optional[str] = Header(default=None))
         disks=disks,
         network=net_info,
         process=proc_info,
-        timestamp=datetime.utcnow().isoformat() + "Z",
+        timestamp=datetime.now().isoformat(),
     )
+
 
 
