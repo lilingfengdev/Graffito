@@ -141,8 +141,8 @@ class XWallApp:
     async def handle_message(self, submission):
         """处理收到的消息（投稿）"""
         try:
-            # 通过投稿服务处理
-            await self.submission_service.process_submission(submission.id)
+            # 通过投稿服务处理（后台任务，避免阻塞接收器与停机流程）
+            asyncio.create_task(self.submission_service.process_submission(submission.id))
         except Exception as e:
             logger.error(f"处理消息失败: {e}", exc_info=True)
             

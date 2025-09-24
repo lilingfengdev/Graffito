@@ -1,7 +1,8 @@
 """投稿服务"""
 import asyncio
-from typing import Dict, Any, List, Optional
+from typing import Dict, Any, List, Optional, Set
 from datetime import datetime, timedelta
+import time
 from loguru import logger
 
 from core.database import get_db
@@ -30,6 +31,12 @@ class SubmissionService:
         self.scheduler: Optional[AsyncIOScheduler] = None
         self._queue_backend: TaskQueueBackend = build_queue_backend()
         self._pub_workers: Dict[str, asyncio.Task] = {}
+        # 防重复处理：同一 submission_id 在单进程内只允许一个处理协程
+        self._inflight: Set[int] = set()
+        self._inflight_lock: asyncio.Lock = asyncio.Lock()
+        # 跟踪投稿处理任务，用于优雅停机时取消
+        self._proc_tasks: Dict[int, asyncio.Task] = {}
+        self._stopping: bool = False
         
     async def initialize(self):
         """初始化服务"""
@@ -45,9 +52,16 @@ class SubmissionService:
             self._setup_send_schedules()
         except Exception as e:
             self.logger.error(f"设置定时计划失败: {e}")
+        # 恢复待处理投稿（处理 120 秒等待期间发生重启的情况）
+        try:
+            await self._resume_pending_submissions()
+        except Exception as e:
+            self.logger.error(f"恢复待处理投稿失败: {e}")
         
     async def shutdown(self):
         """关闭服务"""
+        # 标记停机，通知处理循环尽快退出
+        self._stopping = True
         await self.pipeline.shutdown()
         # 停止调度器与工作协程
         try:
@@ -61,6 +75,22 @@ class SubmissionService:
                 if task and not task.done():
                     task.cancel()
             self._pub_workers.clear()
+        except Exception:
+            pass
+        # 取消所有仍在运行的投稿处理任务
+        try:
+            tasks = [t for t in self._proc_tasks.values() if t and not t.done()]
+            for t in tasks:
+                try:
+                    t.cancel()
+                except Exception:
+                    pass
+            if tasks:
+                try:
+                    await asyncio.gather(*tasks, return_exceptions=True)
+                except Exception:
+                    pass
+            self._proc_tasks.clear()
         except Exception:
             pass
             
@@ -135,14 +165,131 @@ class SubmissionService:
             return None
             
     async def process_submission(self, submission_id: int):
-        """处理投稿"""
+        """处理投稿（带重启恢复的动态等待）。
+
+        - 根据投稿 `created_at` 计算剩余等待时间，支持在 120 秒等待期间重启后继续等待剩余时间。
+        - 使用进程内去重，避免同一投稿被并发处理。
+        """
+        # 进程内防重复
+        async with self._inflight_lock:
+            if submission_id in self._inflight:
+                try:
+                    self.logger.info(f"投稿 {submission_id} 已在处理，跳过重复触发")
+                except Exception:
+                    pass
+                return
+            self._inflight.add(submission_id)
+            # 记录当前任务以便停机时取消
+            try:
+                cur = asyncio.current_task()
+                if cur is not None:
+                    self._proc_tasks[submission_id] = cur
+            except Exception:
+                pass
+
         try:
-            # 等待用户可能的补充消息
             settings = get_settings()
-            wait_time = settings.processing.wait_time
-            
-            self.logger.info(f"等待 {wait_time} 秒接收补充消息")
-            await asyncio.sleep(wait_time)
+            wait_time = max(0, int(settings.processing.wait_time))
+
+            # 读取投稿创建时间与当前状态，用于计算剩余等待
+            db = await get_db()
+            async with db.get_session() as session:
+                stmt = select(Submission).where(Submission.id == submission_id)
+                result = await session.execute(stmt)
+                submission = result.scalar_one_or_none()
+                # 获取该会话缓存中最早一条消息的时间戳（优先用消息时间作为等待基准，更贴合“消息窗口”概念）
+                earliest_ts: Optional[float] = None
+                try:
+                    ts_stmt = (
+                        select(func.min(MessageCache.message_time))
+                        .where(
+                            and_(
+                                MessageCache.sender_id == submission.sender_id,  # type: ignore[arg-type]
+                                MessageCache.receiver_id == submission.receiver_id,  # type: ignore[arg-type]
+                            )
+                        )
+                    )
+                    ts_result = await session.execute(ts_stmt)
+                    earliest_ts = ts_result.scalar_one_or_none()
+                except Exception:
+                    earliest_ts = None
+
+            if not submission:
+                return
+
+            # 仅在待处理投稿上执行等待逻辑；其他状态直接进入后续流程
+            if submission.status == SubmissionStatus.PENDING.value:
+                # 滑动窗口：自“最后一条消息”起静默 wait_time 秒才进入处理
+                # 先确定创建时间作为兜底基准
+                created_ts: Optional[float] = None
+                try:
+                    created_ts = submission.created_at.timestamp() if submission.created_at else None
+                except Exception:
+                    created_ts = None
+
+                # 获取当前最新消息时间戳；若无缓存，则以创建时间兜底
+                async def _get_last_ts() -> float:
+                    db2 = await get_db()
+                    async with db2.get_session() as s2:
+                        try:
+                            last_stmt = (
+                                select(func.max(MessageCache.message_time))
+                                .where(
+                                    and_(
+                                        MessageCache.sender_id == submission.sender_id,  # type: ignore[arg-type]
+                                        MessageCache.receiver_id == submission.receiver_id,  # type: ignore[arg-type]
+                                    )
+                                )
+                            )
+                            last_res = await s2.execute(last_stmt)
+                            last_ts = last_res.scalar_one_or_none()
+                        except Exception:
+                            last_ts = None
+                    if isinstance(last_ts, (int, float)) and last_ts > 0:
+                        return float(last_ts)
+                    if isinstance(earliest_ts, (int, float)) and earliest_ts > 0:
+                        return float(earliest_ts)
+                    return float(created_ts or time.time())
+
+                # 循环等待直到与最后一条消息间隔 >= wait_time
+                # 节流日志：首次与每 30s 打印一次，或剩余 <= 5s
+                first_logged = False
+                last_info_log_ts: float = 0.0
+                while True:
+                    # 停机则中断
+                    if self._stopping:
+                        raise asyncio.CancelledError()
+                    # 若投稿已不再处于 PENDING（例如被删除/改状态），立即退出
+                    try:
+                        db_chk = await get_db()
+                        async with db_chk.get_session() as s_chk:
+                            st_stmt = select(Submission.status).where(Submission.id == submission_id)
+                            st_res = await s_chk.execute(st_stmt)
+                            cur_status = st_res.scalar_one_or_none()
+                    except Exception:
+                        cur_status = None
+                    if cur_status != SubmissionStatus.PENDING.value:
+                        return
+                    last_ts = await _get_last_ts()
+                    gap = max(0.0, time.time() - last_ts)
+                    if gap >= float(wait_time):
+                        break
+                    remaining = max(0.0, float(wait_time) - gap)
+                    sleep_s = min(remaining, 5.0)
+                    now_ts = time.time()
+                    # 仅在首次、距离上次 >=30s、或剩余<=5s 时输出 INFO 日志
+                    if (not first_logged) or (now_ts - last_info_log_ts >= 30.0) or (remaining <= 5.0):
+                        try:
+                            self.logger.info(f"等待 {int(sleep_s)} 秒（距最后一条消息 {int(gap)}s < {wait_time}s）")
+                        except Exception:
+                            pass
+                        first_logged = True
+                        last_info_log_ts = now_ts
+                    try:
+                        await asyncio.sleep(max(0.5, sleep_s))
+                    except asyncio.CancelledError:
+                        # 停机或外部取消
+                        raise
             
             # 合并消息
             await self.merge_messages(submission_id)
@@ -158,6 +305,55 @@ class SubmissionService:
                 
         except Exception as e:
             self.logger.error(f"处理投稿异常: {e}", exc_info=True)
+        finally:
+            # 释放 in-flight 标记
+            async with self._inflight_lock:
+                self._inflight.discard(submission_id)
+                try:
+                    self._proc_tasks.pop(submission_id, None)
+                except Exception:
+                    pass
+
+    async def _resume_pending_submissions(self):
+        """在服务启动时恢复待处理投稿，确保等待中的投稿不会因重启而永久卡住。
+
+        策略：
+        - 扫描状态为 PENDING 的投稿；依据 `created_at` 由 `process_submission` 自行计算剩余等待并继续处理。
+        - 避免一次性创建过多任务：可按创建时间排序逐一拉起（这里简单并发创建，由 in-flight 去重保障）。
+        """
+        db = await get_db()
+        async with db.get_session() as session:
+            stmt = (
+                select(Submission)
+                .where(Submission.status == SubmissionStatus.PENDING.value)
+                .order_by(Submission.created_at)
+            )
+            result = await session.execute(stmt)
+            pendings: List[Submission] = result.scalars().all()
+
+        if not pendings:
+            return
+
+        settings = get_settings()
+        wait_time = max(0, int(settings.processing.wait_time))
+        now = datetime.now()
+        for sub in pendings:
+            try:
+                if not sub.created_at:
+                    remain = wait_time
+                else:
+                    elapsed = (now - sub.created_at).total_seconds()
+                    remain = max(0, int(wait_time - max(0.0, elapsed)))
+                try:
+                    self.logger.info(
+                        f"恢复待处理投稿 {sub.id}（sender={sub.sender_id}）：剩余等待 {remain} 秒"
+                    )
+                except Exception:
+                    pass
+                # 交由 process_submission 动态等待与处理（含 in-flight 去重）
+                asyncio.create_task(self.process_submission(int(sub.id)))
+            except Exception as e:
+                self.logger.error(f"恢复投稿 {getattr(sub, 'id', None)} 失败: {e}")
             
     async def merge_messages(self, submission_id: int):
         """合并用户的多条消息"""
