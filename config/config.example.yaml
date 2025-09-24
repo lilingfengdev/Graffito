@@ -59,6 +59,23 @@ web:
 
   cors_allow_headers: [ "*" ]
 
+  # API 限流（SlowAPI）配置
+  # 说明：
+  # - enabled: 是否启用限流
+  # - default: 应用于所有未单独设置的接口的默认限额（可选）
+  # - login/register/create_invite/init_superadmin: 针对特定接口的限额（可选）
+  # - storage_uri: 可选的共享存储（如 Redis）用于多实例/分布式限流
+  # - trust_forwarded_for: 位于反向代理后时，信任 X-Forwarded-For 头
+  rate_limit:
+    enabled: false
+    default: "120/minute"
+    login: "10/minute"
+    register_invite: "5/hour"
+    create_invite: "20/hour"
+    init_superadmin: "2/hour"
+    # storage_uri: "redis://localhost:6379/0"  # 分布式部署建议启用
+    trust_forwarded_for: true
+
 
 
 # 数据库配置

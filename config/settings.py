@@ -97,6 +97,19 @@ class QueueConfig(BaseModel):
     mysql: QueueMySQLConfig = QueueMySQLConfig()
 
 
+class RateLimitConfig(BaseModel):
+    """Web API 限流配置"""
+
+    enabled: bool = False
+    default: Optional[str] = "120/minute"
+    login: Optional[str] = "10/minute"
+    register_invite: Optional[str] = "5/hour"
+    create_invite: Optional[str] = "20/hour"
+    init_superadmin: Optional[str] = "2/hour"
+    storage_uri: Optional[str] = None
+    trust_forwarded_for: bool = True
+
+
 class WebConfig(BaseModel):
     """Web 后端配置"""
     enabled: bool = True
@@ -111,6 +124,7 @@ class WebConfig(BaseModel):
     cors_allow_credentials: bool = True
     cors_allow_methods: List[str] = Field(default_factory=lambda: ["*"])
     cors_allow_headers: List[str] = Field(default_factory=lambda: ["*"])
+    rate_limit: RateLimitConfig = RateLimitConfig()
 
 
 class LLMConfig(BaseModel):
@@ -163,6 +177,9 @@ class RenderingConfig(BaseModel):
     
     # 自定义字体族，支持多个字体回退
     font_family: str = "'Inter', -apple-system, BlinkMacSystemFont, 'Segoe UI', 'PingFang SC', 'Hiragino Sans GB', 'Microsoft YaHei', 'Helvetica Neue', Helvetica, Arial, sans-serif"
+
+
+ 
 
 
 class QQReceiverConfig(BaseModel):

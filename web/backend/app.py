@@ -8,13 +8,15 @@ Provides:
 CORS is enabled; static frontend can be served from ../frontend/dist if built.
 """
 
-import asyncio
 from datetime import datetime, timedelta
 from pathlib import Path
 from typing import Optional, List, Dict, Any
 
 import orjson
-from fastapi import FastAPI, Depends, HTTPException, status
+from slowapi import Limiter
+from slowapi.errors import RateLimitExceeded
+from slowapi.middleware import SlowAPIMiddleware
+from fastapi import FastAPI, Depends, Header, HTTPException, Request, status
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.security import OAuth2PasswordRequestForm
 from fastapi.responses import JSONResponse
@@ -83,7 +85,54 @@ def orjson_dumps(v, *, default):
     return orjson.dumps(v, default=default).decode()
 
 
+settings = get_settings()
+
+
+def _client_ip(request: Request) -> str:
+    """Determine client IP respecting X-Forwarded-For when configured."""
+    try:
+        if settings.web.rate_limit.trust_forwarded_for:
+            xff = request.headers.get("x-forwarded-for")
+            if xff:
+                return xff.split(",")[0].strip() or (request.client.host if request.client else "unknown")
+    except Exception:
+        pass
+    return request.client.host if request.client else "unknown"
+
+
+_rl_conf = settings.web.rate_limit
+_default_limits = ([_rl_conf.default] if getattr(_rl_conf, "default", None) else []) if getattr(_rl_conf, "enabled", False) else []
+_limiter_storage_uri = getattr(_rl_conf, "storage_uri", None)
+
+if _limiter_storage_uri:
+    limiter = Limiter(key_func=_client_ip, storage_uri=_limiter_storage_uri, default_limits=_default_limits)
+else:
+    limiter = Limiter(key_func=_client_ip, default_limits=_default_limits)
+
+
 app = FastAPI(default_response_class=JSONResponse)
+
+if getattr(_rl_conf, "enabled", False):
+    if _rl_conf.trust_forwarded_for:
+        try:
+            limiter.config.trust_forwarded_for = True
+        except Exception:
+            pass
+    app.state.limiter = limiter
+    app.add_exception_handler(
+        RateLimitExceeded,
+        lambda request, exc: JSONResponse(
+            status_code=status.HTTP_429_TOO_MANY_REQUESTS, content={"detail": "请求过于频繁，请稍后再试"}
+        ),
+    )
+    app.add_middleware(SlowAPIMiddleware)
+
+
+def rl(limit: Optional[str]):
+    """Return a rate limit decorator when enabled; otherwise exempt the endpoint."""
+    if not getattr(settings.web.rate_limit, "enabled", False) or not limit:
+        return limiter.exempt
+    return limiter.limit(limit)
 
 # Shared services (can be injected from main); if not injected, we'll create on startup
 audit_service: Optional[AuditService] = None
@@ -126,19 +175,20 @@ except Exception:
 
 def get_current_user_from_headers(authorization: Optional[str]) -> Dict[str, Any]:
     if not authorization or not authorization.lower().startswith("bearer "):
-        raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail="Not authenticated")
+        raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail="未认证")
     token = authorization.split(" ", 1)[1]
     settings = get_settings()
     try:
         payload = jwt.decode(token, settings.web.jwt_secret_key, algorithms=[settings.web.jwt_algorithm])
     except jwt.ExpiredSignatureError:
-        raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail="Token expired")
+        raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail="登录已过期")
     except jwt.InvalidTokenError:
-        raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail="Invalid token")
+        raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail="无效的登录凭证")
     return payload
 
 
 @app.on_event("startup")
+@limiter.exempt
 async def on_startup():
     # Ensure DB is initialized
     await get_db()
@@ -164,6 +214,7 @@ async def on_shutdown():
 
 
 @app.get("/health")
+@limiter.exempt
 async def health():
     db = await get_db()
     ok = await db.health_check()
@@ -188,7 +239,8 @@ async def has_superadmin() -> Dict[str, bool]:
 
 
 @app.post("/auth/init-superadmin", response_model=UserOut)
-async def init_superadmin(body: SuperadminInitIn):
+@rl(getattr(settings.web.rate_limit, "init_superadmin", None))
+async def init_superadmin(request: Request, body: SuperadminInitIn):
     """Initialize the very first superadmin. If any superadmin exists, forbid."""
     db = await get_db()
     async with db.get_session() as session:
@@ -199,12 +251,12 @@ async def init_superadmin(body: SuperadminInitIn):
         result = await session.execute(exists_stmt)
         exists = result.scalar_one_or_none()
         if exists:
-            raise HTTPException(status_code=400, detail="Superadmin already initialized")
+            raise HTTPException(status_code=400, detail="超级管理员已初始化")
 
         # Also forbid duplicate usernames
         result = await session.execute(select(User).where(User.username == body.username))
         if result.scalar_one_or_none():
-            raise HTTPException(status_code=400, detail="Username already exists")
+            raise HTTPException(status_code=400, detail="用户名已存在")
 
         user = User(
             username=body.username,
@@ -226,7 +278,8 @@ async def init_superadmin(body: SuperadminInitIn):
 
 
 @app.post("/auth/login", response_model=TokenResponse)
-async def login(form_data: OAuth2PasswordRequestForm = Depends()):
+@rl(getattr(settings.web.rate_limit, "login", None))
+async def login(request: Request, form_data: OAuth2PasswordRequestForm = Depends()):
     db = await get_db()
     async with db.get_session() as session:
         from sqlalchemy import select
@@ -236,7 +289,7 @@ async def login(form_data: OAuth2PasswordRequestForm = Depends()):
         result = await session.execute(stmt)
         user = result.scalar_one_or_none()
         if not user or not user.is_active or not verify_password(form_data.password, user.password_hash):
-            raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail="Incorrect username or password")
+            raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail="用户名或密码错误")
 
         token = create_access_token({
             "sub": str(user.id),
@@ -276,7 +329,7 @@ async def me(authorization: Optional[str] = Header(default=None)):
         result = await session.execute(stmt)
         user = result.scalar_one_or_none()
         if not user or not user.is_active:
-            raise HTTPException(status_code=401, detail="User inactive")
+            raise HTTPException(status_code=401, detail="用户已被禁用")
         # derive role
         prof = (await session.execute(select(AdminProfile).where(AdminProfile.user_id == user.id))).scalar_one_or_none()
         role = None
@@ -299,10 +352,11 @@ async def me(authorization: Optional[str] = Header(default=None)):
 
 # Invite endpoints
 @app.post("/invites/create")
-async def create_invite(body: InviteCreateIn, authorization: Optional[str] = Header(default=None)):
+@rl(getattr(settings.web.rate_limit, "create_invite", None))
+async def create_invite(request: Request, body: InviteCreateIn, authorization: Optional[str] = Header(default=None)):
     payload = get_current_user_from_headers(authorization)
     if not payload.get("is_superadmin"):
-        raise HTTPException(status_code=403, detail="Only superadmin can create invites")
+        raise HTTPException(status_code=403, detail="仅超级管理员可创建邀请码")
 
     db = await get_db()
     async with db.get_session() as session:
@@ -340,7 +394,8 @@ async def create_invite(body: InviteCreateIn, authorization: Optional[str] = Hea
 
 
 @app.post("/auth/register-invite", response_model=UserOut)
-async def register_via_invite(body: RegisterViaInviteIn):
+@rl(getattr(settings.web.rate_limit, "register_invite", None))
+async def register_via_invite(request: Request, body: RegisterViaInviteIn):
     db = await get_db()
     async with db.get_session() as session:
         from sqlalchemy import select
@@ -352,12 +407,12 @@ async def register_via_invite(body: RegisterViaInviteIn):
         result = await session.execute(stmt)
         invite = result.scalar_one_or_none()
         if not invite or not invite.is_valid():
-            raise HTTPException(status_code=400, detail="Invalid or expired token")
+            raise HTTPException(status_code=400, detail="邀请码无效或已过期")
 
         # Check username
         result = await session.execute(select(User).where(User.username == body.username))
         if result.scalar_one_or_none():
-            raise HTTPException(status_code=400, detail="Username already exists")
+            raise HTTPException(status_code=400, detail="用户名已存在")
 
         # Create admin user
         user = User(
@@ -408,7 +463,7 @@ class SubmissionOut(BaseModel):
 async def list_submissions(status_filter: Optional[str] = None, limit: int = 50, authorization: Optional[str] = Header(default=None)):
     payload = get_current_user_from_headers(authorization)
     if not payload.get("is_admin"):
-        raise HTTPException(status_code=403, detail="Admin required")
+        raise HTTPException(status_code=403, detail="需要管理员权限") 
 
     db = await get_db()
     async with db.get_session() as session:
@@ -447,7 +502,7 @@ class AuditActionIn(BaseModel):
 async def api_approve(submission_id: int, authorization: Optional[str] = Header(default=None)):
     payload = get_current_user_from_headers(authorization)
     if not payload.get("is_admin"):
-        raise HTTPException(status_code=403, detail="Admin required")
+        raise HTTPException(status_code=403, detail="需要管理员权限")
     res = await audit_service.approve(submission_id, operator_id=str(payload.get("username")))
     if not res.get("success"):
         raise HTTPException(status_code=400, detail=res.get("message"))
@@ -458,7 +513,7 @@ async def api_approve(submission_id: int, authorization: Optional[str] = Header(
 async def api_reject(submission_id: int, body: AuditActionIn, authorization: Optional[str] = Header(default=None)):
     payload = get_current_user_from_headers(authorization)
     if not payload.get("is_admin"):
-        raise HTTPException(status_code=403, detail="Admin required")
+        raise HTTPException(status_code=403, detail="需要管理员权限")
     res = await audit_service.reject_with_message(submission_id, operator_id=str(payload.get("username")), extra=body.comment)
     if not res.get("success"):
         raise HTTPException(status_code=400, detail=res.get("message"))
@@ -469,7 +524,7 @@ async def api_reject(submission_id: int, body: AuditActionIn, authorization: Opt
 async def api_toggle_anon(submission_id: int, authorization: Optional[str] = Header(default=None)):
     payload = get_current_user_from_headers(authorization)
     if not payload.get("is_admin"):
-        raise HTTPException(status_code=403, detail="Admin required")
+        raise HTTPException(status_code=403, detail="需要管理员权限")
     res = await audit_service.toggle_anonymous(submission_id, operator_id=str(payload.get("username")))
     if not res.get("success"):
         raise HTTPException(status_code=400, detail=res.get("message"))
@@ -480,7 +535,7 @@ async def api_toggle_anon(submission_id: int, authorization: Optional[str] = Hea
 async def api_comment(submission_id: int, body: AuditActionIn, authorization: Optional[str] = Header(default=None)):
     payload = get_current_user_from_headers(authorization)
     if not payload.get("is_admin"):
-        raise HTTPException(status_code=403, detail="Admin required")
+        raise HTTPException(status_code=403, detail="需要管理员权限")
     res = await audit_service.add_comment(submission_id, operator_id=str(payload.get("username")), comment=(body.comment or ""))
     if not res.get("success"):
         raise HTTPException(status_code=400, detail=res.get("message"))
@@ -492,7 +547,7 @@ async def api_comment(submission_id: int, body: AuditActionIn, authorization: Op
 async def api_hold(submission_id: int, authorization: Optional[str] = Header(default=None)):
     payload = get_current_user_from_headers(authorization)
     if not payload.get("is_admin"):
-        raise HTTPException(status_code=403, detail="Admin required")
+        raise HTTPException(status_code=403, detail="需要管理员权限")
     res = await audit_service.hold(submission_id, operator_id=str(payload.get("username")))
     if not res.get("success"):
         raise HTTPException(status_code=400, detail=res.get("message"))
@@ -503,7 +558,7 @@ async def api_hold(submission_id: int, authorization: Optional[str] = Header(def
 async def api_delete(submission_id: int, authorization: Optional[str] = Header(default=None)):
     payload = get_current_user_from_headers(authorization)
     if not payload.get("is_admin"):
-        raise HTTPException(status_code=403, detail="Admin required")
+        raise HTTPException(status_code=403, detail="需要管理员权限")
     res = await audit_service.delete(submission_id, operator_id=str(payload.get("username")))
     if not res.get("success"):
         raise HTTPException(status_code=400, detail=res.get("message"))
@@ -514,7 +569,7 @@ async def api_delete(submission_id: int, authorization: Optional[str] = Header(d
 async def api_approve_immediate(submission_id: int, authorization: Optional[str] = Header(default=None)):
     payload = get_current_user_from_headers(authorization)
     if not payload.get("is_admin"):
-        raise HTTPException(status_code=403, detail="Admin required")
+        raise HTTPException(status_code=403, detail="需要管理员权限")
     res = await audit_service.approve_immediate(submission_id, operator_id=str(payload.get("username")))
     if not res.get("success"):
         raise HTTPException(status_code=400, detail=res.get("message"))
@@ -525,7 +580,7 @@ async def api_approve_immediate(submission_id: int, authorization: Optional[str]
 async def api_rerender(submission_id: int, authorization: Optional[str] = Header(default=None)):
     payload = get_current_user_from_headers(authorization)
     if not payload.get("is_admin"):
-        raise HTTPException(status_code=403, detail="Admin required")
+        raise HTTPException(status_code=403, detail="需要管理员权限")
     res = await audit_service.rerender(submission_id, operator_id=str(payload.get("username")))
     if not res.get("success"):
         raise HTTPException(status_code=400, detail=res.get("message"))
@@ -536,7 +591,7 @@ async def api_rerender(submission_id: int, authorization: Optional[str] = Header
 async def api_refresh(submission_id: int, authorization: Optional[str] = Header(default=None)):
     payload = get_current_user_from_headers(authorization)
     if not payload.get("is_admin"):
-        raise HTTPException(status_code=403, detail="Admin required")
+        raise HTTPException(status_code=403, detail="需要管理员权限")
     res = await audit_service.refresh(submission_id, operator_id=str(payload.get("username")))
     if not res.get("success"):
         raise HTTPException(status_code=400, detail=res.get("message"))
@@ -547,7 +602,7 @@ async def api_refresh(submission_id: int, authorization: Optional[str] = Header(
 async def api_reply(submission_id: int, body: AuditActionIn, authorization: Optional[str] = Header(default=None)):
     payload = get_current_user_from_headers(authorization)
     if not payload.get("is_admin"):
-        raise HTTPException(status_code=403, detail="Admin required")
+        raise HTTPException(status_code=403, detail="需要管理员权限")
     res = await audit_service.reply_to_sender(submission_id, operator_id=str(payload.get("username")), extra=body.comment)
     if not res.get("success"):
         raise HTTPException(status_code=400, detail=res.get("message"))
@@ -558,7 +613,7 @@ async def api_reply(submission_id: int, body: AuditActionIn, authorization: Opti
 async def api_blacklist(submission_id: int, body: AuditActionIn, authorization: Optional[str] = Header(default=None)):
     payload = get_current_user_from_headers(authorization)
     if not payload.get("is_admin"):
-        raise HTTPException(status_code=403, detail="Admin required")
+        raise HTTPException(status_code=403, detail="需要管理员权限")
     res = await audit_service.blacklist(submission_id, operator_id=str(payload.get("username")), extra=body.comment)
     if not res.get("success"):
         raise HTTPException(status_code=400, detail=res.get("message"))
@@ -593,7 +648,7 @@ class SubmissionDetailOut(BaseModel):
 async def get_submission_detail(submission_id: int, authorization: Optional[str] = Header(default=None)):
     payload = get_current_user_from_headers(authorization)
     if not payload.get("is_admin"):
-        raise HTTPException(status_code=403, detail="Admin required")
+        raise HTTPException(status_code=403, detail="需要管理员权限")
     
     db = await get_db()
     async with db.get_session() as session:
@@ -605,7 +660,7 @@ async def get_submission_detail(submission_id: int, authorization: Optional[str]
         submission = result.scalar_one_or_none()
         
         if not submission:
-            raise HTTPException(status_code=404, detail="Submission not found")
+            raise HTTPException(status_code=404, detail="投稿未找到")
             
         return SubmissionDetailOut(
             id=submission.id,
@@ -653,7 +708,7 @@ class BlacklistOut(BaseModel):
 async def get_blacklist(authorization: Optional[str] = Header(default=None)):
     payload = get_current_user_from_headers(authorization)
     if not payload.get("is_admin"):
-        raise HTTPException(status_code=403, detail="Admin required")
+        raise HTTPException(status_code=403, detail="需要管理员权限")
     
     db = await get_db()
     async with db.get_session() as session:
@@ -683,7 +738,7 @@ async def get_blacklist(authorization: Optional[str] = Header(default=None)):
 async def add_to_blacklist(body: BlacklistUserIn, authorization: Optional[str] = Header(default=None)):
     payload = get_current_user_from_headers(authorization)
     if not payload.get("is_admin"):
-        raise HTTPException(status_code=403, detail="Admin required")
+        raise HTTPException(status_code=403, detail="需要管理员权限")
     
     db = await get_db()
     async with db.get_session() as session:
@@ -700,7 +755,7 @@ async def add_to_blacklist(body: BlacklistUserIn, authorization: Optional[str] =
         existing = result.scalar_one_or_none()
         
         if existing:
-            raise HTTPException(status_code=400, detail="User already blacklisted")
+            raise HTTPException(status_code=400, detail="用户已在黑名单中")
         
         expires_at = None
         if body.expires_hours and body.expires_hours > 0:
@@ -723,7 +778,7 @@ async def add_to_blacklist(body: BlacklistUserIn, authorization: Optional[str] =
 async def remove_from_blacklist(blacklist_id: int, authorization: Optional[str] = Header(default=None)):
     payload = get_current_user_from_headers(authorization)
     if not payload.get("is_admin"):
-        raise HTTPException(status_code=403, detail="Admin required")
+        raise HTTPException(status_code=403, detail="需要管理员权限")
     
     db = await get_db()
     async with db.get_session() as session:
@@ -736,7 +791,7 @@ async def remove_from_blacklist(blacklist_id: int, authorization: Optional[str] 
         blacklist_entry = result.scalar_one_or_none()
         
         if not blacklist_entry:
-            raise HTTPException(status_code=404, detail="Blacklist entry not found")
+            raise HTTPException(status_code=404, detail="黑名单记录未找到")
         
         # 删除记录
         delete_stmt = delete(BlackList).where(BlackList.id == blacklist_id)
@@ -778,7 +833,7 @@ class AdminUpdateIn(BaseModel):
 async def list_admins(authorization: Optional[str] = Header(default=None)):
     payload = get_current_user_from_headers(authorization)
     if not payload.get("is_admin"):
-        raise HTTPException(status_code=403, detail="Admin required")
+        raise HTTPException(status_code=403, detail="需要管理员权限")
 
     db = await get_db()
     async with db.get_session() as session:
@@ -816,7 +871,7 @@ async def list_admins(authorization: Optional[str] = Header(default=None)):
 async def create_admin(body: AdminCreateIn, authorization: Optional[str] = Header(default=None)):
     payload = get_current_user_from_headers(authorization)
     if not payload.get("is_superadmin"):
-        raise HTTPException(status_code=403, detail="Only superadmin can create admins")
+        raise HTTPException(status_code=403, detail="仅超级管理员可创建管理员")
 
     db = await get_db()
     async with db.get_session() as session:
@@ -827,7 +882,7 @@ async def create_admin(body: AdminCreateIn, authorization: Optional[str] = Heade
         target_username = body.user_id
         u = (await session.execute(select(User).where(User.username == target_username))).scalar_one_or_none()
         if not u:
-            raise HTTPException(status_code=404, detail="User not found. Please invite/register first.")
+            raise HTTPException(status_code=404, detail="用户不存在，请先邀请/注册用户")
 
         # 标记为管理员/超级管理员（仅当请求为 super_admin）
         u.is_admin = True
@@ -852,9 +907,9 @@ async def create_admin(body: AdminCreateIn, authorization: Optional[str] = Heade
 async def update_admin(admin_id: int, body: AdminUpdateIn, authorization: Optional[str] = Header(default=None)):
     payload = get_current_user_from_headers(authorization)
     if not payload.get("is_admin"):
-        raise HTTPException(status_code=403, detail="Admin required")
+        raise HTTPException(status_code=403, detail="需要管理员权限")
     if body.role == "super_admin" and not payload.get("is_superadmin"):
-        raise HTTPException(status_code=403, detail="Only superadmin can assign super_admin role")
+        raise HTTPException(status_code=403, detail="仅超级管理员可分配超级管理员角色")
 
     db = await get_db()
     async with db.get_session() as session:
@@ -863,7 +918,7 @@ async def update_admin(admin_id: int, body: AdminUpdateIn, authorization: Option
 
         u = (await session.execute(select(User).where(User.id == admin_id))).scalar_one_or_none()
         if not u:
-            raise HTTPException(status_code=404, detail="Admin not found")
+            raise HTTPException(status_code=404, detail="管理员未找到")
 
         # 更新 User 标记
         u.is_admin = True
@@ -893,7 +948,7 @@ class AdminStatusIn(BaseModel):
 async def toggle_admin_status(admin_id: int, body: AdminStatusIn, authorization: Optional[str] = Header(default=None)):
     payload = get_current_user_from_headers(authorization)
     if not payload.get("is_admin"):
-        raise HTTPException(status_code=403, detail="Admin required")
+        raise HTTPException(status_code=403, detail="需要管理员权限")
 
     db = await get_db()
     async with db.get_session() as session:
@@ -902,11 +957,11 @@ async def toggle_admin_status(admin_id: int, body: AdminStatusIn, authorization:
 
         u = (await session.execute(select(User).where(User.id == admin_id))).scalar_one_or_none()
         if not u:
-            raise HTTPException(status_code=404, detail="Admin not found")
+            raise HTTPException(status_code=404, detail="管理员未找到")
 
         # 仅超级管理员可禁用超级管理员
         if u.is_superadmin and not payload.get("is_superadmin"):
-            raise HTTPException(status_code=403, detail="Only superadmin can disable superadmin")
+            raise HTTPException(status_code=403, detail="仅超级管理员可禁用超级管理员")
 
         u.is_active = bool(body.is_active)
         await session.flush()
@@ -917,7 +972,7 @@ async def toggle_admin_status(admin_id: int, body: AdminStatusIn, authorization:
 async def delete_admin(admin_id: int, authorization: Optional[str] = Header(default=None)):
     payload = get_current_user_from_headers(authorization)
     if not payload.get("is_superadmin"):
-        raise HTTPException(status_code=403, detail="Only superadmin can delete admins")
+        raise HTTPException(status_code=403, detail="仅超级管理员可删除管理员")
 
     db = await get_db()
     async with db.get_session() as session:
@@ -926,9 +981,9 @@ async def delete_admin(admin_id: int, authorization: Optional[str] = Header(defa
 
         u = (await session.execute(select(User).where(User.id == admin_id))).scalar_one_or_none()
         if not u:
-            raise HTTPException(status_code=404, detail="Admin not found")
+            raise HTTPException(status_code=404, detail="管理员未找到")
         if u.is_superadmin:
-            raise HTTPException(status_code=400, detail="Cannot delete superadmin")
+            raise HTTPException(status_code=400, detail="无法删除超级管理员")
 
         # 取消管理员权限，但保留用户账号
         u.is_admin = False
@@ -953,7 +1008,7 @@ class StoredPostOut(BaseModel):
 async def get_stored_posts(group_name: Optional[str] = None, authorization: Optional[str] = Header(default=None)):
     payload = get_current_user_from_headers(authorization)
     if not payload.get("is_admin"):
-        raise HTTPException(status_code=403, detail="Admin required")
+        raise HTTPException(status_code=403, detail="需要管理员权限")
     
     db = await get_db()
     async with db.get_session() as session:
@@ -1005,7 +1060,7 @@ async def get_stored_posts(group_name: Optional[str] = None, authorization: Opti
 async def publish_stored_posts(group_name: str, authorization: Optional[str] = Header(default=None)):
     payload = get_current_user_from_headers(authorization)
     if not payload.get("is_admin"):
-        raise HTTPException(status_code=403, detail="Admin required")
+        raise HTTPException(status_code=403, detail="需要管理员权限")
     
     try:
         from services.submission_service import SubmissionService
@@ -1024,7 +1079,7 @@ async def publish_stored_posts(group_name: str, authorization: Optional[str] = H
 async def clear_stored_posts(group_name: str, authorization: Optional[str] = Header(default=None)):
     payload = get_current_user_from_headers(authorization)
     if not payload.get("is_admin"):
-        raise HTTPException(status_code=403, detail="Admin required")
+        raise HTTPException(status_code=403, detail="需要管理员权限")
     
     db = await get_db()
     async with db.get_session() as session:
@@ -1057,7 +1112,7 @@ class StatsOut(BaseModel):
 async def get_stats(authorization: Optional[str] = Header(default=None)):
     payload = get_current_user_from_headers(authorization)
     if not payload.get("is_admin"):
-        raise HTTPException(status_code=403, detail="Admin required")
+        raise HTTPException(status_code=403, detail="需要管理员权限")
     
     db = await get_db()
     async with db.get_session() as session:
