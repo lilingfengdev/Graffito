@@ -43,7 +43,6 @@ cache/
 
 # Cookies
 cookies/
-*.json
 cookies-*.json
 
 # 测试

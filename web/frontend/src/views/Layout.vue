@@ -131,7 +131,13 @@
         
         <div class="header-actions">
           <el-badge :value="pendingCount" :hidden="pendingCount === 0" class="badge">
-            <el-button :icon="Bell" circle @click="router.push('/audit')" />
+            <el-button 
+              :icon="Bell" 
+              circle 
+              @click="router.push('/audit')" 
+              class="notification-btn"
+              :class="{ 'has-notification': pendingCount > 0 }"
+            />
           </el-badge>
         </div>
       </el-header>
@@ -212,19 +218,21 @@
         </el-form-item>
         
         <el-form-item label="总计">
-          <el-tag type="info" size="large">
-            {{ formatDuration(inviteMinutes) }}
-          </el-tag>
-          <div class="time-hint">
-            <el-text type="info" size="small">
-              <span v-if="inviteMinutes > 0">
-                链接将在 {{ formatDuration(inviteMinutes) }} 后过期
-                <span class="expiry-at">（约 {{ formatExpiryAt(inviteMinutes) }} 到期）</span>
-              </span>
-              <span v-else>
-                请选择有效期
-              </span>
-            </el-text>
+          <div class="total-duration-container">
+            <el-tag type="info" size="large" class="duration-tag">
+              {{ formatDuration(inviteMinutes) }}
+            </el-tag>
+            <div class="time-hint">
+              <el-text type="info" size="small">
+                <span v-if="inviteMinutes > 0">
+                  链接将在 {{ formatDuration(inviteMinutes) }} 后过期
+                  <span class="expiry-at">（约 {{ formatExpiryAt(inviteMinutes) }} 到期）</span>
+                </span>
+                <span v-else>
+                  请选择有效期
+                </span>
+              </el-text>
+            </div>
           </div>
         </el-form-item>
         
@@ -512,26 +520,6 @@ onUnmounted(() => {
   z-index: 100;
 }
 
-.sidebar::before {
-  content: '';
-  position: absolute;
-  top: 0;
-  right: 0;
-  bottom: 0;
-  width: 1px;
-  background: linear-gradient(
-    to bottom,
-    transparent 0%,
-    var(--xw-border-primary) 20%,
-    var(--xw-border-primary) 80%,
-    transparent 100%
-  );
-  transition: opacity 0.3s ease;
-}
-
-.sidebar:hover::before {
-  opacity: 0.8;
-}
 
 /* Logo容器 - 优化布局和动画 */
 .logo-container {
@@ -542,14 +530,17 @@ onUnmounted(() => {
   padding: 0 12px;
   border-bottom: 1px solid var(--el-border-color-light);
   position: relative;
-  transition: padding 0.3s ease;
+  transition: all 0.3s ease;
 }
 
 .logo-container.collapsed {
   flex-direction: column;
   justify-content: center;
-  gap: 6px;
-  padding: 8px 12px;
+  align-items: center;
+  gap: 8px;
+  padding: 12px;
+  height: auto;
+  min-height: 80px;
 }
 
 /* Logo区域 - 统一布局避免跳动 */
@@ -566,6 +557,7 @@ onUnmounted(() => {
   flex: none;
   justify-content: center;
   gap: 0;
+  width: 100%;
 }
 
 .logo-icon {
@@ -580,10 +572,7 @@ onUnmounted(() => {
 .logo-text {
   font-size: 18px;
   font-weight: 600;
-  background: linear-gradient(135deg, var(--xw-primary), var(--xw-primary-light));
-  -webkit-background-clip: text;
-  -webkit-text-fill-color: transparent;
-  background-clip: text;
+  color: var(--xw-primary);
   white-space: nowrap;
   overflow: hidden;
 }
@@ -615,8 +604,10 @@ onUnmounted(() => {
 }
 
 .collapse-btn.collapsed {
-  width: 28px;
-  height: 28px;
+  width: 30px;
+  height: 30px;
+  align-self: center;
+  margin: 0 auto;
 }
 
 .collapse-icon {
@@ -658,14 +649,17 @@ onUnmounted(() => {
 
 :deep(.el-menu--collapse .el-menu-item),
 :deep(.el-menu--collapse .el-sub-menu__title) {
-  padding-left: 0 !important;
-  padding-right: 0 !important;
+  padding: 0 !important;
   display: flex;
   align-items: center;
   justify-content: center;
   margin: 4px 8px;
   border-radius: var(--xw-radius-lg);
   transition: all 0.3s cubic-bezier(0.4, 0, 0.2, 1);
+  width: 48px;
+  height: 48px;
+  margin-left: auto;
+  margin-right: auto;
 }
 
 :deep(.el-menu--collapse .el-menu-item .el-icon),
@@ -680,7 +674,7 @@ onUnmounted(() => {
 }
 
 :deep(.el-menu--collapse .el-menu-item.is-active) {
-  background: linear-gradient(135deg, var(--xw-primary-lightest), rgba(99, 102, 241, 0.15));
+  background: var(--xw-primary-lightest);
   box-shadow: var(--xw-shadow-sm);
 }
 
@@ -699,7 +693,7 @@ onUnmounted(() => {
   top: 0;
   bottom: 0;
   width: 0;
-  background: linear-gradient(135deg, var(--xw-primary), var(--xw-primary-light));
+  background: var(--xw-primary);
   transition: width 0.3s ease;
 }
 
@@ -713,7 +707,7 @@ onUnmounted(() => {
 }
 
 .nav-item.is-active {
-  background: linear-gradient(135deg, var(--xw-primary-lightest), rgba(99, 102, 241, 0.15));
+  background: var(--xw-primary-lightest);
   color: var(--xw-primary);
   box-shadow: var(--xw-shadow-sm);
 }
@@ -730,9 +724,10 @@ onUnmounted(() => {
 }
 
 .user-section.collapsed {
-  padding: 12px 8px;
+  padding: 16px 8px;
   display: flex;
   justify-content: center;
+  align-items: center;
 }
 
 .user-info {
@@ -749,9 +744,12 @@ onUnmounted(() => {
 
 .user-info.collapsed {
   gap: 0;
-  padding: 6px;
+  padding: 8px;
   min-height: 40px;
   justify-content: center;
+  width: 48px;
+  height: 48px;
+  border-radius: 50%;
 }
 
 .user-info:hover {
@@ -860,12 +858,32 @@ onUnmounted(() => {
   margin-top: 2px;
 }
 
+/* 总计时长容器样式 */
+.total-duration-container {
+  display: flex;
+  flex-direction: column;
+  align-items: flex-start;
+  gap: 8px;
+  width: 100%;
+}
+
+.duration-tag {
+  font-weight: 600;
+  letter-spacing: 0.5px;
+}
+
 .time-hint {
-  margin-top: 8px;
+  display: flex;
+  flex-direction: column;
+  align-items: flex-start;
+  gap: 4px;
+  padding-left: 2px;
+  line-height: 1.5;
 }
 
 .time-hint .expiry-at {
   color: var(--el-text-color-secondary);
+  margin-left: 4px;
 }
 
 /* 移动端遮罩层 */
@@ -951,7 +969,7 @@ onUnmounted(() => {
   left: 50%;
   width: 0;
   height: 0;
-  background: radial-gradient(circle, var(--xw-primary-lightest) 0%, transparent 70%);
+  background: var(--xw-primary-lightest);
   transition: all 0.3s ease;
   border-radius: 50%;
   transform: translate(-50%, -50%);
@@ -969,6 +987,83 @@ onUnmounted(() => {
 
 .mobile-menu-btn:active {
   transform: scale(0.95);
+}
+
+/* 通知按钮样式优化 */
+.notification-btn {
+  color: var(--xw-text-secondary);
+  border: 1px solid var(--xw-border-primary);
+  background: var(--xw-bg-primary);
+  transition: all 0.3s cubic-bezier(0.4, 0, 0.2, 1);
+  position: relative;
+  overflow: hidden;
+}
+
+.notification-btn::before {
+  content: '';
+  position: absolute;
+  top: 50%;
+  left: 50%;
+  width: 0;
+  height: 0;
+  background: var(--xw-primary-lightest);
+  transition: all 0.3s ease;
+  border-radius: 50%;
+  transform: translate(-50%, -50%);
+}
+
+.notification-btn:hover::before {
+  width: 40px;
+  height: 40px;
+}
+
+.notification-btn:hover {
+  color: var(--xw-primary);
+  border-color: var(--xw-primary);
+  background: var(--xw-bg-secondary);
+  transform: scale(1.05);
+  box-shadow: var(--xw-shadow-md);
+}
+
+.notification-btn:active {
+  transform: scale(0.95);
+}
+
+/* 有通知时的高亮状态 */
+.notification-btn.has-notification {
+  color: var(--xw-primary);
+  border-color: var(--xw-primary);
+  background: var(--xw-primary-lightest);
+  animation: notification-pulse 2s infinite;
+}
+
+@keyframes notification-pulse {
+  0%, 100% {
+    box-shadow: 0 0 0 0 rgba(99, 102, 241, 0.4);
+  }
+  50% {
+    box-shadow: 0 0 0 6px rgba(99, 102, 241, 0);
+  }
+}
+
+/* 深色模式下的通知按钮优化 */
+html.dark .notification-btn {
+  color: var(--xw-text-primary);
+  border-color: var(--xw-border-secondary);
+  background: var(--xw-bg-tertiary);
+}
+
+html.dark .notification-btn:hover {
+  color: var(--xw-primary-light);
+  border-color: var(--xw-primary-light);
+  background: var(--xw-bg-quaternary);
+  box-shadow: var(--xw-shadow-lg);
+}
+
+html.dark .notification-btn.has-notification {
+  color: var(--xw-primary-light);
+  border-color: var(--xw-primary-light);
+  background: rgba(99, 102, 241, 0.2);
 }
 
 /* 响应式设计 */

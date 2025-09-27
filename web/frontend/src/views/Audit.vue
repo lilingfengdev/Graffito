@@ -184,9 +184,13 @@
           v-model:current-page="currentPage"
           :page-size="pageSize"
           :total="total"
-          layout="total, prev, pager, next, jumper"
+          layout="prev, pager, next"
           @current-change="handlePageChange"
+          background
         />
+        <div class="pagination-info">
+          共 {{ total }} 条记录，当前第 {{ currentPage }} 页
+        </div>
       </div>
     </el-card>
 
@@ -502,8 +506,18 @@ onMounted(async () => {
 
 .pagination-container {
   display: flex;
-  justify-content: center;
-  margin-top: 20px;
+  flex-direction: column;
+  align-items: center;
+  gap: var(--xw-space-3);
+  margin: var(--xw-space-8) var(--xw-space-4) var(--xw-space-4);
+  padding-top: var(--xw-space-6);
+  border-top: 1px solid var(--xw-border-tertiary);
+}
+
+.pagination-info {
+  color: var(--xw-text-secondary);
+  font-size: var(--xw-text-sm);
+  text-align: center;
 }
 
 /* 响应式设计 */
@@ -586,25 +600,13 @@ onMounted(async () => {
   }
   
   /* 分页器移动端适配 */
-  :deep(.el-pagination) {
-    justify-content: center;
+  .pagination-container {
+    margin-top: var(--xw-space-6);
+    padding-top: var(--xw-space-4);
   }
   
-  :deep(.el-pagination .el-pagination__total),
-  :deep(.el-pagination .el-pagination__jump) {
-    display: none;
-  }
-  
-  :deep(.el-pagination .el-pager) {
-    display: flex;
-    gap: 4px;
-  }
-  
-  :deep(.el-pagination .el-pager .number) {
-    min-width: 28px;
-    height: 28px;
-    line-height: 26px;
-    font-size: 13px;
+  .pagination-info {
+    font-size: var(--xw-text-xs);
   }
 }
 
@@ -643,18 +645,13 @@ onMounted(async () => {
   }
   
   /* 分页器更紧凑 */
-  :deep(.el-pagination .el-pager .number) {
-    min-width: 24px;
-    height: 24px;
-    line-height: 22px;
-    font-size: 12px;
+  .pagination-container {
+    margin-top: var(--xw-space-4);
+    padding-top: var(--xw-space-3);
   }
   
-  :deep(.el-pagination .btn-prev),
-  :deep(.el-pagination .btn-next) {
-    width: 24px;
-    height: 24px;
-    font-size: 12px;
+  .pagination-info {
+    font-size: 10px;
   }
 }
 </style>

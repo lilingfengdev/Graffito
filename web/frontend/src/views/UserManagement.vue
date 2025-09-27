@@ -56,13 +56,14 @@
             </div>
 
             <!-- 黑名单表格 -->
-            <el-table 
-              :data="paginatedBlacklist" 
-              v-loading="blacklistState.loading"
-              class="blacklist-table"
-              stripe
-              :header-cell-style="headerCellStyle"
-            >
+            <div class="table-container">
+              <el-table 
+                :data="paginatedBlacklist" 
+                v-loading="blacklistState.loading"
+                class="blacklist-table"
+                stripe
+                :header-cell-style="headerCellStyle"
+              >
         <el-table-column prop="user_id" label="用户ID" width="150">
           <template #default="{ row }">
             <div class="user-cell">
@@ -148,10 +149,11 @@
               >
                 删除
               </el-button>
+                  </div>
+                </template>
+              </el-table-column>
+              </el-table>
             </div>
-          </template>
-        </el-table-column>
-            </el-table>
             
             <!-- 分页 -->
             <div class="pagination-container">
@@ -198,13 +200,14 @@
             </div>
 
             <!-- 管理员表格 -->
-            <el-table 
-              :data="paginatedAdmins" 
-              v-loading="adminState.loading"
-              class="admin-table"
-              stripe
-              :header-cell-style="headerCellStyle"
-            >
+            <div class="table-container">
+              <el-table 
+                :data="paginatedAdmins" 
+                v-loading="adminState.loading"
+                class="admin-table"
+                stripe
+                :header-cell-style="headerCellStyle"
+              >
               <el-table-column prop="user_id" label="用户ID" width="150">
                 <template #default="{ row }">
                   <div class="user-cell">
@@ -280,7 +283,8 @@
                   </div>
                 </template>
               </el-table-column>
-            </el-table>
+              </el-table>
+            </div>
             
             <!-- 分页 -->
             <div class="pagination-container">
@@ -1369,6 +1373,14 @@ onMounted(async () => {
   flex-wrap: wrap;
 }
 
+/* 表格容器样式 */
+.table-container {
+  overflow-x: auto;
+  margin: 0 var(--xw-space-4);
+  border-radius: var(--xw-radius-lg);
+  box-shadow: 0 2px 8px rgba(0, 0, 0, 0.06);
+}
+
 /* 表格样式 */
 .blacklist-table,
 .admin-table {
@@ -1376,8 +1388,9 @@ onMounted(async () => {
   border-radius: var(--xw-radius-lg);
   overflow: hidden;
   border: none;
-  margin: 0 var(--xw-space-4);
-  box-shadow: 0 2px 8px rgba(0, 0, 0, 0.06);
+  margin: 0;
+  box-shadow: none;
+  min-width: 1200px; /* 设置最小宽度确保表格完整显示 */
 }
 
 .blacklist-table :deep(.el-table__header),
@@ -1794,11 +1807,18 @@ html.dark :deep(.el-dialog__footer) {
     justify-content: center;
   }
   
+  /* 表格容器移动端适配 */
+  .table-container {
+    margin: 0 var(--xw-space-2);
+    border-radius: var(--xw-radius);
+  }
+
   /* 表格移动端适配 */
   .blacklist-table,
   .admin-table {
     font-size: var(--xw-text-sm);
     border-radius: var(--xw-radius);
+    min-width: 800px; /* 移动端减小最小宽度 */
   }
   
   .blacklist-table :deep(.el-table__cell),
@@ -1942,6 +1962,12 @@ html.dark :deep(.el-dialog__footer) {
     width: 100%;
   }
   
+  /* 表格容器超小屏幕适配 */
+  .table-container {
+    margin: 0 var(--xw-space-1);
+    border-radius: var(--xw-radius-sm);
+  }
+
   /* 表格内容更紧凑 */
   .blacklist-table :deep(.el-table__cell),
   .admin-table :deep(.el-table__cell) {
@@ -1952,6 +1978,8 @@ html.dark :deep(.el-dialog__footer) {
   .blacklist-table,
   .admin-table {
     font-size: var(--xw-text-xs);
+    margin: 0;
+    min-width: 600px; /* 超小屏幕进一步减小最小宽度 */
   }
   
   .action-buttons .el-button {
