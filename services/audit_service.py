@@ -125,12 +125,30 @@ class AuditService:
                 with open(num_file, 'w') as f:
                     f.write(str(current_num + 1))
                     
-                # 添加到暂存区
+                # 添加到暂存区（独立模式：记录所有配置了定时的平台）
+                from core.plugin import plugin_manager
+                from utils.common import get_platform_config
+                
+                scheduled_platforms = []
+                try:
+                    for pub in plugin_manager.publishers.values():
+                        try:
+                            platform_key = getattr(pub.platform, "value", "")
+                            cfg = get_platform_config(platform_key)
+                            times = (cfg or {}).get("send_schedule") or []
+                            if times:
+                                scheduled_platforms.append(platform_key)
+                        except Exception:
+                            continue
+                except Exception:
+                    pass
+                
                 stored = StoredPost(
                     submission_id=submission_id,
                     group_name=submission.group_name,
                     publish_id=current_num,
-                    priority=0
+                    priority=0,
+                    pending_platforms=scheduled_platforms  # 独立模式：记录待发布的平台
                 )
                 session.add(stored)
                 

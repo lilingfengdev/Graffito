@@ -11,6 +11,7 @@ CORS is enabled; static frontend can be served from ../frontend/dist if built.
 from datetime import datetime, timedelta
 from pathlib import Path
 from typing import Optional, List, Dict, Any
+import asyncio
 
 import orjson
 from slowapi import Limiter
@@ -19,7 +20,7 @@ from slowapi.middleware import SlowAPIMiddleware
 from fastapi import FastAPI, Depends, Header, HTTPException, Request, status
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.security import OAuth2PasswordRequestForm
-from fastapi.responses import JSONResponse
+from fastapi.responses import JSONResponse, StreamingResponse
 from fastapi.staticfiles import StaticFiles
 
 import jwt
@@ -34,6 +35,7 @@ import os
 import sys
 import socket
 import platform
+import re
 
 
 # Security helpers
@@ -151,6 +153,73 @@ def set_services(audit: AuditService) -> None:
     global audit_service, _owns_audit_service
     audit_service = audit
     _owns_audit_service = False
+
+
+# ============================================
+# SSE (Server-Sent Events) 推送管理器
+# ============================================
+class SSEConnectionManager:
+    """管理 SSE 客户端连接与事件推送"""
+    
+    def __init__(self):
+        # 存储活跃连接: {user_id: [queue1, queue2, ...]}
+        self._connections: Dict[str, List[asyncio.Queue]] = {}
+    
+    async def connect(self, user_id: str) -> asyncio.Queue:
+        """添加新的客户端连接"""
+        queue = asyncio.Queue(maxsize=100)
+        if user_id not in self._connections:
+            self._connections[user_id] = []
+        self._connections[user_id].append(queue)
+        return queue
+    
+    async def disconnect(self, user_id: str, queue: asyncio.Queue):
+        """移除客户端连接"""
+        if user_id in self._connections:
+            try:
+                self._connections[user_id].remove(queue)
+                if not self._connections[user_id]:
+                    del self._connections[user_id]
+            except ValueError:
+                pass
+    
+    async def send_to_user(self, user_id: str, event_type: str, data: Dict[str, Any]):
+        """向指定用户发送事件"""
+        if user_id not in self._connections:
+            return
+        
+        message = {
+            "type": event_type,
+            "data": data,
+            "timestamp": datetime.now().isoformat()
+        }
+        
+        dead_queues = []
+        for queue in self._connections[user_id]:
+            try:
+                queue.put_nowait(message)
+            except asyncio.QueueFull:
+                # 队列满了，移除这个连接
+                dead_queues.append(queue)
+            except Exception:
+                dead_queues.append(queue)
+        
+        # 清理死连接
+        for queue in dead_queues:
+            await self.disconnect(user_id, queue)
+    
+    async def broadcast(self, event_type: str, data: Dict[str, Any]):
+        """向所有连接的客户端广播事件"""
+        for user_id in list(self._connections.keys()):
+            await self.send_to_user(user_id, event_type, data)
+    
+    def get_active_connections_count(self) -> int:
+        """获取活跃连接数"""
+        return sum(len(queues) for queues in self._connections.values())
+
+
+# 全局 SSE 管理器实例
+sse_manager = SSEConnectionManager()
 
 
 # CORS
@@ -549,6 +618,12 @@ async def api_approve(submission_id: int, authorization: Optional[str] = Header(
     res = await audit_service.approve(submission_id, operator_id=str(payload.get("username")))
     if not res.get("success"):
         raise HTTPException(status_code=400, detail=res.get("message"))
+    
+    # 发送 SSE 通知
+    await notify_submission_update(submission_id, "submission_approved", {
+        "operator": str(payload.get("username"))
+    })
+    
     return res
 
 
@@ -558,6 +633,13 @@ async def api_reject(submission_id: int, body: AuditActionIn, authorization: Opt
     res = await audit_service.reject_with_message(submission_id, operator_id=str(payload.get("username")), extra=body.comment)
     if not res.get("success"):
         raise HTTPException(status_code=400, detail=res.get("message"))
+    
+    # 发送 SSE 通知
+    await notify_submission_update(submission_id, "submission_rejected", {
+        "operator": str(payload.get("username")),
+        "reason": body.comment
+    })
+    
     return res
 
 
@@ -604,6 +686,12 @@ async def api_approve_immediate(submission_id: int, authorization: Optional[str]
     res = await audit_service.approve_immediate(submission_id, operator_id=str(payload.get("username")))
     if not res.get("success"):
         raise HTTPException(status_code=400, detail=res.get("message"))
+    
+    # 发送 SSE 通知
+    await notify_submission_update(submission_id, "submission_published", {
+        "operator": str(payload.get("username"))
+    })
+    
     return res
 
 
@@ -1236,6 +1324,22 @@ class SystemStatusOut(BaseModel):
     timestamp: str
 
 
+# 日志管理 API（仅 superadmin）
+class LogEntry(BaseModel):
+    timestamp: str
+    level: str
+    location: str  # name:function:line
+    message: str
+
+
+class LogsOut(BaseModel):
+    logs: List[LogEntry]
+    total: int
+    page: int
+    page_size: int
+    has_more: bool
+
+
 @app.get("/management/system/status", response_model=SystemStatusOut)
 async def get_system_status(authorization: Optional[str] = Header(default=None)):
     payload = get_current_user_from_headers(authorization)
@@ -1377,5 +1481,225 @@ async def get_system_status(authorization: Optional[str] = Header(default=None))
         timestamp=datetime.now().isoformat(),
     )
 
+
+@app.get("/management/logs", response_model=LogsOut)
+async def get_logs(
+    date: Optional[str] = None,  # 日期过滤，格式: YYYY-MM-DD
+    level: Optional[str] = None,  # 日志级别过滤: DEBUG|INFO|WARNING|ERROR|CRITICAL
+    page: int = 1,
+    page_size: int = 100,
+    search: Optional[str] = None,  # 关键词搜索
+    order: Optional[str] = "desc",  # 排序方式: asc|desc
+    authorization: Optional[str] = Header(default=None)
+):
+    """获取系统日志（仅超级管理员）"""
+    payload = get_current_user_from_headers(authorization)
+    if not payload.get("is_superadmin"):
+        raise HTTPException(status_code=403, detail="需要超级管理员权限")
+    
+    import re
+    from pathlib import Path
+    
+    # 确定要读取的日志文件
+    logs_dir = Path("data/logs")
+    if not logs_dir.exists():
+        return LogsOut(logs=[], total=0, page=page, page_size=page_size, has_more=False)
+    
+    # 如果指定了日期，只读取该日期的日志
+    if date:
+        try:
+            # 验证日期格式
+            datetime.strptime(date, "%Y-%m-%d")
+            log_files = [logs_dir / f"xwall_{date}.log"]
+            log_files = [f for f in log_files if f.exists()]
+        except ValueError:
+            raise HTTPException(status_code=400, detail="日期格式错误，应为 YYYY-MM-DD")
+    else:
+        # 否则读取所有日志文件，按日期倒序
+        log_files = sorted(logs_dir.glob("xwall_*.log"), reverse=True)
+    
+    if not log_files:
+        return LogsOut(logs=[], total=0, page=page, page_size=page_size, has_more=False)
+    
+    # 日志格式: {time:YYYY-MM-DD HH:mm:ss.SSS} | {level: <8} | {name}:{function}:{line} - {message}
+    log_pattern = re.compile(
+        r'^(?P<timestamp>\d{4}-\d{2}-\d{2}\s+\d{2}:\d{2}:\d{2}\.\d{3})\s*\|\s*'
+        r'(?P<level>\w+)\s*\|\s*'
+        r'(?P<location>.+?)\s*-\s*'
+        r'(?P<message>.*)$'
+    )
+    
+    all_logs: List[LogEntry] = []
+    
+    # 读取日志文件
+    for log_file in log_files:
+        try:
+            with open(log_file, 'r', encoding='utf-8') as f:
+                for line in f:
+                    line = line.strip()
+                    if not line:
+                        continue
+                    
+                    match = log_pattern.match(line)
+                    if match:
+                        log_level = match.group('level').strip()
+                        log_message = match.group('message').strip()
+                        
+                        # 日志级别过滤
+                        if level and log_level.upper() != level.upper():
+                            continue
+                        
+                        # 关键词搜索
+                        if search and search.lower() not in log_message.lower():
+                            continue
+                        
+                        all_logs.append(LogEntry(
+                            timestamp=match.group('timestamp'),
+                            level=log_level,
+                            location=match.group('location').strip(),
+                            message=log_message
+                        ))
+        except Exception as e:
+            logger.warning(f"读取日志文件 {log_file} 失败: {e}")
+            continue
+    
+    # 按时间戳排序（支持正序和倒序）
+    reverse_order = order.lower() != "asc" if order else True
+    all_logs.sort(key=lambda x: x.timestamp, reverse=reverse_order)
+    
+    # 分页
+    total = len(all_logs)
+    start_idx = (page - 1) * page_size
+    end_idx = start_idx + page_size
+    
+    paginated_logs = all_logs[start_idx:end_idx]
+    has_more = end_idx < total
+    
+    return LogsOut(
+        logs=paginated_logs,
+        total=total,
+        page=page,
+        page_size=page_size,
+        has_more=has_more
+    )
+
+
+@app.get("/management/logs/files")
+async def list_log_files(authorization: Optional[str] = Header(default=None)):
+    """获取所有日志文件列表（仅超级管理员）"""
+    payload = get_current_user_from_headers(authorization)
+    if not payload.get("is_superadmin"):
+        raise HTTPException(status_code=403, detail="需要超级管理员权限")
+    
+    from pathlib import Path
+    
+    logs_dir = Path("data/logs")
+    if not logs_dir.exists():
+        return {"files": []}
+    
+    log_files = sorted(logs_dir.glob("xwall_*.log"), reverse=True)
+    
+    file_info = []
+    for log_file in log_files:
+        try:
+            stat = log_file.stat()
+            # 从文件名提取日期
+            date_match = re.match(r'xwall_(\d{4}-\d{2}-\d{2})\.log', log_file.name)
+            date_str = date_match.group(1) if date_match else None
+            
+            file_info.append({
+                "filename": log_file.name,
+                "date": date_str,
+                "size": stat.st_size,
+                "modified": datetime.fromtimestamp(stat.st_mtime).isoformat()
+            })
+        except Exception as e:
+            logger.warning(f"获取日志文件 {log_file} 信息失败: {e}")
+            continue
+    
+    return {"files": file_info}
+
+
+# ============================================
+# SSE 推送端点
+# ============================================
+async def event_stream_generator(queue: asyncio.Queue):
+    """SSE 事件流生成器"""
+    try:
+        # 发送初始连接成功消息
+        yield f"data: {orjson.dumps({'type': 'connected', 'data': {}, 'timestamp': datetime.now().isoformat()}).decode()}\n\n"
+        
+        # 持续发送事件
+        while True:
+            try:
+                # 等待新消息，超时发送心跳
+                message = await asyncio.wait_for(queue.get(), timeout=30.0)
+                yield f"data: {orjson.dumps(message).decode()}\n\n"
+            except asyncio.TimeoutError:
+                # 发送心跳保持连接
+                yield f": heartbeat\n\n"
+    except asyncio.CancelledError:
+        pass
+    except Exception as e:
+        print(f"SSE stream error: {e}")
+
+
+@app.get("/events/stream")
+@limiter.exempt
+async def sse_stream(
+    request: Request,
+    authorization: Optional[str] = Header(default=None),
+    token: Optional[str] = None
+):
+    """SSE 事件流端点"""
+    # EventSource 不支持自定义 headers，所以支持从 URL 参数获取 token
+    auth_header = authorization
+    if not auth_header and token:
+        auth_header = f"Bearer {token}"
+    
+    payload = get_current_user_from_headers(auth_header)
+    user_id = str(payload.get("sub"))
+    
+    # 创建连接队列
+    queue = await sse_manager.connect(user_id)
+    
+    async def cleanup():
+        """清理连接"""
+        await sse_manager.disconnect(user_id, queue)
+    
+    # 返回 SSE 流
+    return StreamingResponse(
+        event_stream_generator(queue),
+        media_type="text/event-stream",
+        headers={
+            "Cache-Control": "no-cache",
+            "Connection": "keep-alive",
+            "X-Accel-Buffering": "no",  # 禁用 nginx 缓冲
+        }
+    )
+
+
+@app.get("/events/connections")
+async def get_sse_connections(authorization: Optional[str] = Header(default=None)):
+    """获取 SSE 连接统计（仅管理员）"""
+    payload = get_current_user_from_headers(authorization)
+    if not payload.get("is_admin"):
+        raise HTTPException(status_code=403, detail="需要管理员权限")
+    
+    return {
+        "active_connections": sse_manager.get_active_connections_count()
+    }
+
+
+# ============================================
+# 辅助函数：在审核操作时发送 SSE 通知
+# ============================================
+async def notify_submission_update(submission_id: int, event_type: str, extra_data: Dict[str, Any] = None):
+    """发送投稿更新通知"""
+    data = {
+        "submission_id": submission_id,
+        **(extra_data or {})
+    }
+    await sse_manager.broadcast(event_type, data)
 
 

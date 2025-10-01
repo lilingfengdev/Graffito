@@ -38,6 +38,7 @@ class BasePublisher(PublisherPlugin):
             # 主账号
             self.accounts[group.main_account.qq_id] = {
                 'qq_id': group.main_account.qq_id,
+                'http_host': getattr(group.main_account, 'http_host', '127.0.0.1'),
                 'http_port': group.main_account.http_port,
                 'http_token': getattr(group.main_account, 'http_token', None),
                 'group_name': group_name,
@@ -48,6 +49,7 @@ class BasePublisher(PublisherPlugin):
             for minor in group.minor_accounts:
                 self.accounts[minor.qq_id] = {
                     'qq_id': minor.qq_id,
+                    'http_host': getattr(minor, 'http_host', '127.0.0.1'),
                     'http_port': minor.http_port,
                     'http_token': getattr(minor, 'http_token', None),
                     'group_name': group_name,

@@ -11,7 +11,7 @@
     <el-aside 
       :width="isMobile ? '280px' : (collapsed ? '64px' : '250px')" 
       class="sidebar"
-      :class="{ 'mobile': isMobile, 'mobile-hidden': isMobile && collapsed }"
+      :class="{ 'mobile': isMobile, 'mobile-hidden': isMobile && collapsed, 'collapsed': collapsed }"
     >
       <div class="logo-container" :class="{ 'collapsed': collapsed }">
         <!-- Logo区域 - 统一容器，避免跳动 -->
@@ -276,6 +276,13 @@ const isMobile = ref(false)
 const user = ref(null)
 const pendingCount = ref(0)
 
+// 触摸手势相关
+const touchStartX = ref(0)
+const touchStartY = ref(0)
+const touchEndX = ref(0)
+const touchEndY = ref(0)
+const isSwiping = ref(false)
+
 // 邀请功能相关
 const showInviteDialog = ref(false)
 const inviteMinutes = ref(60)
@@ -310,6 +317,10 @@ const menuRoutes = computed(() => {
   
   // 根据用户权限过滤路由
   return routes.filter(route => {
+    // 如果路由需要超级管理员权限，但用户不是超级管理员，则不显示
+    if (route.meta?.requiresSuperAdmin && !user.value?.is_superadmin) {
+      return false
+    }
     // 如果路由需要管理员权限，但用户不是管理员，则不显示
     if (route.meta?.requiresAdmin && !user.value?.is_admin) {
       return false
@@ -481,6 +492,50 @@ const handleKeydown = (event) => {
   }
 }
 
+// 触摸手势处理
+const handleTouchStart = (e) => {
+  if (!isMobile.value) return
+  
+  touchStartX.value = e.touches[0].clientX
+  touchStartY.value = e.touches[0].clientY
+  isSwiping.value = true
+}
+
+const handleTouchMove = (e) => {
+  if (!isMobile.value || !isSwiping.value) return
+  
+  touchEndX.value = e.touches[0].clientX
+  touchEndY.value = e.touches[0].clientY
+}
+
+const handleTouchEnd = () => {
+  if (!isMobile.value || !isSwiping.value) return
+  
+  isSwiping.value = false
+  
+  const deltaX = touchEndX.value - touchStartX.value
+  const deltaY = touchEndY.value - touchStartY.value
+  const minSwipeDistance = 50
+  
+  // 确保水平滑动距离大于垂直滑动距离（避免与页面滚动冲突）
+  if (Math.abs(deltaX) > Math.abs(deltaY) && Math.abs(deltaX) > minSwipeDistance) {
+    // 从左边缘向右滑动，打开侧边栏
+    if (deltaX > 0 && touchStartX.value < 20 && collapsed.value) {
+      collapsed.value = false
+    }
+    // 向左滑动，关闭侧边栏
+    else if (deltaX < 0 && !collapsed.value) {
+      collapsed.value = true
+    }
+  }
+  
+  // 重置触摸坐标
+  touchStartX.value = 0
+  touchStartY.value = 0
+  touchEndX.value = 0
+  touchEndY.value = 0
+}
+
 onMounted(async () => {
   // 初始化移动端检测
   checkMobile()
@@ -488,6 +543,13 @@ onMounted(async () => {
   
   // 添加键盘快捷键
   window.addEventListener('keydown', handleKeydown)
+  
+  // 添加移动端触摸手势支持
+  if (isMobile.value) {
+    document.addEventListener('touchstart', handleTouchStart, { passive: true })
+    document.addEventListener('touchmove', handleTouchMove, { passive: true })
+    document.addEventListener('touchend', handleTouchEnd, { passive: true })
+  }
   
   await fetchUserInfo()
   await fetchPendingCount()
@@ -500,6 +562,11 @@ onMounted(async () => {
 onUnmounted(() => {
   window.removeEventListener('resize', handleResize)
   window.removeEventListener('keydown', handleKeydown)
+  
+  // 移除触摸事件监听
+  document.removeEventListener('touchstart', handleTouchStart)
+  document.removeEventListener('touchmove', handleTouchMove)
+  document.removeEventListener('touchend', handleTouchEnd)
 })
 </script>
 
@@ -512,35 +579,116 @@ onUnmounted(() => {
 .sidebar {
   background: var(--sidebar-bg);
   border-right: 1px solid var(--el-border-color);
-  transition: all 0.3s cubic-bezier(0.4, 0, 0.2, 1);
+  transition: width 0.3s cubic-bezier(0.4, 0, 0.2, 1),
+              background 0.3s cubic-bezier(0.4, 0, 0.2, 1),
+              border-color 0.3s cubic-bezier(0.4, 0, 0.2, 1),
+              box-shadow 0.3s cubic-bezier(0.4, 0, 0.2, 1);
   display: flex;
   flex-direction: column;
-  backdrop-filter: blur(10px);
+  backdrop-filter: blur(20px);
+  -webkit-backdrop-filter: blur(20px);
   position: relative;
   z-index: 100;
+  overflow-x: hidden;
+  overflow-y: auto;
+  will-change: width;
+}
+
+/* 浅色模式侧边栏渐变 */
+html.light .sidebar {
+  background: linear-gradient(180deg, 
+    rgba(255, 255, 255, 0.95) 0%, 
+    rgba(249, 250, 251, 0.92) 50%,
+    rgba(243, 244, 246, 0.9) 100%
+  );
+  box-shadow: 2px 0 12px rgba(0, 0, 0, 0.04);
+}
+
+html.light .sidebar::before {
+  content: '';
+  position: absolute;
+  top: 0;
+  left: 0;
+  right: 0;
+  bottom: 0;
+  background: linear-gradient(135deg, 
+    rgba(99, 102, 241, 0.02) 0%, 
+    transparent 50%,
+    rgba(139, 92, 246, 0.02) 100%
+  );
+  pointer-events: none;
+  z-index: -1;
+}
+
+/* 深色模式侧边栏渐变 */
+html.dark .sidebar {
+  background: linear-gradient(180deg, 
+    rgba(10, 15, 30, 0.95) 0%, 
+    rgba(20, 27, 45, 0.92) 30%,
+    rgba(30, 41, 67, 0.9) 70%,
+    rgba(45, 58, 90, 0.88) 100%
+  );
+  border-right-color: rgba(99, 102, 241, 0.15);
+  box-shadow: 2px 0 20px rgba(0, 0, 0, 0.5), inset -1px 0 0 rgba(99, 102, 241, 0.1);
+}
+
+html.dark .sidebar::before {
+  content: '';
+  position: absolute;
+  top: 0;
+  left: 0;
+  right: 0;
+  bottom: 0;
+  background: radial-gradient(ellipse at top left, 
+    rgba(99, 102, 241, 0.08) 0%, 
+    transparent 50%
+  ),
+  radial-gradient(ellipse at bottom right, 
+    rgba(139, 92, 246, 0.06) 0%, 
+    transparent 50%
+  );
+  pointer-events: none;
+  z-index: -1;
 }
 
 
-/* Logo容器 - 优化布局和动画 */
+/* Logo容器 - 优化布局和动画，防止抖动 */
 .logo-container {
-  height: 64px;
+  min-height: 64px;
+  max-height: 64px;
   display: flex;
   align-items: center;
   justify-content: space-between;
-  padding: 0 12px;
+  padding: 0 16px;
   border-bottom: 1px solid var(--el-border-color-light);
   position: relative;
-  transition: all 0.3s ease;
+  transition: min-height 0.3s cubic-bezier(0.4, 0, 0.2, 1),
+              max-height 0.3s cubic-bezier(0.4, 0, 0.2, 1),
+              padding 0.3s cubic-bezier(0.4, 0, 0.2, 1),
+              background 0.3s ease;
+  background: linear-gradient(180deg, 
+    rgba(255, 255, 255, 0.05) 0%, 
+    transparent 100%
+  );
+  overflow: hidden;
+}
+
+html.dark .logo-container {
+  background: linear-gradient(180deg, 
+    rgba(99, 102, 241, 0.05) 0%, 
+    transparent 100%
+  );
+  border-bottom-color: rgba(99, 102, 241, 0.15);
 }
 
 .logo-container.collapsed {
   flex-direction: column;
   justify-content: center;
   align-items: center;
-  gap: 8px;
-  padding: 12px;
-  height: auto;
-  min-height: 80px;
+  gap: 10px;
+  padding: 16px 8px;
+  min-height: 100px;
+  max-height: 100px;
 }
 
 /* Logo区域 - 统一布局避免跳动 */
@@ -550,23 +698,28 @@ onUnmounted(() => {
   gap: 12px;
   flex: 1;
   min-width: 0;
-  transition: all 0.3s cubic-bezier(0.4, 0, 0.2, 1);
+  transition: gap 0.3s cubic-bezier(0.4, 0, 0.2, 1),
+              flex 0.3s cubic-bezier(0.4, 0, 0.2, 1);
+  white-space: nowrap;
 }
 
 .logo-container.collapsed .logo-section {
   flex: none;
   justify-content: center;
   gap: 0;
-  width: 100%;
+  width: 48px;
 }
 
 .logo-icon {
   flex-shrink: 0;
-  transition: transform 0.3s ease;
+  transition: transform 0.3s cubic-bezier(0.4, 0, 0.2, 1);
+  display: flex;
+  align-items: center;
+  justify-content: center;
 }
 
 .logo-container.collapsed .logo-icon {
-  transform: scale(0.9);
+  transform: scale(1);
 }
 
 .logo-text {
@@ -575,6 +728,7 @@ onUnmounted(() => {
   color: var(--xw-primary);
   white-space: nowrap;
   overflow: hidden;
+  flex-shrink: 0;
 }
 
 /* 折叠按钮 - 优化动画和交互 */
@@ -584,12 +738,15 @@ onUnmounted(() => {
   justify-content: center;
   width: 32px;
   height: 32px;
+  min-width: 32px;
   border: none;
   border-radius: var(--xw-radius);
   background: transparent;
   color: var(--xw-text-tertiary);
   cursor: pointer;
-  transition: all 0.3s cubic-bezier(0.4, 0, 0.2, 1);
+  transition: transform 0.3s cubic-bezier(0.4, 0, 0.2, 1),
+              background 0.3s ease,
+              color 0.3s ease;
   flex-shrink: 0;
 }
 
@@ -604,10 +761,10 @@ onUnmounted(() => {
 }
 
 .collapse-btn.collapsed {
-  width: 30px;
-  height: 30px;
+  width: 32px;
+  height: 32px;
   align-self: center;
-  margin: 0 auto;
+  margin: 0;
 }
 
 .collapse-icon {
@@ -640,6 +797,8 @@ onUnmounted(() => {
   flex: 1;
   border: none;
   padding: 16px 0;
+  overflow-x: hidden;
+  overflow-y: auto;
 }
 
 /* 导航菜单 - 优化折叠状态 */
@@ -653,34 +812,54 @@ onUnmounted(() => {
   display: flex;
   align-items: center;
   justify-content: center;
-  margin: 4px 8px;
-  border-radius: var(--xw-radius-lg);
+  margin: 6px auto;
+  border-radius: var(--xw-radius-xl);
   transition: all 0.3s cubic-bezier(0.4, 0, 0.2, 1);
   width: 48px;
   height: 48px;
-  margin-left: auto;
-  margin-right: auto;
+  position: relative;
+  overflow: visible;
 }
 
 :deep(.el-menu--collapse .el-menu-item .el-icon),
 :deep(.el-menu--collapse .el-sub-menu__title .el-icon) {
   margin: 0 !important;
-  font-size: 18px;
-  transition: transform 0.3s ease;
+  font-size: 20px;
+  transition: transform 0.3s cubic-bezier(0.4, 0, 0.2, 1);
+}
+
+:deep(.el-menu--collapse .el-menu-item:hover) {
+  background: var(--xw-gradient-highlight);
+  transform: scale(1.05);
 }
 
 :deep(.el-menu--collapse .el-menu-item:hover .el-icon) {
-  transform: scale(1.1);
+  transform: scale(1.15) rotate(-5deg);
 }
 
 :deep(.el-menu--collapse .el-menu-item.is-active) {
-  background: var(--xw-primary-lightest);
-  box-shadow: var(--xw-shadow-sm);
+  background: linear-gradient(135deg, var(--xw-primary-lightest), var(--xw-primary-200));
+  box-shadow: var(--xw-shadow-sm), 0 0 0 2px rgba(99, 102, 241, 0.2);
+  transform: scale(1.02);
+}
+
+html.dark :deep(.el-menu--collapse .el-menu-item.is-active) {
+  background: linear-gradient(135deg, rgba(99, 102, 241, 0.2), rgba(129, 140, 248, 0.15));
+  box-shadow: var(--xw-shadow-md), 0 0 15px rgba(99, 102, 241, 0.3), inset 0 0 10px rgba(99, 102, 241, 0.1);
+}
+
+/* 折叠状态下的 tooltip */
+:deep(.el-menu--collapse .el-tooltip__trigger) {
+  width: 100%;
+  height: 100%;
+  display: flex;
+  align-items: center;
+  justify-content: center;
 }
 
 .nav-item {
-  margin: 4px 12px;
-  border-radius: var(--xw-radius-lg);
+  margin: 6px 12px;
+  border-radius: var(--xw-radius-xl);
   transition: all 0.3s cubic-bezier(0.4, 0, 0.2, 1);
   position: relative;
   overflow: hidden;
@@ -690,41 +869,66 @@ onUnmounted(() => {
   content: '';
   position: absolute;
   left: 0;
-  top: 0;
-  bottom: 0;
-  width: 0;
-  background: var(--xw-primary);
-  transition: width 0.3s ease;
+  top: 50%;
+  transform: translateY(-50%);
+  height: 0;
+  width: 4px;
+  background: linear-gradient(180deg, var(--xw-primary), var(--xw-primary-light));
+  transition: height 0.3s cubic-bezier(0.4, 0, 0.2, 1);
+  border-radius: 0 4px 4px 0;
 }
 
 .nav-item:hover::before {
-  width: 3px;
+  height: 70%;
 }
 
 .nav-item:hover {
-  background: rgba(99, 102, 241, 0.08);
-  transform: translateX(2px);
+  background: var(--xw-gradient-highlight);
+  transform: translateX(4px);
+}
+
+html.dark .nav-item:hover {
+  background: rgba(99, 102, 241, 0.12);
+  box-shadow: inset 0 0 10px rgba(99, 102, 241, 0.05);
 }
 
 .nav-item.is-active {
-  background: var(--xw-primary-lightest);
+  background: linear-gradient(135deg, var(--xw-primary-lightest), var(--xw-primary-200));
   color: var(--xw-primary);
   box-shadow: var(--xw-shadow-sm);
+  font-weight: 600;
 }
 
 .nav-item.is-active::before {
-  width: 3px;
+  height: 80%;
+}
+
+html.dark .nav-item.is-active {
+  background: linear-gradient(135deg, rgba(99, 102, 241, 0.2), rgba(129, 140, 248, 0.15));
+  box-shadow: var(--xw-shadow-md), 0 0 15px rgba(99, 102, 241, 0.2), inset 0 0 10px rgba(99, 102, 241, 0.1);
 }
 
 /* 用户信息区域 - 优化折叠状态 */
 .user-section {
   padding: 16px;
   border-top: 1px solid var(--el-border-color-light);
-  transition: all 0.3s ease;
+  transition: all 0.3s cubic-bezier(0.4, 0, 0.2, 1);
+  background: linear-gradient(180deg, 
+    transparent 0%, 
+    rgba(99, 102, 241, 0.02) 100%
+  );
+}
+
+html.dark .user-section {
+  background: linear-gradient(180deg, 
+    transparent 0%, 
+    rgba(99, 102, 241, 0.05) 100%
+  );
+  border-top-color: rgba(99, 102, 241, 0.15);
 }
 
 .user-section.collapsed {
-  padding: 16px 8px;
+  padding: 20px 8px;
   display: flex;
   justify-content: center;
   align-items: center;
@@ -733,19 +937,21 @@ onUnmounted(() => {
 .user-info {
   display: flex;
   align-items: center;
-  gap: 12px;
+  gap: 8px;
   cursor: pointer;
-  padding: 8px;
-  border-radius: var(--xw-radius-lg);
+  padding: 8px 8px;
+  border-radius: var(--xw-radius-xl);
   transition: all 0.3s cubic-bezier(0.4, 0, 0.2, 1);
   min-height: 48px;
   position: relative;
+  background: var(--xw-gradient-highlight);
+  overflow: hidden;
 }
 
 .user-info.collapsed {
   gap: 0;
-  padding: 8px;
-  min-height: 40px;
+  padding: 10px;
+  min-height: 48px;
   justify-content: center;
   width: 48px;
   height: 48px;
@@ -753,20 +959,27 @@ onUnmounted(() => {
 }
 
 .user-info:hover {
-  background: rgba(99, 102, 241, 0.08);
-  transform: translateY(-1px);
-  box-shadow: var(--xw-shadow-sm);
+  background: linear-gradient(135deg, rgba(99, 102, 241, 0.1), rgba(129, 140, 248, 0.08));
+  transform: translateY(-2px) scale(1.02);
+  box-shadow: var(--xw-shadow-md);
+}
+
+html.dark .user-info:hover {
+  background: linear-gradient(135deg, rgba(99, 102, 241, 0.2), rgba(129, 140, 248, 0.15));
+  box-shadow: var(--xw-shadow-md), 0 0 15px rgba(99, 102, 241, 0.3);
 }
 
 .username {
   font-size: 14px;
+  line-height: 1.5;
   color: var(--xw-text-primary);
   font-weight: 500;
   white-space: nowrap;
   overflow: hidden;
   text-overflow: ellipsis;
   min-width: 0;
-  flex: 1;
+  max-width: 100%;
+  flex: 1 1 auto;
 }
 
 /* 用户名淡入淡出动画 */
@@ -822,6 +1035,14 @@ onUnmounted(() => {
 }
 
 /* 邀请对话框样式 */
+:deep(.el-dialog__body) {
+  padding-top: 24px !important;
+}
+
+:deep(.el-form .el-form-item:first-child) {
+  margin-top: 0;
+}
+
 .time-setting {
   width: 100%;
 }
@@ -915,7 +1136,7 @@ onUnmounted(() => {
   flex: 1;
 }
 
-/* 移动端适配 - 优化动画效果 */
+/* 移动端适配 - 优化动画效果和触摸体验 */
 .sidebar.mobile {
   position: fixed;
   top: 0;
@@ -924,8 +1145,10 @@ onUnmounted(() => {
   height: 100vh;
   box-shadow: var(--xw-shadow-xl);
   transform: translateX(0);
-  transition: all 0.3s cubic-bezier(0.4, 0, 0.2, 1);
+  transition: transform 0.3s cubic-bezier(0.4, 0, 0.2, 1);
   border-right: none;
+  touch-action: pan-y; /* 允许垂直滚动 */
+  -webkit-overflow-scrolling: touch; /* iOS 平滑滚动 */
 }
 
 .sidebar.mobile::before {
@@ -934,6 +1157,7 @@ onUnmounted(() => {
 
 .sidebar.mobile-hidden {
   transform: translateX(-100%);
+  box-shadow: none;
 }
 
 .sidebar.mobile:not(.mobile-hidden) {
@@ -951,15 +1175,21 @@ onUnmounted(() => {
   }
 }
 
-/* 移动端菜单按钮优化 */
+/* 移动端菜单按钮优化 - 增强触摸反馈 */
 .mobile-menu-btn {
   color: var(--xw-text-primary);
-  font-size: 20px;
-  padding: 8px;
-  border-radius: var(--xw-radius);
-  transition: all 0.3s ease;
+  font-size: 22px;
+  padding: 10px;
+  border-radius: var(--xw-radius-lg);
+  transition: all 0.2s cubic-bezier(0.4, 0, 0.2, 1);
   position: relative;
   overflow: hidden;
+  min-width: 44px; /* iOS 推荐的最小触摸目标 */
+  min-height: 44px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  -webkit-tap-highlight-color: transparent; /* 移除 iOS 点击高亮 */
 }
 
 .mobile-menu-btn::before {
@@ -970,23 +1200,22 @@ onUnmounted(() => {
   width: 0;
   height: 0;
   background: var(--xw-primary-lightest);
-  transition: all 0.3s ease;
+  transition: all 0.2s ease;
   border-radius: 50%;
   transform: translate(-50%, -50%);
+  z-index: 0;
 }
 
-.mobile-menu-btn:hover::before {
-  width: 40px;
-  height: 40px;
-}
-
-.mobile-menu-btn:hover {
-  color: var(--xw-primary);
-  transform: scale(1.05);
+.mobile-menu-btn:active::before {
+  width: 100%;
+  height: 100%;
+  transition: all 0.1s ease;
 }
 
 .mobile-menu-btn:active {
-  transform: scale(0.95);
+  color: var(--xw-primary);
+  transform: scale(0.92);
+  background: var(--xw-bg-secondary);
 }
 
 /* 通知按钮样式优化 */
@@ -1066,10 +1295,47 @@ html.dark .notification-btn.has-notification {
   background: rgba(99, 102, 241, 0.2);
 }
 
-/* 响应式设计 */
+/* 移动端遮罩层 - 优化触摸交互 */
+.mobile-overlay {
+  position: fixed;
+  top: 0;
+  left: 0;
+  right: 0;
+  bottom: 0;
+  background: rgba(0, 0, 0, 0.5);
+  backdrop-filter: blur(4px);
+  -webkit-backdrop-filter: blur(4px);
+  z-index: 999;
+  animation: fadeIn 0.3s cubic-bezier(0.4, 0, 0.2, 1);
+  touch-action: none; /* 防止遮罩层下的内容滚动 */
+  -webkit-tap-highlight-color: transparent;
+}
+
+@keyframes fadeIn {
+  from {
+    opacity: 0;
+  }
+  to {
+    opacity: 1;
+  }
+}
+
+/* 通用触摸优化 */
+* {
+  -webkit-tap-highlight-color: transparent;
+}
+
+button, a, .clickable {
+  -webkit-touch-callout: none;
+  -webkit-user-select: none;
+  user-select: none;
+}
+
+/* 响应式设计 - 平板和移动设备 */
 @media (max-width: 768px) {
   .layout-container {
     position: relative;
+    overflow-x: hidden; /* 防止横向滚动 */
   }
   
   .main-container {
@@ -1079,6 +1345,11 @@ html.dark .notification-btn.has-notification {
   
   .header {
     padding: 0 16px;
+    height: 56px; /* 移动端减小高度 */
+  }
+  
+  .header-actions {
+    gap: 12px; /* 减小按钮间距 */
   }
   
   .breadcrumb {
@@ -1087,6 +1358,7 @@ html.dark .notification-btn.has-notification {
   
   .content {
     padding: 16px;
+    min-height: calc(100vh - 56px); /* 调整最小高度 */
   }
   
   .user-section {
@@ -1094,23 +1366,59 @@ html.dark .notification-btn.has-notification {
   }
   
   .user-info {
-    padding: 12px 8px;
+    padding: 10px 8px;
+    min-height: 44px; /* iOS 推荐的最小触摸目标 */
   }
   
   .username {
     font-size: 13px;
+    line-height: 1.5;
+    max-width: calc(100% - 40px); /* 预留头像和间隔空间 */
+  }
+  
+  /* 导航菜单项移动端优化 */
+  .nav-item {
+    margin: 8px 12px;
+    min-height: 48px; /* 增大触摸目标 */
+    font-size: 15px;
+  }
+  
+  :deep(.el-menu-item) {
+    min-height: 48px !important;
+    line-height: 48px !important;
   }
   
   /* 邀请对话框移动端适配 */
   :deep(.el-dialog) {
     width: 90% !important;
     margin: 5vh auto;
+    border-radius: var(--xw-radius-xl) !important;
+  }
+  
+  :deep(.el-dialog__header) {
+    padding: 20px 16px 16px 16px;
+  }
+  
+  :deep(.el-dialog__body) {
+    padding: 20px 16px !important;
+  }
+  
+  :deep(.el-dialog__footer) {
+    padding: 12px 16px;
   }
   
   .quick-time-buttons {
     display: grid;
     grid-template-columns: repeat(2, 1fr);
-    gap: 8px;
+    gap: 10px;
+  }
+  
+  .quick-time-buttons .el-button {
+    padding: 12px 16px;
+    min-height: 44px; /* 增大触摸目标 */
+    font-size: 15px;
+    font-weight: 500;
+    border-radius: var(--xw-radius-lg) !important;
   }
   
   .time-setting .el-row {
@@ -1119,34 +1427,224 @@ html.dark .notification-btn.has-notification {
   
   .time-label {
     font-size: 11px;
+    margin-top: 6px;
+  }
+  
+  /* 表单元素移动端优化 */
+  :deep(.el-input-number) {
+    width: 100% !important;
+  }
+  
+  :deep(.el-input__wrapper) {
+    min-height: 44px; /* iOS 推荐的最小触摸目标 */
+    font-size: 16px; /* 防止 iOS 自动缩放 */
+  }
+  
+  :deep(.el-input__inner) {
+    font-size: 16px; /* 防止 iOS 自动缩放 */
+  }
+  
+  /* 按钮移动端优化 - 增强触摸体验 */
+  :deep(.el-button) {
+    min-height: 44px;
+    padding: 12px 20px;
+    font-size: 15px;
+    border-radius: var(--xw-radius-lg) !important;
+    font-weight: 500;
+    letter-spacing: 0.3px;
+  }
+  
+  :deep(.el-button--small) {
+    min-height: 36px;
+    padding: 8px 14px;
+    font-size: 14px;
+  }
+  
+  :deep(.el-button--large) {
+    min-height: 48px;
+    padding: 14px 24px;
+    font-size: 16px;
+  }
+  
+  /* 对话框底部按钮优化 - 堆叠布局 */
+  :deep(.el-dialog__footer) {
+    display: flex;
+    flex-direction: column-reverse;
+    gap: 12px;
+    padding: 16px !important;
+  }
+  
+  :deep(.el-dialog__footer .el-button) {
+    width: 100%;
+    margin: 0 !important;
+  }
+  
+  /* 按钮组移动端优化 */
+  :deep(.el-button-group) {
+    display: flex;
+    flex-direction: column;
+    gap: 10px;
+  }
+  
+  :deep(.el-button-group .el-button) {
+    width: 100%;
+    margin: 0 !important;
+    border-radius: var(--xw-radius-lg) !important;
+  }
+  
+  :deep(.el-button-group .el-button:first-child) {
+    border-radius: var(--xw-radius-lg) !important;
+  }
+  
+  :deep(.el-button-group .el-button:last-child) {
+    border-radius: var(--xw-radius-lg) !important;
+  }
+  
+  /* 表单项按钮优化 */
+  :deep(.el-form-item__content .el-button + .el-button) {
+    margin-left: 0 !important;
+    margin-top: 10px;
+  }
+  
+  /* 通知按钮移动端优化 */
+  .notification-btn {
+    min-width: 44px;
+    min-height: 44px;
   }
 }
 
-/* 超小屏幕适配 */
+/* 超小屏幕适配 - 手机竖屏 */
 @media (max-width: 480px) {
   .header {
     padding: 0 12px;
   }
   
+  .header-left {
+    gap: 8px;
+    min-width: 0;
+    flex: 1;
+  }
+  
   .content {
     padding: 12px;
+    min-height: calc(100vh - 56px);
   }
   
   .breadcrumb {
     font-size: 13px;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+  }
+  
+  :deep(.el-breadcrumb__item:last-child .el-breadcrumb__inner) {
+    max-width: 150px;
+    overflow: hidden;
+    text-overflow: ellipsis;
   }
   
   :deep(.el-dialog) {
     width: 95% !important;
-    margin: 3vh auto;
+    margin: 2vh auto;
+    max-height: 96vh;
+    display: flex;
+    flex-direction: column;
+  }
+  
+  :deep(.el-dialog__header) {
+    padding: 18px 12px 14px 12px;
+  }
+  
+  :deep(.el-dialog__body) {
+    overflow-y: auto;
+    max-height: calc(96vh - 120px);
+    padding: 20px 12px !important;
   }
   
   .quick-time-buttons {
     grid-template-columns: 1fr;
+    gap: 12px;
+  }
+  
+  .quick-time-buttons .el-button {
+    width: 100%;
+    min-height: 48px;
+    font-size: 15px;
+    font-weight: 500;
   }
   
   .header-actions .el-button {
     padding: 8px;
+  }
+  
+  /* 对话框底部按钮超小屏优化 */
+  :deep(.el-dialog__footer) {
+    padding: 12px !important;
+  }
+  
+  :deep(.el-dialog__footer .el-button) {
+    min-height: 48px;
+    font-size: 15px;
+  }
+  
+  /* 表单标签移动端优化 */
+  :deep(.el-form-item__label) {
+    font-size: 14px;
+    min-width: 80px !important;
+  }
+  
+  /* Logo 移动端优化 */
+  .logo-text {
+    font-size: 16px;
+  }
+  
+  /* 用户头像移动端优化 */
+  .user-info {
+    padding: 8px 6px;
+  }
+  
+  .username {
+    font-size: 12px;
+    max-width: calc(100% - 36px); /* 预留头像和间隔空间 */
+  }
+}
+
+/* 横屏手机优化 */
+@media (max-width: 768px) and (orientation: landscape) {
+  .header {
+    height: 48px;
+  }
+  
+  .content {
+    padding: 12px;
+    min-height: calc(100vh - 48px);
+  }
+  
+  :deep(.el-dialog) {
+    max-height: 90vh;
+  }
+  
+  :deep(.el-dialog__body) {
+    max-height: calc(90vh - 100px);
+  }
+}
+
+/* 支持安全区域（刘海屏、Home Indicator 等） */
+@supports (padding: max(0px)) {
+  .sidebar.mobile {
+    padding-top: max(0px, env(safe-area-inset-top));
+    padding-bottom: max(0px, env(safe-area-inset-bottom));
+  }
+  
+  .header {
+    padding-left: max(16px, env(safe-area-inset-left));
+    padding-right: max(16px, env(safe-area-inset-right));
+  }
+  
+  .content {
+    padding-left: max(16px, env(safe-area-inset-left));
+    padding-right: max(16px, env(safe-area-inset-right));
+    padding-bottom: max(16px, env(safe-area-inset-bottom));
   }
 }
 </style>

@@ -609,6 +609,66 @@ class SubmissionService:
         except Exception as e:
             self.logger.error(f"发布单条投稿失败: {e}", exc_info=True)
             return False
+
+    async def publish_single_submission_for_platforms(self, submission_id: int, platform_keys: List[str]) -> bool:
+        """为指定平台发布单条投稿（独立模式）
+        
+        Args:
+            submission_id: 投稿ID
+            platform_keys: 要发布的平台键列表
+        
+        Returns:
+            是否发布成功
+        """
+        try:
+            if not platform_keys:
+                return True
+            
+            any_success = False
+            error_details: List[str] = []
+            
+            for name, publisher in self.publishers.items():
+                platform_key = getattr(publisher.platform, 'value', '')
+                if platform_key not in platform_keys:
+                    continue
+                
+                result = await publisher.publish_submission(submission_id)
+                if result.get('success'):
+                    any_success = True
+                else:
+                    detail = result.get('error') or result.get('message') or str(result)
+                    error_details.append(f"{name}: {detail}")
+            
+            if any_success:
+                # 独立模式：从暂存的 pending_platforms 中移除已成功的平台
+                db = await get_db()
+                async with db.get_session() as session:
+                    stmt = select(StoredPost).where(StoredPost.submission_id == submission_id)
+                    result = await session.execute(stmt)
+                    stored = result.scalar_one_or_none()
+                    
+                    if stored:
+                        pending = stored.pending_platforms or []
+                        if isinstance(pending, list):
+                            # 移除已发布的平台
+                            for key in platform_keys:
+                                if key in pending:
+                                    pending.remove(key)
+                            stored.pending_platforms = pending
+                            
+                            # 若所有平台都已发布，删除暂存记录
+                            if not pending:
+                                await session.delete(stored)
+                        
+                        await session.commit()
+                return True
+            else:
+                msg = "; ".join(error_details) if error_details else '未知错误'
+                self.logger.error(f"发布平台 {platform_keys} 失败: {msg}")
+                return False
+        except Exception as e:
+            self.logger.error(f"发布单条投稿到指定平台失败: {e}", exc_info=True)
+            return False
             
     def _setup_send_schedules(self):
         """根据各平台 send_schedule 设置定时任务，任务入队到各自发布器队列。"""
@@ -721,9 +781,10 @@ class SubmissionService:
                 self.logger.error(f"发布器 worker 异常 {pub_name}: {e}")
 
     async def publish_stored_posts_for_publisher(self, group_name: str, publisher_name: str) -> bool:
-        """仅通过指定发布器发送该组的暂存投稿。
+        """仅通过指定发布器发送该组的暂存投稿（独立模式）。
 
-        仅删除那些已被所有已注册发布器成功发布的存量记录，避免其他平台漏发。
+        独立模式：只发布该平台待发布的投稿，发布成功后从 pending_platforms 中移除该平台。
+        当 pending_platforms 为空时，删除暂存记录。
         """
         try:
             stored_posts = await self.get_stored_posts(group_name)
@@ -733,24 +794,42 @@ class SubmissionService:
                 except Exception:
                     pass
                 return True
-            submission_ids = [p.submission_id for p in stored_posts]
+
+            publisher = self.publishers.get(publisher_name)
+            if not publisher:
+                self.logger.error(f"找不到发布器: {publisher_name}")
+                return False
+
+            platform_key = getattr(publisher.platform, 'value', '')
+            
+            # 独立模式：只处理该平台待发布的投稿
+            to_publish_posts = []
+            for sp in stored_posts:
+                pending = sp.pending_platforms or []
+                if isinstance(pending, list) and platform_key in pending:
+                    to_publish_posts.append(sp)
+            
+            if not to_publish_posts:
+                try:
+                    self.logger.info(f"[{publisher_name}] 组 {group_name} 无需该平台发布的投稿")
+                except Exception:
+                    pass
+                return True
+
+            submission_ids = [p.submission_id for p in to_publish_posts]
             db = await get_db()
             async with db.get_session() as session:
                 # 加载投稿
                 stmt = select(Submission).where(Submission.id.in_(submission_ids))
                 result = await session.execute(stmt)
                 submissions = result.scalars().all()
+            
             if not submissions:
                 try:
                     self.logger.info(f"[{publisher_name}] 组 {group_name} 暂无有效投稿记录")
                 except Exception:
                     pass
                 return True
-
-            publisher = self.publishers.get(publisher_name)
-            if not publisher:
-                self.logger.error(f"找不到发布器: {publisher_name}")
-                return False
 
             # 只由该发布器发布
             try:
@@ -767,49 +846,49 @@ class SubmissionService:
                 self.logger.error(f"平台 {publisher_name} 批量发布失败: {e}")
                 return False
 
-            # 统计各投稿是否已被所有平台成功发布
+            # 独立模式：从 pending_platforms 中移除该平台，清理已完成的暂存记录
             try:
                 async with (await get_db()).get_session() as session2:
-                    # 读取这些投稿所有发布记录
-                    pr_stmt = select(PublishRecord).where(PublishRecord.submission_ids.isnot(None)).order_by(PublishRecord.created_at.desc())
-                    r = await session2.execute(pr_stmt)
-                    records = r.scalars().all()
-                    # 构建映射 submission_id -> set(platforms_success)
-                    success_map: Dict[int, set] = {}
-                    for rec in records:
-                        try:
-                            if not rec.is_success:
-                                continue
-                            subs = rec.submission_ids or []
-                            if not isinstance(subs, list):
-                                continue
-                            for sid in subs:
-                                success_map.setdefault(int(sid), set()).add(rec.platform)
-                        except Exception:
-                            continue
-                    # 当前需要的所有平台集合
-                    need_platforms = {p.platform.value for p in self.publishers.values()}
-                    # 删除那些所有平台都已成功的暂存记录
+                    # 重新加载暂存记录（避免脏读）
+                    stmt = select(StoredPost).where(StoredPost.id.in_([sp.id for sp in to_publish_posts]))
+                    r = await session2.execute(stmt)
+                    current_stored = r.scalars().all()
+                    
+                    # 构建本次发布的成功投稿ID集合
+                    success_submission_ids = set()
+                    for i, res in enumerate(results):
+                        if res and res.get('success') and i < len(submissions):
+                            success_submission_ids.add(submissions[i].id)
+                    
                     to_delete_ids: List[int] = []
-                    for sp in stored_posts:
-                        done = success_map.get(int(sp.submission_id), set())
-                        if need_platforms.issubset(done):
-                            to_delete_ids.append(sp.id)
+                    for sp in current_stored:
+                        if sp.submission_id in success_submission_ids:
+                            pending = sp.pending_platforms or []
+                            if isinstance(pending, list) and platform_key in pending:
+                                pending.remove(platform_key)
+                                sp.pending_platforms = pending
+                                
+                                # 若所有平台都已发布，标记删除
+                                if not pending:
+                                    to_delete_ids.append(sp.id)
+                    
+                    # 删除已完成的暂存记录
                     if to_delete_ids:
-                        async with (await get_db()).get_session() as session3:
-                            del_stmt = delete(StoredPost).where(StoredPost.id.in_(to_delete_ids))
-                            await session3.execute(del_stmt)
-                            await session3.commit()
+                        del_stmt = delete(StoredPost).where(StoredPost.id.in_(to_delete_ids))
+                        await session2.execute(del_stmt)
+                    
+                    await session2.commit()
+                    
+                    try:
+                        self.logger.info(f"[{publisher_name}] 清理已完成的暂存记录: {len(to_delete_ids)} 条")
+                    except Exception:
+                        pass
             except Exception as e:
-                self.logger.error(f"清理已完成暂存记录失败: {e}")
-            # 返回是否至少有一条成功（若前面统计失败则保守返回 True 表示流程完成）
+                self.logger.error(f"清理暂存记录失败: {e}")
+            
+            # 返回是否至少有一条成功
             try:
-                success_any = False
-                try:
-                    # results 作用域在上方 try 块内，防御性处理
-                    success_any = any(r and r.get('success') for r in (results or []))  # type: ignore[name-defined]
-                except Exception:
-                    success_any = True
+                success_any = any(r and r.get('success') for r in (results or []))  # type: ignore[name-defined]
                 return success_any
             except Exception:
                 return True

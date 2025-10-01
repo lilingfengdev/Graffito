@@ -1,2 +1,55 @@
+# Logs
+logs
+*.log
+npm-debug.log*
+pnpm-debug.log*
+yarn-debug.log*
+yarn-error.log*
+lerna-debug.log*
+
+# Dependencies
 node_modules
-pnpm-lock.yaml
+.pnp
+.pnp.js
+
+# Build output
+dist
+dist-ssr
+*.local
+
+# Editor directories and files
+.vscode/*
+!.vscode/extensions.json
+.idea
+.DS_Store
+*.suo
+*.ntvs*
+*.njsproj
+*.sln
+*.sw?
+
+# Environment files
+.env
+.env.local
+.env.*.local
+.env.development.local
+.env.production.local
+
+# Cache
+.cache
+.vite
+.temp
+*.cache
+
+# OS files
+Thumbs.db
+.DS_Store
+
+# IDE
+*.swp
+*.swo
+*~
+.project
+.classpath
+.settings/
+.metadata/

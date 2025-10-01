@@ -129,21 +129,32 @@ class QQReceiver(BaseReceiver):
 
         nonebot.init()
         
-        # NoneBot2 初始化后重新配置日志文件输出（避免被覆盖）
+        # NoneBot2 初始化后重新配置日志输出（避免被 NoneBot2 覆盖）
         import os
         if os.getenv("XWALL_LOG_CONFIGURED") == "true":
             from loguru import logger as loguru_logger
             import sys
+            
+            # NoneBot2 会移除所有处理器，需要重新添加控制台和文件处理器
+            loguru_logger.remove()  # 先移除 NoneBot2 添加的处理器
+            
+            # 重新添加控制台日志处理器
+            loguru_logger.add(
+                sys.stdout,
+                format="<green>{time:YYYY-MM-DD HH:mm:ss}</green> | <level>{level: <8}</level> | <cyan>{name}</cyan>:<cyan>{function}</cyan>:<cyan>{line}</cyan> - <level>{message}</level>",
+                level="INFO"
+            )
+            
             # 重新添加文件日志处理器
             loguru_logger.add(
                 "data/logs/xwall_{time:YYYY-MM-DD}.log",
                 rotation="00:00",
                 retention="30 days",
                 level="DEBUG",
-                # 确保格式一致
                 format="{time:YYYY-MM-DD HH:mm:ss.SSS} | {level: <8} | {name}:{function}:{line} - {message}"
             )
-            logger.info("NoneBot2 初始化后重新配置文件日志")
+            
+            logger.info("NoneBot2 初始化后重新配置控制台和文件日志")
 
         driver = nonebot.get_driver()
 
@@ -1455,23 +1466,21 @@ class QQReceiver(BaseReceiver):
 
                     self.logger.error(f"立即发送失败: {e}")
 
-            # “是” 的无定时立即发送逻辑：若未配置任何平台的 send_schedule，则立刻发送当前投稿
+            # "是" 的独立模式：每个平台独立判断是否定时发送
 
-            has_schedule = None
-
+            scheduled_platforms = []
+            instant_platforms = []
             pub_ok = None
 
             if cmd == "是" and (isinstance(result, dict) and result.get("success")):
 
                 try:
 
-                    # 检查是否存在任一已注册发布器配置了 send_schedule
+                    # 区分各平台是否配置了 send_schedule
 
                     from core.plugin import plugin_manager
 
                     from utils.common import get_platform_config
-
-                    _has = False
 
                     pubs = list(plugin_manager.publishers.values())
 
@@ -1479,14 +1488,16 @@ class QQReceiver(BaseReceiver):
 
                         try:
 
-                            cfg = get_platform_config(getattr(pub.platform, "value", ""))
+                            platform_key = getattr(pub.platform, "value", "")
+                            cfg = get_platform_config(platform_key)
 
                             times = (cfg or {}).get("send_schedule") or []
 
                             if times:
-                                _has = True
+                                scheduled_platforms.append(platform_key)
 
-                                break
+                            else:
+                                instant_platforms.append(platform_key)
 
 
 
@@ -1494,28 +1505,28 @@ class QQReceiver(BaseReceiver):
 
                             continue
 
-                    has_schedule = _has
 
 
+                except Exception as e:
 
-                except Exception:
+                    self.logger.error(f"区分平台定时配置失败: {e}")
 
-                    has_schedule = False
+                # 无定时的平台立即发送
 
-                # 未配置任何定时 -> 立即发送
-
-                if not has_schedule:
+                if instant_platforms:
 
                     try:
 
                         if self.submission_service:
-                            pub_ok = await self.submission_service.publish_single_submission(submission_id)
+                            pub_ok = await self.submission_service.publish_single_submission_for_platforms(
+                                submission_id, instant_platforms
+                            )
 
 
 
                     except Exception as e:
 
-                        self.logger.error(f"未配置定时，自动立即发送失败: {e}")
+                        self.logger.error(f"立即发送平台 {instant_platforms} 失败: {e}")
 
                         pub_ok = False
 
@@ -1532,27 +1543,31 @@ class QQReceiver(BaseReceiver):
                 if notif_ok is not None:
                     parts.append("已私聊通知投稿者" if notif_ok else "通知投稿者失败")
 
-                # 使用上文计算的 has_schedule/pub_ok 决定提示
+                # 根据平台分布决定提示（独立模式）
 
-                _hs = bool(has_schedule) if has_schedule is not None else False
-
-                if not _hs and pub_ok is True:
-
-                    tail = "已立即发送"
-
-
-
-                elif not _hs and pub_ok is False:
-
-                    tail = "未配置定时，自动发送失败。可用“发送暂存区”或“立即”重试"
-
-
-
-                else:
-
+                if instant_platforms and scheduled_platforms:
+                    # 混合模式
+                    if pub_ok is True:
+                        tail = f"已立即发送到 {', '.join(instant_platforms)}；{', '.join(scheduled_platforms)} 已加入暂存区等待定时"
+                    elif pub_ok is False:
+                        tail = f"立即发送 {', '.join(instant_platforms)} 失败；{', '.join(scheduled_platforms)} 已加入暂存区"
+                    else:
+                        tail = f"{', '.join(scheduled_platforms)} 已加入暂存区等待定时"
+                elif instant_platforms:
+                    # 仅即时发送
+                    if pub_ok is True:
+                        tail = "已立即发送"
+                    elif pub_ok is False:
+                        tail = "自动发送失败。可用\"发送暂存区\"或\"立即\"重试"
+                    else:
+                        tail = "处理完成"
+                elif scheduled_platforms:
+                    # 仅定时发送
                     tail = "已加入暂存区，等待定时发送"
+                else:
+                    tail = "处理完成"
 
-                extra_line = "；".join(parts + [tail]) if parts is not None else tail
+                extra_line = "；".join(parts + [tail]) if parts else tail
 
                 msg = (msg or "") + ("\n" + extra_line if extra_line else "")
 

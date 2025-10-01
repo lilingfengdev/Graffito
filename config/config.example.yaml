@@ -336,6 +336,8 @@ account_groups:
 
       qq_id: "1234567890"  # 主账号QQ
 
+      http_host: "127.0.0.1"  # NapCat HTTP服务器地址（默认 127.0.0.1，支持远程服务器）
+
       http_port: 3000  # NapCat HTTP端口（若使用 NapCat/QSign 等，需要仍保留）
 
       http_token: ""   # Napcat HTTP Token（若启用HTTP鉴权则填写）
@@ -344,15 +346,13 @@ account_groups:
 
     # - qq_id: "9876543210"
 
+    #   http_host: "192.168.1.100"  # 可以配置不同的 NapCat 服务器
+
     #   http_port: 3001
 
     #   http_token: ""
 
     max_post_stack: 1
-
-    max_images_per_post: 30
-
-    send_schedule: [ ]
 
     watermark_text: ""
 

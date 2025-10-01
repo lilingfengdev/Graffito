@@ -1,4 +1,5 @@
 import { createRouter, createWebHistory } from 'vue-router'
+import api from './api'
 import Login from './views/Login.vue'
 import Register from './views/Register.vue'
 import Layout from './views/Layout.vue'
@@ -7,6 +8,7 @@ import Audit from './views/Audit.vue'
 import SubmissionDetail from './views/SubmissionDetail.vue'
 import UserManagement from './views/UserManagement.vue'
 import StoredPosts from './views/StoredPosts.vue'
+import LogsManagement from './views/LogsManagement.vue'
 
 const routes = [
   { path: '/login', component: Login },
@@ -45,6 +47,12 @@ const routes = [
         name: 'StoredPosts',
         component: StoredPosts,
         meta: { title: '暂存区', icon: 'Box' }
+      },
+      {
+        path: 'logs',
+        name: 'LogsManagement',
+        component: LogsManagement,
+        meta: { title: '系统日志', icon: 'Memo', requiresSuperAdmin: true }
       }
     ]
   }
@@ -63,29 +71,34 @@ router.beforeEach(async (to, from, next) => {
     next('/login')
   } else if (token && isAuthPage) {
     next('/')
-  } else if (token && to.meta.requiresAdmin) {
+  } else if (token && (to.meta.requiresAdmin || to.meta.requiresSuperAdmin)) {
     // 检查管理员权限
     try {
       const userStr = localStorage.getItem('user')
+      let user = null
+      
       if (userStr) {
-        const user = JSON.parse(userStr)
-        if (!user.is_admin) {
-          // 非管理员用户，重定向到首页
-          next('/')
-        } else {
-          next()
-        }
+        user = JSON.parse(userStr)
       } else {
         // 如果没有用户信息，尝试从 API 获取
-        const { default: api } = await import('./api')
         const { data } = await api.get('/auth/me')
         localStorage.setItem('user', JSON.stringify(data))
-        if (!data.is_admin) {
-          next('/')
-        } else {
-          next()
-        }
+        user = data
       }
+      
+      // 检查超级管理员权限
+      if (to.meta.requiresSuperAdmin && !user.is_superadmin) {
+        next('/')
+        return
+      }
+      
+      // 检查管理员权限
+      if (to.meta.requiresAdmin && !user.is_admin) {
+        next('/')
+        return
+      }
+      
+      next()
     } catch (error) {
       console.error('权限检查失败:', error)
       next('/')

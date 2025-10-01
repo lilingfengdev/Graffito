@@ -143,6 +143,7 @@ class StoredPost(Base):
     publish_id = Column(Integer, nullable=False)  # 发布编号
     priority = Column(Integer, default=0)  # 优先级
     scheduled_time = Column(DateTime)  # 计划发送时间
+    pending_platforms = Column(JSON)  # 待发布的平台列表（独立模式：每个平台独立清理）
     created_at = Column(DateTime, default=datetime.now)
     
     def to_dict(self) -> Dict[str, Any]:
@@ -154,6 +155,7 @@ class StoredPost(Base):
             'publish_id': self.publish_id,
             'priority': self.priority,
             'scheduled_time': self.scheduled_time.isoformat() if self.scheduled_time else None,
+            'pending_platforms': self.pending_platforms,
             'created_at': self.created_at.isoformat() if self.created_at else None,
         }
 

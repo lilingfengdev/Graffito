@@ -336,6 +336,10 @@ class AccountInfo(BaseModel):
 
     http_port: int
 
+    # Napcat HTTP 服务端地址（可选，默认 127.0.0.1，支持配置远程 NapCat 服务器）
+
+    http_host: str = "127.0.0.1"
+
     # Napcat HTTP 服务端 Token（可选，用于访问 Napcat 本地 HTTP 接口）
 
     http_token: Optional[str] = None
@@ -353,10 +357,6 @@ class AccountGroup(BaseModel):
     minor_accounts: List[AccountInfo] = Field(default_factory=list)
 
     max_post_stack: int = 1
-
-    max_images_per_post: int = 30
-
-    send_schedule: List[str] = Field(default_factory=list)
 
     watermark_text: str = ""
 

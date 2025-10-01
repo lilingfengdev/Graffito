@@ -73,6 +73,12 @@ class Database:
             except Exception:
                 pass
             
+            # 独立模式迁移：为 stored_posts 增加 pending_platforms（若不存在）
+            try:
+                await conn.execute(text("ALTER TABLE stored_posts ADD COLUMN pending_platforms JSON"))
+            except Exception:
+                pass
+            
         logger.info(f"数据库初始化完成: {db_url}")
         
     async def close(self):

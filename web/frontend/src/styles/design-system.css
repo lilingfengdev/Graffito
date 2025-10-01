@@ -441,14 +441,7 @@
     border-radius: var(--xw-radius-xl);
     box-shadow: var(--xw-shadow-sm);
     backdrop-filter: blur(10px);
-    transition: var(--xw-transition);
     overflow: hidden;
-  }
-  
-  .xw-card:hover {
-    transform: translateY(-2px);
-    box-shadow: var(--xw-shadow-lg);
-    border-color: var(--xw-primary-lightest);
   }
   
   .xw-card-header {
@@ -696,11 +689,6 @@
     transition: var(--xw-transition);
   }
   
-  .xw-hover-lift:hover {
-    transform: translateY(-2px);
-    box-shadow: var(--xw-shadow-lg);
-  }
-  
   /* 发光效果 */
   .xw-glow {
     position: relative;
@@ -797,7 +785,6 @@
   
   .xw-table-row:hover {
     background: var(--xw-bg-secondary);
-    transform: scale(1.002);
   }
   
   /* 模态框增强 */
@@ -1354,7 +1341,6 @@
     border: 1px solid var(--xw-card-border);
     border-radius: var(--xw-radius-xl);
     padding: var(--xw-space-6);
-    transition: var(--xw-transition);
     position: relative;
     overflow: hidden;
   }
@@ -1367,11 +1353,6 @@
     right: 0;
     height: 4px;
     background: linear-gradient(90deg, var(--xw-primary), var(--xw-primary-light));
-  }
-  
-  .xw-stat-card:hover {
-    transform: translateY(-4px);
-    box-shadow: var(--xw-shadow-xl);
   }
   
   .xw-stat-value {
@@ -1634,5 +1615,194 @@ html.dark {
 
   .el-select .el-input .el-input__wrapper.is-focus {
     border-color: var(--xw-primary);
+  }
+
+  /* el-descriptions 组件样式修复 */
+  .el-descriptions {
+    --el-descriptions-border-color: var(--xw-border-secondary);
+    --el-descriptions-item-bordered-label-background: var(--xw-bg-tertiary);
+    --el-descriptions-item-bordered-content-background: var(--xw-bg-secondary);
+    --el-descriptions-title-text-color: var(--xw-text-primary);
+    --el-descriptions-label-text-color: var(--xw-text-secondary);
+    --el-descriptions-content-text-color: var(--xw-text-primary);
+  }
+
+  .el-descriptions__body .el-descriptions__table.is-bordered .el-descriptions__cell {
+    border-color: var(--xw-border-secondary);
+  }
+
+  .el-descriptions__label.el-descriptions__cell.is-bordered-label {
+    background-color: var(--xw-bg-tertiary);
+    color: var(--xw-text-secondary);
+    font-weight: var(--xw-font-medium);
+  }
+
+  .el-descriptions__content.el-descriptions__cell.is-bordered-content {
+    background-color: var(--xw-bg-secondary);
+    color: var(--xw-text-primary);
+  }
+
+  /* 优化描述列表中的标签样式 */
+  .el-descriptions .el-tag {
+    background-color: rgba(99, 102, 241, 0.15);
+    border-color: rgba(99, 102, 241, 0.3);
+    color: var(--xw-primary-lighter);
+  }
+
+  .el-descriptions .el-tag.el-tag--info {
+    background-color: rgba(59, 130, 246, 0.15);
+    border-color: rgba(59, 130, 246, 0.3);
+    color: var(--xw-info-light);
+  }
+
+  /* 优化头像样式 */
+  .el-descriptions .el-avatar {
+    background-color: var(--xw-primary);
+    color: white;
+    border: 2px solid var(--xw-border-secondary);
+  }
+
+  /* el-button 按钮组件样式修复 */
+  .el-button {
+    --el-button-bg-color: var(--xw-bg-tertiary);
+    --el-button-border-color: var(--xw-border-secondary);
+    --el-button-text-color: var(--xw-text-primary);
+    --el-button-hover-bg-color: var(--xw-bg-quaternary);
+    --el-button-hover-border-color: var(--xw-border-tertiary);
+    --el-button-hover-text-color: var(--xw-text-primary);
+    --el-button-active-bg-color: var(--xw-bg-tertiary);
+    --el-button-active-border-color: var(--xw-border-secondary);
+    transition: all 0.2s cubic-bezier(0.4, 0, 0.2, 1);
+  }
+
+  /* 默认按钮样式优化 */
+  .el-button:not(.el-button--primary):not(.el-button--success):not(.el-button--warning):not(.el-button--danger):not(.el-button--info) {
+    background-color: var(--xw-bg-tertiary);
+    border-color: var(--xw-border-secondary);
+    color: var(--xw-text-primary);
+  }
+
+  .el-button:not(.el-button--primary):not(.el-button--success):not(.el-button--warning):not(.el-button--danger):not(.el-button--info):hover {
+    background-color: var(--xw-bg-quaternary);
+    border-color: var(--xw-border-tertiary);
+    color: var(--xw-text-primary);
+    transform: translateY(-1px);
+  }
+
+  .el-button:not(.el-button--primary):not(.el-button--success):not(.el-button--warning):not(.el-button--danger):not(.el-button--info):active {
+    transform: translateY(0);
+  }
+
+  /* Primary 按钮优化 */
+  .el-button--primary {
+    --el-button-bg-color: var(--xw-primary);
+    --el-button-border-color: var(--xw-primary);
+    --el-button-hover-bg-color: var(--xw-primary-light);
+    --el-button-hover-border-color: var(--xw-primary-light);
+    background: linear-gradient(135deg, var(--xw-primary), var(--xw-primary-dark));
+    border: none;
+  }
+
+  .el-button--primary:hover {
+    background: linear-gradient(135deg, var(--xw-primary-light), var(--xw-primary));
+    transform: translateY(-2px);
+  }
+
+  .el-button--primary:active {
+    transform: translateY(0);
+  }
+
+  /* Success 按钮优化 */
+  .el-button--success {
+    background: linear-gradient(135deg, var(--xw-success), #059669);
+    border: none;
+  }
+
+  .el-button--success:hover {
+    background: linear-gradient(135deg, var(--xw-success-light), var(--xw-success));
+    transform: translateY(-2px);
+  }
+
+  /* Warning 按钮优化 */
+  .el-button--warning {
+    background: linear-gradient(135deg, var(--xw-warning), #d97706);
+    border: none;
+  }
+
+  .el-button--warning:hover {
+    background: linear-gradient(135deg, var(--xw-warning-light), var(--xw-warning));
+    transform: translateY(-2px);
+  }
+
+  /* Danger 按钮优化 */
+  .el-button--danger {
+    background: linear-gradient(135deg, var(--xw-danger), #dc2626);
+    border: none;
+  }
+
+  .el-button--danger:hover {
+    background: linear-gradient(135deg, var(--xw-danger-light), var(--xw-danger));
+    transform: translateY(-2px);
+  }
+
+  /* Info 按钮优化 */
+  .el-button--info {
+    background: linear-gradient(135deg, var(--xw-info), #2563eb);
+    border: none;
+  }
+
+  .el-button--info:hover {
+    background: linear-gradient(135deg, var(--xw-info-light), var(--xw-info));
+    transform: translateY(-2px);
+  }
+
+  /* 文本按钮优化 */
+  .el-button.is-text {
+    --el-button-text-color: var(--xw-primary-light);
+    --el-button-hover-text-color: var(--xw-primary-lighter);
+    --el-button-hover-bg-color: rgba(99, 102, 241, 0.1);
+  }
+
+  /* 链接按钮优化 */
+  .el-button.is-link {
+    --el-button-text-color: var(--xw-primary-light);
+    --el-button-hover-text-color: var(--xw-primary-lighter);
+  }
+
+  /* 禁用状态 */
+  .el-button.is-disabled,
+  .el-button.is-disabled:hover,
+  .el-button.is-disabled:active {
+    background-color: var(--xw-bg-secondary);
+    border-color: var(--xw-border-primary);
+    color: var(--xw-text-quaternary);
+    transform: none;
+    cursor: not-allowed;
+    opacity: 0.5;
+  }
+
+  /* 按钮组优化 */
+  .el-button-group .el-button {
+    border-color: var(--xw-border-secondary);
+  }
+
+  .el-button-group .el-button:hover {
+    z-index: 1;
+  }
+
+  /* 图标按钮优化 */
+  .el-button.is-circle,
+  .el-button.is-round {
+    transition: all 0.3s cubic-bezier(0.4, 0, 0.2, 1);
+  }
+
+  .el-button.is-circle:hover,
+  .el-button.is-round:hover {
+    transform: rotate(5deg) scale(1.05);
+  }
+
+  .el-button.is-circle:active,
+  .el-button.is-round:active {
+    transform: rotate(0) scale(1);
   }
 }

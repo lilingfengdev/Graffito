@@ -1,105 +1,63 @@
 ---
-description: 异步数据库访问与会话管理约束
+description: "异步数据库访问与会话管理约束"
 ---
+# 异步数据库访问与会话管理约束
 
-# 异步数据库访问与会话管理约束（async-db）
+本文档规定了在 XWall 项目中访问异步数据库的最佳实践。
 
-适用范围：所有访问数据库的模块，尤其是 `processors/*`、`publishers/*`、`receivers/*`。
+## 1. 获取数据库实例
 
-## 引用与单例
-- 使用 [core/database.py](mdc:core/database.py) 提供的单例工厂管理 `AsyncEngine` 与 `async_sessionmaker`。
-- 仅通过公开方法获取会话，避免在模块顶层创建长期持有的会话实例。
+- **单例模式**: 项目使用一个全局的数据库管理器。通过调用 `get_db()` 函数来获取其实例。
+  ```python
+  from core.database import get_db
 
-## 会话与事务
-- 首选模式：
-  - `async with get_db_session() as session:` 获取会话
-  - `async with session.begin():` 显式事务边界（读写）
-- 只读操作可在事务外执行，但推荐统一置于 `session.begin()` 的上下文中以简化一致性。
+  async def my_function():
+      db = await get_db()
+      # ... use db instance
+  ```
+- **自动初始化**: `get_db()` 会在首次调用时自动初始化数据库连接和表结构，无需手动操作。
 
-## 协程与并发
-- 严禁在同步上下文中直接调用异步会话方法；确保调用栈为 async。
-- 在并发任务中为每个任务单独获取会话；不要跨任务共享 `Session`。
+## 2. 会话管理
 
-## ORM 模型与关系
-- 模型定义位于 [core/models.py](mdc:core/models.py)。
-- 查询时避免 N+1：优先使用 `selectinload`/`joinedload` 根据场景选择。
+- **使用 `async with`**: 所有数据库操作都必须在 `db.get_session()` 的异步上下文管理器中执行。这能确保会话被正确地创建、提交、回滚和关闭。
+- **严禁手动管理会话**: 不要手动创建 `AsyncSession` 实例，也不要手动调用 `session.commit()`、`session.rollback()` 或 `session.close()`。`get_session()` 上下文管理器会自动处理这一切。
 
-## 提交与回滚
-- 使用 `session.begin()` 自动提交/回滚；手动提交仅在必要时调用 `await session.commit()`。
-- 捕获异常时，允许 `session.begin()` 自动回滚；不要在 finally 中无条件提交。
-
-## 连接与性能
-- 避免在热路径中频繁创建引擎；引擎由单例维护。
-- 批量写入尽量使用 `session.execute(insert(...).values([...]))` 或者 `bulk_save_objects`（谨慎对待回写主键/事件）。
-
-## 典型用法
+### 正确示例：
 
 ```python
-from core.database import get_db_session
-from sqlalchemy import select
+from core.database import get_db
 from core.models import Submission
+from sqlalchemy.future import select
 
-async def load_waiting_submissions(limit: int = 50):
-    async with get_db_session() as session:
-        async with session.begin():
-            stmt = select(Submission).where(Submission.status == 'WAITING').limit(limit)
-            result = await session.execute(stmt)
-            return result.scalars().all()
+async def get_submission(submission_id: int) -> Submission | None:
+    db = await get_db()
+    async with db.get_session() as session:
+        stmt = select(Submission).where(Submission.id == submission_id)
+        result = await session.execute(stmt)
+        return result.scalar_one_or_none()
 ```
 
-## 禁止事项
-- 在模块级持有 `Session` 或跨请求/任务复用同一 `Session`。
-- 在 `async for`/回调中泄漏未关闭会话上下文。
-- 同步函数中通过 `asyncio.run` 调用数据库操作。
----
-alwaysApply: false
-description: 异步数据库访问与会话管理约束
-globs: core/**/*.py,services/**/*.py,processors/**/*.py,publishers/**/*.py,receivers/**/*.py
----
-## 异步数据库规范（SQLAlchemy Async）
+### 错误示例：
 
-- 统一通过 `core/database.py` 的 `get_db()` 获取单例 `Database`。
-- 获取会话使用 `async with db.get_session() as session:`，避免手动管理 commit/rollback。
-- ORM 导入置于使用处局部作用域，避免循环依赖（参考 `fetch_submission_by_id`）。
-- SQLite 的 WAL、同步等已在初始化中设置，无需重复配置。
-- 长事务需拆分；查询与写入分步提交；必要时为高频查询添加索引（见 `core/models.py`）。
-- 复用公共查询：`fetch_submission_by_id`、`fetch_submissions_by_ids`。
+```python
+# 错误：手动创建会话
+session = db.async_session()
+# ...
+await session.commit() # 错误：手动提交
+await session.close()  # 错误：手动关闭
+```
 
-### 会话内状态更新约定
-- 管道阶段更新 `Submission.status`：`PROCESSING` -> 渲染完成 `WAITING` -> 发布成功 `PUBLISHED`；失败回退为 `PENDING`。
-- 捕获异常后回滚，并尽量恢复到安全值。
+## 3. CRUD 操作
 
-相关文件：[`core/database.py`](mdc:core/database.py)、[`processors/pipeline.py`](mdc:processors/pipeline.py)
----
-description: 异步数据库访问与会话管理约束
-globs: core/*.py,services/*.py,processors/*.py,publishers/*.py,receivers/**/*.py,cli.py,main.py
----
-## 异步数据库规范（SQLAlchemy Async）
+- **使用 ORM**: 优先使用 SQLAlchemy ORM 进行数据库操作。
+- **添加对象**: `session.add(my_object)`
+- **查询对象**: `await session.execute(select(...))`
+- **删除对象**: `await session.delete(my_object)`
 
-- 统一通过 `core/database.py` 的 `get_db()` 获取单例 `Database`。
-- 获取会话使用 `async with db.get_session() as session:`，避免手动管理 commit/rollback。
-- 所有 ORM 导入放在使用处的局部作用域，避免循环依赖（示例见 `fetch_submission_by_id`）。
-- SQLite 使用 WAL 已在初始化中配置，无需重复设定。
-- 长事务需拆分；查询与写入分步提交，必要时添加索引（参考模型里的复合索引）。
-- 提供的高阶方法：`fetch_submission_by_id`、`fetch_submissions_by_ids` 优先复用。
+- **事务性**: `get_session()` 的 `async with` 块内的所有操作都在一个事务中。如果块内代码成功执行完毕，事务会自动提交。如果发生异常，事务会自动回滚。
 
-### 会话内更新状态的约定
-- 处理管道将 `Submission.status` 在不同阶段置为 `PROCESSING`/`WAITING`/`PUBLISHED`/`PENDING`。
-- 捕获异常后回滚并尽量恢复状态到安全值（例如回退到 `PENDING`）。
----
-description: 异步数据库访问与会话管理约束
-globs: core/**/*.py,services/**/*.py,processors/**/*.py,publishers/**/*.py,receivers/**/*.py
----
-## 异步数据库规范（SQLAlchemy Async）
+## 4. 注意事项
 
-- 统一通过 `core/database.py` 的 `get_db()` 获取单例 `Database`。
-- 获取会话使用 `async with db.get_session() as session:`，避免手动管理 commit/rollback。
-- 所有 ORM 导入放在使用处的局部作用域，避免循环依赖（示例见 `fetch_submission_by_id`）。
-- SQLite 使用 WAL 已在初始化中配置，无需重复设定。
-- 长事务需拆分；查询与写入分步提交，必要时添加索引（参考模型里的复合索引）。
-- 提供的高阶方法：`fetch_submission_by_id`、`fetch_submissions_by_ids` 优先复用。
-
-### 会话内更新状态的约定
-- 处理管道将 `Submission.status` 在不同阶段置为 `PROCESSING`/`WAITING`/`PUBLISHED`/`PENDING`。
-- 捕获异常后回滚并尽量恢复状态到安全值（例如回退到 `PENDING`）。
+- **避免循环导入**: 在服务层或业务逻辑代码中，有时直接导入 `core.models` 可能会导致循环导入。如果遇到这种情况，可以在函数内部进行局部导入，如 `core/database.py` 中的 `fetch_submission_by_id` 所示。
+- **性能**: 对于复杂的查询，可以使用 `selectinload` 或 `joinedload` 来优化关联对象的加载。
 

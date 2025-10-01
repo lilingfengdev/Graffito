@@ -1,129 +1,95 @@
 ---
-description: 本地运行与常见操作手册
+description: "本地运行与常见操作手册"
 ---
+# 本地运行与常见操作手册
 
-# 本地运行与常见操作手册（runbook）
+本手册指导如何在本地环境部署和运行 XWall 系统。
 
-## 环境准备
-- Python 版本：与项目 `pyproject.toml`/`requirements.txt` 一致
-- 安装依赖：`pip install -r requirements.txt`
-- 配置文件：
-  - 基础配置：[config/config.yaml](mdc:config/config.yaml)
-  - 平台配置：`config/publishers/*.yml`
+## 1. 环境要求
 
-## 数据库
-- 连接与会话由 [core/database.py](mdc:core/database.py) 管理。
-- 首次运行会自动初始化引擎；模型见 [core/models.py](mdc:core/models.py)。
+- Python 3.9 或更高版本。
 
-## 启动程序
-- 主入口：[main.py](mdc:main.py)
-- 常用命令（示例）：
-  - `python main.py` 启动服务或任务调度
+## 2. 安装步骤
 
-## 处理管道
-- 管道编排：[processors/pipeline.py](mdc:processors/pipeline.py)
-- 渲染器：[processors/html_renderer.py](mdc:processors/html_renderer.py)、[processors/content_renderer.py](mdc:processors/content_renderer.py)
-- LLM 处理：[processors/llm_processor.py](mdc:processors/llm_processor.py)
+首次运行时，启动脚本会自动处理大部分安装步骤。
 
-## 发布器
-- 基类与发现：[publishers/base.py](mdc:publishers/base.py)、[publishers/loader.py](mdc:publishers/loader.py)
-- 平台配置：
-  - 哔哩哔哩：[config/publishers/bilibili.yml](mdc:config/publishers/bilibili.yml)
-  - QQ 空间：[config/publishers/qzone.yml](mdc:config/publishers/qzone.yml)
-  - 小红书：[config/publishers/rednote.yml](mdc:config/publishers/rednote.yml)
+### a. 创建虚拟环境与安装依赖
 
-## 调试与排错
-- 开启更详细日志：在 `config/config.yaml` 中调整日志级别。
-- 数据库问题：检查连接串/会话泄漏，遵循 [async-db](mdc:.cursor/rules/async-db.mdc)。
-- 状态异常：确认 `Submission.status` 状态机流转是否符合约定。
+直接运行启动脚本即可自动创建虚拟环境并安装所需依赖。
 
-## 常见注意事项
-- 管道处理完成后需清理 `MessageCache`，避免历史记录重复影响。
-- 任何新平台发布器需通过 `BasePublisher.prepare_content()` 统一组装文本。
----
-alwaysApply: false
-description: 本地运行与常见操作手册
----
-## 运行手册（本地）
+- **Windows**:
+  ```shell
+  .\start.bat
+  ```
+- **Linux / macOS**:
+  ```shell
+  chmod +x start.sh
+  ./start.sh
+  ```
 
-### 1) 安装依赖
-- Python: 使用 `requirements.txt` 安装；Windows 可执行 `start.bat`。
-- 可选：B 站/红书登录工具见根目录对应 `*_login_tool.py`。
+脚本会自动在项目根目录创建 `venv` 文件夹，并从 [`requirements.txt`](mdc:requirements.txt) 安装依赖包，同时会安装 Playwright 所需的浏览器核心。
 
-### 2) 配置
-- 复制并修改 `config/config.example.yaml` 为 `config/config.yaml`。
-- 平台发布配置位于 `config/publishers/*.yml`，按需开启 `enabled: true`。
+### b. 手动安装 (可选)
 
-### 3) 初始化与启动
-- 首次运行会自动初始化数据库（SQLite，WAL 已配置）。
-- 入口：`python main.py` 或按文档脚本启动。
+如果你想手动进行安装：
 
-### 4) 调试处理管道
-- 提交消息后，`ProcessingPipeline` 依次运行 LLM、HTML、内容渲染。
-- 结果写入 `Submission.processed_content`、`rendered_images`，状态更新为 `WAITING`。
+1.  创建虚拟环境:
+    ```shell
+    python -m venv venv
+    ```
+2.  激活虚拟环境:
+    - Windows: `.\venv\Scripts\activate`
+    - Linux/macOS: `source venv/bin/activate`
+3.  安装依赖:
+    ```shell
+    pip install -r requirements.txt
+    playwright install chromium
+    ```
 
-### 5) 发布
-- 使用对应发布器将 `WAITING` 的投稿发布，成功后状态为 `PUBLISHED`，并记录 `PublishRecord`。
+## 3. 配置
 
-### 6) 常见排障
-- 数据库：检查 `config/settings.py` 的数据库 URL 与文件权限，必要时删除 `data/oqqwall.db*`/`data/xwall.db*` 后重试（谨慎）。
-- 依赖：确认未误改第三方目录：`bilibili-api-17.3.0/`、`aioqzone/`、`qqqr/`、`xiaohongshu-mcp-main/`。
+1.  **主配置文件**:
+    首次运行 [`start.sh`](mdc:start.sh) 时，系统会自动将 [`config/config.example.yaml`](mdc:config/config.example.yaml) 复制为 `config/config.yaml`。你需要根据自己的需求修改 `config/config.yaml` 文件中的配置项。
+    对于 Windows 用户，需要手动复制并重命名该文件。
 
-参考文件：[`README.md`](mdc:README.md)、[`docs/installation.md`](mdc:docs/installation.md)、[`docs/configuration.md`](mdc:docs/configuration.md)
----
-description: 本地运行与常见操作手册
-globs: README.md,docs/*.md,*.py
----
-## 运行手册（本地）
+2.  **环境变量**:
+    可以创建一个 `.env` 文件来配置环境变量，例如 `DEBUG` 或 `LOG_LEVEL`。[`start.sh`](mdc:start.sh) 支持通过 `-d` 或 `--debug` 参数来进入调试模式。
 
-### 1) 安装依赖
-- Python: 使用 `requirements.txt` 安装；Windows 可执行 `start.bat`。
-- 可选：B 站/红书登录工具见根目录对应 `*_login_tool.py`。
+## 4. 运行系统
 
-### 2) 配置
-- 复制并修改 `config/config.example.yaml` 为 `config/config.yaml`。
-- 平台发布配置位于 `config/publishers/*.yml`，按需开启 `enabled: true`。
+### a. 初始化数据库
 
-### 3) 初始化与启动
-- 首次运行会自动初始化数据库（SQLite，WAL 已配置）。
-- 入口：`python main.py` 或按文档脚本启动。
+如果 `data/xwall.db` 数据库文件不存在，启动脚本会自动初始化数据库。
+你也可以手动或强制初始化数据库：
 
-### 4) 调试处理管道
-- 提交消息后，`ProcessingPipeline` 会依次运行 LLM、HTML、内容渲染。
-- 结果写入 `Submission.processed_content`、`rendered_images`，状态更新为 `WAITING`。
+```shell
+# 激活虚拟环境后运行
+python cli.py db-init
+```
+或者通过启动脚本参数：
+- Windows: `.\start.bat --init-db`
+- Linux/macOS: `./start.sh --init-db`
 
-### 5) 发布
-- 通过对应发布器将 `WAITING` 的投稿发布，成功后状态为 `PUBLISHED`，并记录 `PublishRecord`。
+### b. 启动主程序
 
-### 6) 常见排障
-- 数据库问题：检查 `config/settings.py` 的数据库 URL 与文件权限，必要时删除 `data/oqqwall.db*` 后重新初始化（谨慎）。
-- 第三方依赖：确认未误改 `bilibili-api-17.3.0/`、`aioqzone/`、`qqqr/`、`xiaohongshu-mcp-main/`。
----
-description: 本地运行与常见操作手册
-alwaysApply: false
----
-## 运行手册（本地）
+配置完成后，再次运行启动脚本即可启动 XWall：
 
-### 1) 安装依赖
-- Python: 使用 `requirements.txt` 安装；Windows 可执行 `start.bat`。
-- 可选：B 站/红书登录工具见根目录对应 `*_login_tool.py`。
+- **Windows**:
+  ```shell
+  .\start.bat
+  ```
+- **Linux / macOS**:
+  ```shell
+  ./start.sh
+  ```
+  
+程序将通过 [`main.py`](mdc:main.py) 启动，并加载 FastAPI 服务。
 
-### 2) 配置
-- 复制并修改 `config/config.example.yaml` 为 `config/config.yaml`。
-- 平台发布配置位于 `config/publishers/*.yml`，按需开启 `enabled: true`。
+## 5. 常见操作
 
-### 3) 初始化与启动
-- 首次运行会自动初始化数据库（SQLite，WAL 已配置）。
-- 入口：`python main.py` 或按文档脚本启动。
-
-### 4) 调试处理管道
-- 提交消息后，`ProcessingPipeline` 会依次运行 LLM、HTML、内容渲染。
-- 结果写入 `Submission.processed_content`、`rendered_images`，状态更新为 `WAITING`。
-
-### 5) 发布
-- 通过对应发布器将 `WAITING` 的投稿发布，成功后状态为 `PUBLISHED`，并记录 `PublishRecord`。
-
-### 6) 常见排障
-- 数据库问题：检查 `config/settings.py` 的数据库 URL 与文件权限，必要时删除 `data/oqqwall.db*` 后重新初始化（谨慎）。
-- 第三方依赖：确认未误改 `bilibili-api-17.3.0/`、`aioqzone/`、`qqqr/`、`xiaohongshu-mcp-main/`。
+- **强制重新初始化数据库**: `python cli.py db-init` (会清空现有数据)。
+- **登录平台账号**:
+  - Bilibili: 运行 [`bilibili_login_tool.py`](mdc:bilibili_login_tool.py)
+  - 小红书: 运行 [`rednote_login_tool.py`](mdc:rednote_login_tool.py)
+  - QQ空间: Cookies 需要手动获取并配置。
 

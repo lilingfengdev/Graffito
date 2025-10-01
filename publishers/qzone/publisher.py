@@ -77,8 +77,8 @@ class QzonePublisher(BasePublisher):
         self.api_clients[account_id] = create_qzone_api(cookies)
     
     async def login_via_napcat(self, account_id: str) -> bool:
-        """通过 NapCat 本地 HTTP 接口拉取 qzone.qq.com 域 cookies 完成登录。
-        要求：account_groups 为账号提供 http_port，可选 http_token。
+        """通过 NapCat HTTP 接口拉取 qzone.qq.com 域 cookies 完成登录。
+        要求：account_groups 为账号提供 http_host、http_port，可选 http_token。
         成功后写入 data/cookies/qzone_{account_id}.json 并校验 gtk。
         """
         try:
@@ -86,6 +86,7 @@ class QzonePublisher(BasePublisher):
             if not account_info:
                 self.logger.error(f"账号不存在: {account_id}")
                 return False
+            host = account_info.get('http_host', '127.0.0.1')
             port = account_info['http_port']
             headers = {}
             http_token = account_info.get('http_token')
@@ -94,7 +95,7 @@ class QzonePublisher(BasePublisher):
 
             async with httpx.AsyncClient(headers=headers, timeout=20) as client:
                 # 参考脚本：从 NapCat 获取指定域 Cookie
-                url = f"http://127.0.0.1:{port}/get_cookies"
+                url = f"http://{host}:{port}/get_cookies"
                 try:
                     resp = await client.get(url, params={"domain": "qzone.qq.com"})
                 except httpx.HTTPError as e:

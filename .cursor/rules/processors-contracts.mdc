@@ -1,100 +1,79 @@
 ---
-description: 处理器数据契约（LLM -> HTML -> Content 渲染）
+description: "处理器数据契约（LLM -> HTML -> Content 渲染）"
 ---
+# 处理器数据契约
 
-# 处理器数据契约（processors-contracts）
+本规则定义了在 [`processors/pipeline.py`](mdc:processors/pipeline.py) 中，数据在不同处理器之间流转时所遵循的数据结构和约定。
 
-适用范围：`processors/*` 与依赖处理结果的 `publishers/*`、`receivers/*`。
+## 核心数据结构
 
-## 管道阶段与职责
-- `LLMProcessor`（[processors/llm_processor.py](mdc:processors/llm_processor.py)）
-  - 输入：`Submission`（含用户消息或聚合文本）
-  - 输出：结构化 LLM 结果 `submission.llm_result`（JSON 兼容，包含标题、段落、标签、外链等）
-- `HTMLRenderer`（[processors/html_renderer.py](mdc:processors/html_renderer.py)）
-  - 输入：`submission.llm_result`
-  - 输出：HTML 字符串 `submission.processed_content`
-- `ContentRenderer`（[processors/content_renderer.py](mdc:processors/content_renderer.py)）
-  - 输入：`submission.processed_content`（HTML）
-  - 输出：图片渲染列表 `submission.rendered_images`（文件路径或二进制引用）
+处理管道的核心是一个名为 `data` 的 Python 字典，它在各个处理阶段之间传递和扩充。
 
-## 状态流转契约
-由 `ProcessingPipeline.process_submission()`（[processors/pipeline.py](mdc:processors/pipeline.py)）负责：
-- 开始处理：`Submission.status = PROCESSING`
-- 渲染完成：`Submission.status = WAITING`
-- 发布成功：`Submission.status = PUBLISHED`
+## 1. 管道初始数据
 
-## 数据写回契约
-- 必填写回字段：
-  - `submission.llm_result`
-  - `submission.processed_content`
-  - `submission.rendered_images`
-- 写回时应保证：
-  - 字段可序列化（JSON 友好）
-  - 尺寸可控（必要时做截断或拆分）
-  - 路径为相对工程路径或受控的绝对路径
+在调用 `LLMProcessor` 之前，`ProcessingPipeline` 会构建一个初始的 `data` 字典，其结构如下：
 
-## 消息缓存清理
-- 管道处理成功后，需清理对应的 `MessageCache`，防止历史消息重复合并。
+```python
+{
+    "submission_id": int,          # 投稿ID
+    "sender_id": str,              # 发送者ID
+    "nickname": str,               # 发送者昵称
+    "messages": list[dict],        # 从 MessageCache 或 raw_content 中获取的原始消息列表
+    "is_anonymous": bool,          # 初始匿名状态
+    "watermark_text": str,         # 水印文本
+    "wall_mark": str               # 墙标文本
+}
+```
 
-## 错误与重试
-- 各阶段应抛出具有上下文的异常，并由管道统一捕获记录。
-- 允许幂等重试；处理器不应产生不可逆副作用（例如重复写文件名需具备去重/覆盖策略）。
+## 2. `LLMProcessor` 阶段
 
-## 与发布器的集成
-- 文本统一通过 `BasePublisher.prepare_content()`（[publishers/base.py](mdc:publishers/base.py)）组装。
-- 是否包含编号、@、分段、链接由对应平台配置控制（见 `config/publishers/*.yml`）。
----
-alwaysApply: false
-description: 处理器数据契约（LLM -> HTML -> Content 渲染）
-globs: processors/**/*.py
----
-## 处理器输入/输出契约
+-   **输入**: 初始 `data` 字典。
+-   **处理**:
+    1.  对消息中的图片进行安全审核和内容描述。
+    2.  调用大语言模型（LLM）对消息进行分组、审核和内容提取。
+-   **输出 (对 `data` 字典的修改)**:
+    -   `data['messages']`: 更新为 LLM 判断属于最后一组投稿的消息列表。
+    -   `data['is_anonymous']`: 根据 LLM 判断更新。
+    -   `data['llm_result']`: 新增字段，包含 LLM 的详细分析结果。
+        ```json
+        {
+          "needpriv": "true" | "false",
+          "safemsg": "true" | "false",
+          "isover": "true" | "false",
+          "notregular": "true" | "false",
+          "messages": [ ... ], // 筛选后的消息ID列表
+          "segments": [ "文本片段1", "文本片段2" ] // 提取的文本段落
+        }
+        ```
 
-管道数据 `data: Dict[str, Any]` 在阶段间传递，关键字段：
+-   **副作用**: `Submission` 表中的 `llm_result`, `is_anonymous`, `is_safe`, `is_complete` 字段会被更新。
 
-- 基础输入：`submission_id`、`sender_id`、`nickname`、`messages`、`is_anonymous`、`watermark_text`、`wall_mark`。
-- LLM 输出：`llm_result`（并派生 `is_anonymous`/`is_safe`/`is_complete` 到 `Submission`）。
-- HTML 输出：`rendered_html`、`extracted_links`（链接需去重并保序）。
-- 内容渲染输出：`rendered_images: List[str]`（供发布器使用）。
+## 3. `HTMLRenderer` 阶段
 
-### 不变量
-- 不移除已有字段；仅追加字段，避免破坏后续阶段。
-- `processed_content` 结构统一为：`{"text": List[str]|str, "html": str, "links": List[str]}`。
-- 渲染完成后由管道写回 `Submission.rendered_images` 与 `Submission.processed_content`。
+-   **输入**: 经过 `LLMProcessor` 处理后的 `data` 字典。
+-   **处理**:
+    1.  使用 Jinja2 模板将 `data['messages']` 渲染成一个 HTML 字符串。
+    2.  在渲染过程中，提取所有可点击的链接。
+-   **输出 (对 `data` 字典的修改)**:
+    -   `data['rendered_html']`: 新增字段，包含渲染出的完整 HTML 内容。
+    -   `data['extracted_links']`: 新增字段，包含从消息中提取的所有 URL 列表。
 
-相关文件：[`processors/pipeline.py`](mdc:processors/pipeline.py)、[`processors/llm_processor.py`](mdc:processors/llm_processor.py)、[`processors/html_renderer.py`](mdc:processors/html_renderer.py)、[`processors/content_renderer.py`](mdc:processors/content_renderer.py)
----
-description: 处理器数据契约（LLM -> HTML -> Content 渲染）
-globs: processors/*.py,services/*.py
----
-## 处理器输入/输出契约
+## 4. `ContentRenderer` 阶段
 
-管道数据结构 `data: Dict[str, Any]` 在阶段间传递，关键字段：
+-   **输入**: 经过 `HTMLRenderer` 处理后的 `data` 字典。
+-   **处理**:
+    1.  使用 Playwright (无头浏览器) 加载 `data['rendered_html']`。
+    2.  将 HTML 页面截图，并根据内容高度可能分页生成多张图片。
+-   **输出 (对 `data` 字典的修改)**:
+    -   `data['rendered_images']`: 新增字段，包含一个或多个渲染后图片的本地文件路径列表。
 
-- 输入基础字段：`submission_id`、`sender_id`、`nickname`、`messages`、`is_anonymous`、`watermark_text`、`wall_mark`。
-- LLM 阶段输出：`llm_result`，并派生 `is_anonymous`/`is_safe`/`is_complete` 到 `Submission`。
-- HTML 阶段输出：`rendered_html`、`extracted_links`（链接需去重并保序）。
-- 内容渲染阶段输出：`rendered_images: List[str]`（最终用于各发布平台）。
+## 5. 管道结束
 
-### 不变量
-- 不移除已有字段；追加字段以免破坏后续阶段。
-- `processed_content` 的结构统一为：`{"text": List[str]|str, "html": str, "links": List[str]}`。
-- 渲染完成后由管道写回 `Submission` 的 `rendered_images` 与 `processed_content`。
----
-description: 处理器数据契约（LLM -> HTML -> Content 渲染）
-globs: processors/**/*.py
----
-## 处理器输入/输出契约
+`ContentRenderer` 执行完毕后，`ProcessingPipeline` 会将最终结果写回数据库：
 
-管道数据结构 `data: Dict[str, Any]` 在阶段间传递，关键字段：
-
-- 输入基础字段：`submission_id`、`sender_id`、`nickname`、`messages`、`is_anonymous`、`watermark_text`、`wall_mark`。
-- LLM 阶段输出：`llm_result`，并派生 `is_anonymous`/`is_safe`/`is_complete` 到 `Submission`。
-- HTML 阶段输出：`rendered_html`、`extracted_links`（链接需去重并保序）。
-- 内容渲染阶段输出：`rendered_images: List[str]`（最终用于各发布平台）。
-
-### 不变量
-- 不移除已有字段；追加字段以免破坏后续阶段。
-- `processed_content` 的结构统一为：`{"text": List[str]|str, "html": str, "links": List[str]}`。
-- 渲染完成后由管道写回 `Submission` 的 `rendered_images` 与 `processed_content`。
+-   更新 `Submission.rendered_images`。
+-   更新 `Submission.processed_content` (包含文本、HTML 和链接)。
+-   更新 `Submission.processed_at` 时间戳。
+-   将 `Submission.status` 设置为 `WAITING`，等待发布。
+-   清理该用户对应的 `MessageCache`。
 
