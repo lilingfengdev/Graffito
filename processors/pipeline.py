@@ -18,10 +18,20 @@ _shared_pipeline: Optional["ProcessingPipeline"] = None
 class ProcessingPipeline:
     """消息处理管道"""
     
-    def __init__(self):
+    def __init__(self, render_backend: str = "local", render_config: Optional[Dict[str, Any]] = None):
+        """
+        初始化处理管道
+        
+        Args:
+            render_backend: 渲染后端类型 (local/remote/cloudflare)
+            render_config: 渲染后端配置
+        """
         self.llm_processor = LLMProcessor()
         self.html_renderer = HTMLRenderer()
-        self.content_renderer = ContentRenderer()
+        self.content_renderer = ContentRenderer(
+            backend_type=render_backend,
+            backend_config=render_config or {}
+        )
         self.logger = logger.bind(module="pipeline")
         self._initialized: bool = False
         self._init_lock: asyncio.Lock = asyncio.Lock()
@@ -283,5 +293,15 @@ def get_shared_pipeline() -> ProcessingPipeline:
     """获取全局共享的处理管道实例（单例）。"""
     global _shared_pipeline
     if _shared_pipeline is None:
-        _shared_pipeline = ProcessingPipeline()
+        # 从配置读取渲染后端设置
+        from config.settings import get_settings
+        settings = get_settings()
+        
+        render_backend = settings.rendering.backend if hasattr(settings.rendering, 'backend') else "local"
+        render_config = settings.rendering.backend_config if hasattr(settings.rendering, 'backend_config') else {}
+        
+        _shared_pipeline = ProcessingPipeline(
+            render_backend=render_backend,
+            render_config=render_config
+        )
     return _shared_pipeline

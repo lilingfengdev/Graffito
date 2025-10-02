@@ -145,6 +145,35 @@ rendering:
   # font_family: "'Inter', 'Roboto', 'Helvetica Neue', 'PingFang SC', 'Microsoft YaHei', sans-serif"
   font_family: "'Inter', -apple-system, BlinkMacSystemFont, 'Segoe UI', 'PingFang SC', 'Hiragino Sans GB', 'Microsoft YaHei', 'Helvetica Neue', Helvetica, Arial, sans-serif"
 
+  # 渲染后端类型
+  # - local: 本地 Playwright 渲染（默认，需要安装 playwright）
+  # - remote: 独立渲染服务（需要启动 render_service/server.py）
+  # - cloudflare: Cloudflare Browser Rendering（云端渲染，需要 Cloudflare 账号）
+  backend: local
+
+  # 渲染后端配置
+  backend_config:
+    # Remote 渲染服务配置（当 backend=remote 时生效）
+    service_url: "http://localhost:8084"
+    # token: "your_render_service_token"  # 可选，渲染服务的认证 Token
+    # 注意：渲染服务需要设置环境变量 RENDER_SERVICE_TOKEN 来启用认证
+    
+    # Cloudflare Browser Rendering 配置（当 backend=cloudflare 时生效）
+    # 获取方式：登录 Cloudflare Dashboard -> Account ID 在 URL 中
+    #           创建 API Token 需要 Browser Rendering 权限
+    # account_id: "your_cloudflare_account_id"
+    # api_token: "your_cloudflare_api_token"
+
+  # 静态资源基础 URL
+  # HTML 中的 @ 前缀会被替换为此 URL
+  # 本地模式（推荐用于本地 Playwright）：
+  #   - "file://./static" - 相对路径，会自动转换为 data URI
+  #   - "file:///D:/path/to/static" - 绝对路径
+  # 远程模式（推荐用于 Cloudflare 渲染）：
+  #   - "https://raw.githubusercontent.com/user/repo/branch/static" - GitHub Raw
+  #   - "https://your-cdn.com/static" - 自定义 CDN
+  static_base_url: "file://./static"
+
 
 
 # 队列配置（用于定时发送任务的持久化队列）

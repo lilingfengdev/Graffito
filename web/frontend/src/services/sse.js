@@ -24,6 +24,7 @@ class SSEService {
 
   /**
    * 连接到 SSE 流
+   * 注意：EventSource API 原生不支持自定义 headers，因此通过 URL 参数传递 token
    */
   async connect() {
     // 如果已连接或正在连接，则不重复连接
@@ -37,12 +38,14 @@ class SSEService {
       this.error.value = null
 
       // 获取认证 token
-      const token = localStorage.getItem('access_token')
+      const token = localStorage.getItem('token') || localStorage.getItem('access_token')
       if (!token) {
         throw new Error('No authentication token found')
       }
 
-      // 构建 SSE URL（EventSource 不支持自定义 headers，所以通过 URL 参数传递 token）
+      // 构建 SSE URL
+      // 注意：EventSource API 不支持自定义 headers，只能通过 URL 参数传递 token
+      // 这是 EventSource 的限制，无法使用 Authorization header
       const baseURL = api.defaults.baseURL || '/api'
       const url = `${baseURL}/events/stream?token=${encodeURIComponent(token)}`
 

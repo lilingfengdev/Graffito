@@ -41,6 +41,9 @@ humanfriendly>=10.0
 # AI/LLM
 openai>=1.50.0
 
+# Cloudflare
+cloudflare>=3.0.0
+
 # High-performance libraries
 orjson>=3.9.10
 

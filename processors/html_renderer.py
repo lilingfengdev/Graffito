@@ -121,6 +121,11 @@ class HTMLRenderer(ProcessorPlugin):
             margin: 0;
             padding: 5px;
             line-height: 1.5;
+            overflow: hidden;  /* 隐藏滚动条 */
+        }
+        
+        html {
+            overflow: hidden;  /* 隐藏滚动条 */
         }
 
         .container {
@@ -593,6 +598,10 @@ class HTMLRenderer(ProcessorPlugin):
             font_family=self.settings.rendering.font_family
         )
         
+        # 替换静态资源路径: @ -> static_base_url
+        static_base_url = self.settings.rendering.static_base_url
+        html = self._resolve_static_urls(html, static_base_url)
+        
         return html
         
     def render_messages(self, messages: List[Dict[str, Any]]) -> str:
@@ -703,7 +712,7 @@ class HTMLRenderer(ProcessorPlugin):
         
     def render_poke(self, msg: Dict[str, Any]) -> str:
         """渲染戳一戳"""
-        return '<img class="poke-icon" src="/static/source/poke.png" alt="戳一戳">'
+        return '<img class="poke-icon" src="@/source/poke.png" alt="戳一戳">'
         
     def render_forward(self, msg: Dict[str, Any]) -> str:
         """渲染合并转发"""
@@ -929,7 +938,7 @@ class HTMLRenderer(ProcessorPlugin):
         }
         
         icon = icon_map.get(ext, 'unknown.png')
-        return f"/static/file/{icon}"
+        return f"@/file/{icon}"
 
     # ===== 工具方法 =====
     def _html(self, text: Any) -> str:
@@ -1175,3 +1184,69 @@ class HTMLRenderer(ProcessorPlugin):
         # 相对路径：尽力转义
         safe = path.replace('\\', '/')
         return f'file://{quote(safe)}'
+    
+    def _resolve_static_urls(self, html: str, base_url: str) -> str:
+        """
+        解析并替换 HTML 中的静态资源引用
+        
+        将 @ 前缀替换为实际的静态资源 URL
+        例如: @/file/image.png -> https://example.com/static/file/image.png
+        
+        Args:
+            html: HTML 内容
+            base_url: 静态资源基础 URL
+            
+        Returns:
+            处理后的 HTML
+        """
+        import re
+        import os
+        from pathlib import Path
+        
+        # 移除尾部斜杠
+        base_url = base_url.rstrip('/')
+        
+        # 处理 file:// 协议的本地路径
+        if base_url.startswith('file://'):
+            # 提取路径部分
+            local_path = base_url[7:]  # 移除 'file://'
+            
+            # Windows 路径处理
+            if os.name == 'nt' and local_path.startswith('/') and ':' in local_path[1:3]:
+                local_path = local_path[1:]  # 移除开头的 /
+            
+            # 如果是相对路径，转换为绝对路径
+            if not os.path.isabs(local_path):
+                local_path = os.path.abspath(local_path)
+            
+            # 定义替换函数 - 转换为 data URI
+            def replace_match(match):
+                attr_value = match.group(1)
+                if attr_value.startswith('@/'):
+                    # 移除 @ 前缀
+                    resource_path = attr_value[2:]  # 移除 '@/'
+                    full_path = os.path.join(local_path, resource_path)
+                    
+                    # 尝试读取文件并转换为 data URI
+                    try:
+                        if os.path.exists(full_path):
+                            return self._image_to_data_uri(full_path)
+                    except Exception:
+                        pass
+                    
+                    # 如果失败，使用 file:// 协议
+                    return Path(full_path).as_uri()
+                return attr_value
+        else:
+            # 远程 URL - 直接替换
+            def replace_match(match):
+                attr_value = match.group(1)
+                if attr_value.startswith('@/'):
+                    # 替换 @ 为 base_url
+                    return base_url + attr_value[1:]  # 移除 @，保留 /
+                return attr_value
+        
+        # 匹配 src="@/..." 或 href="@/..."
+        html = re.sub(r'(?:src|href)="(@/[^"]+)"', lambda m: f'{m.group(0).split("=")[0]}="{replace_match(m)}"', html)
+        
+        return html

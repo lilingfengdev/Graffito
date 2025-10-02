@@ -177,6 +177,16 @@ class RenderingConfig(BaseModel):
     
     # 自定义字体族，支持多个字体回退
     font_family: str = "'Inter', -apple-system, BlinkMacSystemFont, 'Segoe UI', 'PingFang SC', 'Hiragino Sans GB', 'Microsoft YaHei', 'Helvetica Neue', Helvetica, Arial, sans-serif"
+    
+    # 渲染后端类型: local (本地 Playwright) | remote (独立渲染服务) | cloudflare (Cloudflare Browser Rendering)
+    backend: str = "local"
+    
+    # 渲染后端配置
+    backend_config: Dict[str, Any] = Field(default_factory=dict)
+    
+    # 静态资源基础 URL (可以是本地路径或远程 URL)
+    # 例如: "file:///path/to/static" 或 "https://raw.githubusercontent.com/user/repo/branch"
+    static_base_url: str = "file://./static"
 
 
  

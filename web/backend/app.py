@@ -243,13 +243,24 @@ try:
     app.mount("/static", StaticFiles(directory="static", check_dir=False), name="static")
     # 受保护的静态资源（需要登录）：/data
     class AuthenticatedStaticFiles(StaticFiles):
+        """
+        受保护的静态文件服务，要求客户端提供有效的 JWT token
+        
+        验证方式优先级：
+        1. Authorization header (推荐) - 通过 fetch API 请求图片资源时使用
+        2. URL 参数 token/access_token (兼容) - 仅为兼容 EventSource 等无法设置 header 的场景
+        
+        前端优化说明：
+        - 图片资源应使用 fetch + Authorization header 方式加载
+        - URL 参数方式保留作为后向兼容，未来可能移除
+        """
         async def __call__(self, scope, receive, send):
             # 仅处理 HTTP 请求
             if scope.get("type") != "http":
                 await super().__call__(scope, receive, send)
                 return
 
-            # 优先从 Authorization 头获取 Bearer Token；兼容查询参数 token/access_token
+            # 优先从 Authorization 头获取 Bearer Token（推荐方式）
             auth_value: Optional[str] = None
             try:
                 raw_headers = dict(scope.get("headers") or [])
@@ -259,6 +270,7 @@ try:
             except Exception:
                 auth_value = None
 
+            # 后向兼容：从查询参数获取 token（仅用于无法设置 header 的场景，如 EventSource）
             if not auth_value:
                 try:
                     from urllib.parse import parse_qs
