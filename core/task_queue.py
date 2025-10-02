@@ -4,6 +4,7 @@ Supported backends (configured via settings.queue.backend):
   - AsyncSQLiteQueue: backed by persist-queue AsyncSQLiteQueue
   - AsyncQueue: backed by persist-queue AsyncQueue (file-based)
   - MySQLQueue: backed by persist-queue MySQLQueue
+  - RedisQueue: backed by Redis lists (requires Redis enabled)
 """
 from __future__ import annotations
 
@@ -174,10 +175,62 @@ class MySQLQueueBackend(TaskQueueBackend):
         return None
 
 
+class RedisQueueBackend(TaskQueueBackend):
+    """Redis 队列后端（使用 redis-py 原生 List 操作）"""
+    def __init__(self):
+        self._redis = None
+        self._initialized = False
+        self._key_prefix = ""
+    
+    async def _ensure_redis(self):
+        if not self._initialized:
+            from core.redis_client import get_redis
+            from config import get_settings
+            
+            self._redis = await get_redis()
+            if not self._redis.enabled:
+                raise RuntimeError("Redis is not enabled in configuration")
+            
+            settings = get_settings()
+            self._key_prefix = settings.redis.key_prefix
+            self._initialized = True
+    
+    async def ensure_queue(self, name: str):
+        await self._ensure_redis()
+    
+    async def enqueue(self, name: str, job: Dict[str, Any]):
+        await self._ensure_redis()
+        import json
+        queue_key = f"{self._key_prefix}queue:{name}"
+        job_str = json.dumps(job, ensure_ascii=False)
+        await self._redis.client.rpush(queue_key, job_str)
+    
+    async def pop(self, name: str, timeout: int = 5) -> Optional[Tuple[Any, Dict[str, Any]]]:
+        await self._ensure_redis()
+        import json
+        
+        queue_key = f"{self._key_prefix}queue:{name}"
+        
+        try:
+            result = await self._redis.client.blpop(queue_key, timeout=timeout)
+            if result is None:
+                return None
+            
+            _, job_str = result
+            job = json.loads(job_str)
+            return job, job
+            
+        except (asyncio.TimeoutError, Exception):
+            return None
+    
+    async def recover_inflight(self, name: str):
+        return None
+
+
 def build_queue_backend() -> TaskQueueBackend:
     """Build backend per settings.queue.backend.
 
-    Options: 'AsyncSQLiteQueue' | 'AsyncQueue' | 'MySQLQueue'
+    Options: 'AsyncSQLiteQueue' | 'AsyncQueue' | 'MySQLQueue' | 'RedisQueue'
     """
     from config import get_settings
     settings = get_settings()
@@ -198,5 +251,7 @@ def build_queue_backend() -> TaskQueueBackend:
         database = mysql.get('database', 'oqqqueue')
         table = mysql.get('table', 'oqq_tasks')
         return MySQLQueueBackend(host, port, user, password, database, table)
+    if backend == 'RedisQueue':
+        return RedisQueueBackend()
     raise RuntimeError(f"Unsupported queue backend: {backend}")
 

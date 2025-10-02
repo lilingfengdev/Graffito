@@ -1,3 +1,4 @@
+# ==================== Core Framework ====================
 # Web框架
 fastapi>=0.104.0
 uvicorn[standard]>=0.24.0
@@ -6,71 +7,61 @@ aiohttp>=3.9.0
 
 # 数据库
 sqlalchemy>=2.0.0
-alembic>=1.12.0
 aiosqlite>=0.19.0
+redis>=5.0.1
 
-# 异步支持
-asyncio-mqtt>=0.16.0
-
-# 任务调度
-apscheduler>=3.10.0
-persist-queue>=0.8.1
-aiosqlite>=0.19.0
-aiofiles>=23.2.1
-tzlocal>=5.2
-
-# 数据验证
+# 数据验证与配置
 pydantic>=2.5.0
 pydantic-settings>=2.1.0
 python-dotenv>=1.0.0
 
-# 日志
-loguru>=0.7.0
+# ==================== Task & Queue ====================
+apscheduler>=3.10.0
+aiofiles>=23.2.1
+tzlocal>=5.2
 
-# 工具
-pyyaml>=6.0
-jinja2>=3.1.0
-pillow>=10.0.0
-playwright>=1.40.0
-qrcode>=7.4.2
-httpx>=0.25.0
-beautifulsoup4>=4.12.0
-linkify-it-py>=2.0.3
-humanfriendly>=10.0
-
-# AI/LLM
-openai>=1.50.0
-
-# Cloudflare
-cloudflare>=3.0.0
-
-# High-performance libraries
-orjson>=3.9.10
-
-# CLI工具
-click>=8.1.0
-tabulate>=0.9.0
-
-git+https://github.com/peter-wangxu/persist-queue
-# NoneBot2 接入
+# ==================== Bot & Platforms ====================
+# QQ机器人
 nonebot2>=2.2.0
 nonebot-adapter-onebot>=2.4.3
 
-# External platform SDKs
+# 平台SDK
 aioqzone
 bilibili-api-python>=17.3.0
 
-yarl~=1.20.1
-tenacity~=9.1.2
-typing_extensions~=4.15.0
-tylisten~=2.2.1
-lxml~=5.4.0
-urllib3~=2.5.0
-requests~=2.32.5
-colorama~=0.4.6
-pycryptodomex~=3.23.0
-PyJWT~=2.10.1
-Brotli~=1.1.0
-passlib[bcrypt]~=1.7.4
-python-multipart
+# 平台依赖
+requests>=2.32.5
+
+# ==================== AI & Rendering ====================
+# LLM
+openai>=1.50.0
+
+# 浏览器渲染
+playwright>=1.40.0
+pillow>=10.0.0
+cloudflare>=3.0.0
+
+# ==================== Utilities ====================
+# 日志
+loguru>=0.7.0
+
+# 通用工具
+pyyaml>=6.0
+jinja2>=3.1.0
+qrcode>=7.4.2
+httpx>=0.25.0
+linkify-it-py>=2.0.3
+humanfriendly>=10.0
+orjson>=3.9.10
 psutil>=5.9.0
+
+# 认证
+PyJWT>=2.10.1
+passlib[bcrypt]>=1.7.4
+
+# ==================== CLI ====================
+click>=8.1.0
+tabulate>=0.9.0
+
+# ==================== 队列 ====================
+git+https://github.com/peter-wangxu/persist-queue

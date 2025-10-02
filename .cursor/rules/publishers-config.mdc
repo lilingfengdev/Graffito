@@ -1,99 +1,145 @@
 ---
-description: 发布器（publishers）配置与实现约定
+description: "发布器（publishers）配置与实现约定"
+globs: "publishers/**/*.py,config/publishers/*.yml"
 ---
 
-# 发布器配置与实现约定（publishers-config）
+# 发布器配置与实现约定
 
-适用范围：`publishers/*` 及其配置 `config/publishers/*.yml`。
+本规则定义了发布器（publishers）模块的架构、配置约定和实现要求。
 
-## 发现与注册
-- 发布器基类位于 [publishers/base.py](mdc:publishers/base.py)，动态发现与注册见 [publishers/loader.py](mdc:publishers/loader.py)。
-- 新增平台时，在 `publishers/<platform>/publisher.py` 中实现具体发布逻辑，并保证被加载器发现。
+## 1. 发布器发现与注册
 
-## 内容组装
-- 文本统一通过 `BasePublisher.prepare_content()` 生成：
-  - 是否添加编号/序号
-  - 是否包含 @ 提及
-  - 分段文本策略
-  - 外部链接拼接策略
-- 以上行为由平台配置文件控制：
-  - 哔哩哔哩：[config/publishers/bilibili.yml](mdc:config/publishers/bilibili.yml)
-  - QQ 空间：[config/publishers/qzone.yml](mdc:config/publishers/qzone.yml)
-  - 小红书：[config/publishers/rednote.yml](mdc:config/publishers/rednote.yml)
+- **启用控制**: 发布器通过 `config/publishers/<platform>.yml` 中的 `enabled: true` 字段启用
+- **发现机制**: 
+  - 优先显式导入 `publishers.<key>.publisher` 模块
+  - 失败时回退到包遍历自动发现
+  - 平台键从包路径提取：`publishers.<key>.*` → `<key>`
+- **加载器位置**: [`publishers/loader.py`](mdc:publishers/loader.py)
 
-## 输入依赖
-- 依赖处理管道写回的字段：
-  - `submission.processed_content`（HTML）
-  - `submission.rendered_images`（图片路径/句柄）
-  - 可选：`submission.llm_result`（补充标签/话题/外链）
+## 2. 基类职责
 
-## 错误处理
-- 对平台接口错误进行分级记录并可重试；避免一次失败导致整体中断。
-- 谨慎处理频率限制与鉴权失败；必要时退避重试。
+基类位于 [`publishers/base.py`](mdc:publishers/base.py)，定义了以下核心方法：
 
-## 配置结构建议
-- 鉴权：`access_key` / `cookies` / `token` 等敏感字段
-- 文本：`include_index`、`allow_mentions`、`segment_strategy`、`link_strategy`
-- 图片：`max_images`、`image_format`、`quality`
-- 发布策略：`retry`、`backoff`、`timeout`
----
-alwaysApply: false
-description: 发布器（publishers）配置与实现约定
-globs: publishers/**/*.py,config/publishers/*.yml
----
-## 发布器发现与配置
+### 2.1 初始化
+```python
+async def initialize(self):
+    """加载账号组配置到 self.accounts（主/副账号）"""
+```
 
-- 启用由 `config/publishers/<platform>.yml` 的 `enabled: true` 控制。
-- 发现逻辑优先按平台显式导入 `publishers.<key>.publisher`，失败时回退包遍历（见 `publishers/loader.py`）。
-- 平台键来自包路径：`publishers.<key>.* -> <key>`。
+### 2.2 内容组装
+```python
+def prepare_content(self, submission: Submission, include_text: bool = True, **kwargs) -> str:
+    """统一组装发布文本
+    
+    受平台配置控制的行为：
+    - include_publish_id: 是否包含发布编号 (#123)
+    - include_at_sender: 是否@投稿人
+    - include_segments: 是否包含聊天分段文本
+    - publish_text: 是否发布正文（false时仅发图）
+    
+    链接处理：
+    - 始终追加链接列表（不受 include_text 影响）
+    - 单条链接：行内展示
+    - 多条链接：带编号的列表
+    
+    图片来源：
+    - rendered: 仅使用渲染后的图片
+    - chat: 仅使用聊天中的原始图片
+    - both: 两者都使用（去重保序）
+    """
+```
 
-### 基类职责（`publishers/base.py`）
-- `initialize()` 加载账号组配置至 `self.accounts`（主/副账号）。
-- `prepare_content(submission, include_text)` 统一组装文本，受平台配置控制：
-  - `include_publish_id`、`include_at_sender`、`include_segments`、`publish_text`。
-  - 链接始终追加并美化展示；图片来源可选 `rendered|chat|both`（去重保序）。
-- `record_publish()` 记录 `PublishRecord`，成功时更新 `Submission.status=PUBLISHED` 与 `published_at`。
+### 2.3 发布记录
+```python
+async def record_publish(self, submission_ids: List[int], content: str, 
+                        images: List[str], result: Dict[str, Any],
+                        account_id: Optional[str] = None):
+    """记录发布结果到 PublishRecord
+    
+    成功时同步更新：
+    - Submission.status = PUBLISHED
+    - Submission.published_at = now()
+    """
+```
 
-### 平台配置
-- 使用 `utils/common.get_platform_config(key)`，在发布器内通过 `_get_platform_config()` 访问。
+### 2.4 平台特定 @ 格式化
+```python
+def format_at(self, submission: Submission) -> str:
+    """格式化平台特定的@文本
+    
+    默认实现返回 QQ 空间格式。
+    子类可覆盖以适配平台（如 B 站使用 @昵称 纯文本）
+    """
+```
 
-相关文件：[`publishers/base.py`](mdc:publishers/base.py)、[`publishers/loader.py`](mdc:publishers/loader.py)、[`config/publishers/qzone.yml`](mdc:config/publishers/qzone.yml)、[`config/publishers/bilibili.yml`](mdc:config/publishers/bilibili.yml)、[`config/publishers/rednote.yml`](mdc:config/publishers/rednote.yml)
----
-description: 发布器（publishers）配置与实现约定
-globs: publishers/*.py,publishers/**/*.py,services/*.py
----
-## 发布器发现与配置
+## 3. 子类必须实现的方法
 
-- 启用由 `config/publishers/<platform>.yml` 的 `enabled: true` 控制。
-- 发现逻辑优先按平台显式导入 `publishers.<key>.publisher`，失败时回退到包遍历。
-- 平台键来自包路径：`publishers.<key>.* -> <key>`（见 `publishers/loader.py`）。
+```python
+@abstractmethod
+async def publish(self, content: str, images: List[str] = None, **kwargs) -> Dict[str, Any]:
+    """发布单条内容"""
+    
+@abstractmethod
+async def batch_publish(self, items: List[Dict[str, Any]]) -> List[Dict[str, Any]]:
+    """批量发布"""
+    
+@abstractmethod
+async def check_login_status(self) -> bool:
+    """检查登录状态"""
+```
 
-### 基类职责（`publishers/base.py`）
-- `initialize()` 加载账号组配置到 `self.accounts`（主/副账号）。
-- `prepare_content(submission, include_text)` 统一组装文本，受平台配置控制：
-  - `include_publish_id`、`include_at_sender`、`include_segments`、`publish_text`。
-  - 链接始终追加并美化展示；图片来源可选 `rendered|chat|both`。
-- `record_publish()` 统一记录 `PublishRecord` 并在成功时更新 `Submission.status=PUBLISHED`。
+## 4. 平台配置文件
 
-### 平台配置读取
-- 使用 `utils/common.get_platform_config(key)`，在发布器内通过 `_get_platform_config()` 访问。
----
-description: 发布器（publishers）配置与实现约定
-globs: publishers/**/*.py,config/publishers/*.yml
----
-## 发布器发现与配置
+配置文件位于 `config/publishers/` 目录：
+- [`bilibili.yml`](mdc:config/publishers/bilibili.yml) - 哔哩哔哩
+- [`qzone.yml`](mdc:config/publishers/qzone.yml) - QQ 空间
+- [`rednote.yml`](mdc:config/publishers/rednote.yml) - 小红书
 
-- 启用由 `config/publishers/<platform>.yml` 的 `enabled: true` 控制。
-- 发现逻辑优先按平台显式导入 `publishers.<key>.publisher`，失败时回退到包遍历。
-- 平台键来自包路径：`publishers.<key>.* -> <key>`（见 `publishers/loader.py`）。
+### 4.1 配置读取
+```python
+# 在发布器内部使用
+cfg = self._get_platform_config()  # 调用 utils.common.get_platform_config()
+```
 
-### 基类职责（`publishers/base.py`）
-- `initialize()` 加载账号组配置到 `self.accounts`（主/副账号）。
-- `prepare_content(submission, include_text)` 统一组装文本，受平台配置控制：
-  - `include_publish_id`、`include_at_sender`、`include_segments`、`publish_text`。
-  - 链接始终追加并美化展示；图片来源可选 `rendered|chat|both`。
-- `record_publish()` 统一记录 `PublishRecord` 并在成功时更新 `Submission.status=PUBLISHED`。
+### 4.2 标准配置字段
+```yaml
+enabled: true                    # 是否启用
+max_attempts: 3                  # 最大重试次数
+batch_size: 30                   # 批量发布大小
+max_images_per_post: 9           # 单条最大图片数
+send_schedule: []                # 定时发送时间表
 
-### 平台配置读取
-- 使用 `utils/common.get_platform_config(key)`，在发布器内通过 `_get_platform_config()` 访问。
+# 内容控制
+publish_text: true               # 是否发布文本
+include_publish_id: true         # 是否包含编号
+include_at_sender: true          # 是否@投稿人
+include_segments: true           # 是否包含聊天分段
+image_source: "rendered"         # rendered|chat|both
+
+# 平台特定配置
+accounts: {}                     # 账号配置字典
+```
+
+## 5. 输入依赖
+
+发布器依赖处理管道写回的以下字段：
+- `submission.processed_content`: 包含 text、html、links
+- `submission.rendered_images`: 渲染后的图片路径列表
+- `submission.llm_result`: LLM 处理结果（可选，用于提取标签/话题）
+
+## 6. 错误处理
+
+- **分级记录**: 对平台接口错误进行分级日志记录
+- **重试策略**: 支持可配置的重试次数和退避策略
+- **频率限制**: 谨慎处理 rate limit 和鉴权失败
+- **局部失败**: 批量发布时单条失败不中断整体流程
+
+## 7. 相关文件
+
+- 基类: [`publishers/base.py`](mdc:publishers/base.py)
+- 加载器: [`publishers/loader.py`](mdc:publishers/loader.py)
+- QQ空间: [`publishers/qzone/publisher.py`](mdc:publishers/qzone/publisher.py)
+- 哔哩哔哩: [`publishers/bilibili/publisher.py`](mdc:publishers/bilibili/publisher.py)
+- 小红书: [`publishers/rednote/publisher.py`](mdc:publishers/rednote/publisher.py)
+- 配置工具: [`utils/common.py`](mdc:utils/common.py)
 

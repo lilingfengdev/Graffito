@@ -1,0 +1,363 @@
+---
+description: "渲染系统架构与后端配置"
+globs: "processors/*renderer.py,render_service/*.py"
+---
+
+# 渲染系统架构与后端配置
+
+本规则定义了 XWall 的渲染系统架构、多后端支持和配置约定。
+
+## 1. 渲染流程概览
+
+```
+LLM处理 → HTML渲染 → 内容渲染（截图）
+           ↓            ↓
+      rendered_html  rendered_images
+```
+
+## 2. 渲染器模块
+
+### 2.1 HTML 渲染器
+
+**文件**: [`processors/html_renderer.py`](mdc:processors/html_renderer.py)
+
+**职责**:
+- 使用 Jinja2 模板渲染消息为 HTML
+- 提取消息中的链接（http/https URL）
+- 处理各类消息类型（文本、图片、文件、表情等）
+
+**输入**:
+```python
+data = {
+    "messages": [...],      # LLM筛选后的消息列表
+    "llm_result": {...},    # LLM处理结果
+    "nickname": str,        # 发送者昵称（匿名时为空）
+    "watermark_text": str,  # 水印文本
+    "wall_mark": str        # 墙标识
+}
+```
+
+**输出**:
+```python
+data["rendered_html"] = "完整的HTML字符串"
+data["extracted_links"] = ["url1", "url2", ...]  # 提取的链接
+```
+
+### 2.2 内容渲染器
+
+**文件**: [`processors/content_renderer.py`](mdc:processors/content_renderer.py)
+
+**职责**:
+- 将 HTML 渲染为图片（PNG）
+- 支持分页截图（超长内容自动分页）
+- 管理多种渲染后端
+
+**输入**:
+```python
+data["rendered_html"]  # HTML内容
+```
+
+**输出**:
+```python
+data["rendered_images"] = [
+    "data/cache/rendered/1/page_01.png",
+    "data/cache/rendered/1/page_02.png",
+]
+```
+
+## 3. 渲染后端架构
+
+### 3.1 后端类型
+
+XWall 支持三种渲染后端：
+
+1. **local**: 本地 Playwright（默认）
+2. **remote**: 独立渲染服务（HTTP API）
+3. **cloudflare**: Cloudflare Browser Rendering
+
+### 3.2 后端配置
+
+```yaml
+rendering:
+  backend: "local"  # local | remote | cloudflare
+  backend_config:
+    # local 后端配置
+    headless: true
+    
+    # remote 后端配置
+    render_service_url: "http://localhost:8084"
+    timeout: 30
+    
+    # cloudflare 后端配置
+    cf_account_id: "your-account-id"
+    cf_api_token: "your-api-token"
+  
+  # 通用配置
+  font_family: "'Inter', -apple-system, BlinkMacSystemFont, 'Segoe UI', 'PingFang SC'"
+  static_base_url: "file://./static"
+```
+
+## 4. Local 后端（Playwright）
+
+### 4.1 实现
+
+**文件**: [`processors/render_backends.py`](mdc:processors/render_backends.py)
+
+```python
+class LocalRenderBackend(RenderBackend):
+    async def initialize(self):
+        self.playwright = await async_playwright().start()
+        self.browser = await self.playwright.chromium.launch(headless=True)
+    
+    async def render(self, html: str, output_dir: Path) -> List[str]:
+        page = await self.browser.new_page()
+        await page.set_content(html)
+        # 分页截图逻辑
+        ...
+```
+
+### 4.2 优缺点
+
+**优点**:
+- 无需额外服务
+- 配置简单
+- 适合单机部署
+
+**缺点**:
+- 占用主进程资源
+- Playwright 安装体积较大
+- 并发能力受限
+
+## 5. Remote 后端（独立服务）
+
+### 5.1 架构
+
+```
+主服务 ──HTTP POST──> 渲染服务 ──Playwright──> 返回图片
+(main.py)             (render_service/server.py)
+```
+
+### 5.2 渲染服务
+
+**文件**: [`render_service/server.py`](mdc:render_service/server.py)
+
+**启动**:
+```bash
+# Windows
+render.bat
+
+# Linux/macOS
+./render.sh
+```
+
+**API**:
+```python
+POST /render
+{
+    "html": "<html>...</html>",
+    "config": {
+        "max_height": 12000,
+        "page_height": 4000,
+        "device_scale_factor": 2
+    }
+}
+
+Response:
+{
+    "success": true,
+    "images": [
+        "base64_encoded_png_1",
+        "base64_encoded_png_2"
+    ]
+}
+```
+
+### 5.3 配置
+
+```yaml
+rendering:
+  backend: "remote"
+  backend_config:
+    render_service_url: "http://localhost:8084"
+    timeout: 30
+```
+
+### 5.4 优缺点
+
+**优点**:
+- 主服务轻量化
+- 独立扩展和重启
+- 可部署在不同机器
+
+**缺点**:
+- 需要额外部署
+- 网络通信开销
+- 需要处理服务可用性
+
+## 6. Cloudflare 后端
+
+### 6.1 实现
+
+使用 Cloudflare Browser Rendering API:
+
+```python
+class CloudflareRenderBackend(RenderBackend):
+    async def render(self, html: str, output_dir: Path) -> List[str]:
+        # 上传 HTML 到临时存储
+        # 调用 CF API 进行渲染
+        # 下载截图
+        ...
+```
+
+### 6.2 配置
+
+```yaml
+rendering:
+  backend: "cloudflare"
+  backend_config:
+    cf_account_id: "${CF_ACCOUNT_ID}"
+    cf_api_token: "${CF_API_TOKEN}"
+    cf_endpoint: "https://api.cloudflare.com/client/v4"
+```
+
+### 6.3 优缺点
+
+**优点**:
+- 无需维护浏览器环境
+- 弹性伸缩
+- 全球分布式
+
+**缺点**:
+- 需要 Cloudflare 账号
+- 有 API 调用限制
+- 需要上传/下载 HTML
+
+## 7. 渲染参数
+
+### 7.1 页面尺寸
+
+```python
+# 在 HTML 模板中设置
+width: 600px        # 内容宽度
+max_height: 12000px # 最大高度
+page_height: 4000px # 单页高度（分页阈值）
+```
+
+### 7.2 设备缩放
+
+```python
+device_scale_factor: 2  # Retina 显示（2x）
+```
+
+### 7.3 字体配置
+
+```yaml
+rendering:
+  font_family: "'Inter', -apple-system, BlinkMacSystemFont, 'Segoe UI', 'PingFang SC', 'Hiragino Sans GB', 'Microsoft YaHei'"
+```
+
+**字体回退策略**:
+1. Inter (自定义英文字体)
+2. -apple-system (macOS 系统字体)
+3. BlinkMacSystemFont (Chrome 系统字体)
+4. Segoe UI (Windows 系统字体)
+5. PingFang SC (macOS 中文)
+6. Hiragino Sans GB (旧版 macOS 中文)
+7. Microsoft YaHei (Windows 中文)
+8. sans-serif (通用无衬线)
+
+## 8. 静态资源
+
+### 8.1 资源类型
+
+- 文件图标: `static/file/*.png`
+- QQ 表情: `static/qlottie/*.gif`
+- 其他素材: `static/source/*.png`
+
+### 8.2 URL 配置
+
+```yaml
+rendering:
+  static_base_url: "file://./static"  # 本地
+  # 或
+  static_base_url: "https://cdn.example.com/static"  # CDN
+```
+
+### 8.3 在 HTML 中引用
+
+```html
+<!-- Jinja2 模板 -->
+<img src="{{ static_base_url }}/file/{{ icon_name }}.png">
+```
+
+## 9. 分页逻辑
+
+### 9.1 触发条件
+
+当渲染内容高度超过 `page_height` 时自动分页：
+
+```python
+if total_height > page_height:
+    # 按 page_height 切分
+    pages = ceil(total_height / page_height)
+```
+
+### 9.2 命名规则
+
+```
+data/cache/rendered/{submission_id}/page_01.png
+data/cache/rendered/{submission_id}/page_02.png
+...
+```
+
+## 10. 错误处理
+
+### 10.1 渲染失败
+
+```python
+try:
+    images = await backend.render(html, output_dir)
+except Exception as e:
+    logger.error(f"渲染失败: {e}")
+    # 回退策略或重试
+```
+
+### 10.2 后端不可用
+
+- Local: 检查 Playwright 是否正确安装
+- Remote: 检查渲染服务是否启动
+- Cloudflare: 检查 API 凭证和网络连接
+
+## 11. 性能优化
+
+### 11.1 浏览器复用
+
+```python
+# 共享浏览器实例，避免频繁启动
+self.browser = await playwright.chromium.launch()
+# 每次渲染创建新页面
+page = await self.browser.new_page()
+```
+
+### 11.2 并发控制
+
+```python
+# 限制同时渲染的任务数
+semaphore = asyncio.Semaphore(max_concurrent)
+async with semaphore:
+    await render_task()
+```
+
+### 11.3 缓存策略
+
+- 已渲染的图片不重复渲染
+- 使用 `submission_id` 作为目录名组织文件
+
+## 12. 相关文件
+
+- HTML 渲染器: [`processors/html_renderer.py`](mdc:processors/html_renderer.py)
+- 内容渲染器: [`processors/content_renderer.py`](mdc:processors/content_renderer.py)
+- 渲染后端: [`processors/render_backends.py`](mdc:processors/render_backends.py)
+- 渲染服务: [`render_service/server.py`](mdc:render_service/server.py)
+- 启动脚本: [`render.bat`](mdc:render.bat) / [`render.sh`](mdc:render.sh)
+- 配置: [`config/settings.py`](mdc:config/settings.py)

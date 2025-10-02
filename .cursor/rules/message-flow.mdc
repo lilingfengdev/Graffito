@@ -1,0 +1,231 @@
+---
+description: "消息接收与处理流程"
+globs: "receivers/**/*.py,services/*.py"
+---
+
+# 消息接收与处理流程
+
+本规则定义了从消息接收到发布的完整流程和关键节点。
+
+## 1. 消息接收阶段
+
+### 1.1 接收器入口
+
+- **QQ 接收器**: [`receivers/qq/nonebot_receiver.py`](mdc:receivers/qq/nonebot_receiver.py)
+- **基于**: NoneBot2 + OneBot v11 适配器
+- **监听事件**:
+  - `PrivateMessageEvent`: 私聊消息
+  - `GroupMessageEvent`: 群消息（仅限管理群）
+  - `FriendRequestEvent`: 好友请求
+
+### 1.2 消息缓存机制
+
+```python
+# 消息暂存到 MessageCache 表
+MessageCache(
+    sender_id=sender_id,
+    receiver_id=receiver_id,
+    message_id=message_id,
+    message_content=message_dict,  # JSON格式
+    message_time=timestamp,
+)
+```
+
+**缓存策略**:
+- 用户发送多条消息时，先缓存不立即处理
+- 等待 `processing.wait_time` 秒（默认120秒）后合并处理
+- 特殊指令（如 `#完成`）可立即触发处理
+
+### 1.3 特殊指令
+
+| 指令 | 功能 | 说明 |
+|------|------|------|
+| `#完成` | 立即提交投稿 | 结束缓存等待，立即处理 |
+| `#匿名` | 标记为匿名 | 设置 `is_anonymous=True` |
+| `#评论 <文本>` | 追加评论 | 投稿者可为已发布内容追加评论 |
+
+## 2. 投稿创建阶段
+
+### 2.1 Submission 创建
+
+当缓存时间到期或收到 `#完成` 指令时：
+
+```python
+submission = Submission(
+    sender_id=sender_id,
+    sender_nickname=nickname,
+    receiver_id=receiver_id,
+    group_name=group_name,
+    raw_content=merged_messages,  # 合并的消息列表
+    status=SubmissionStatus.PENDING,
+    is_anonymous=is_anonymous,
+    internal_id=next_internal_id(),
+)
+```
+
+### 2.2 黑名单检查
+
+- 查询 `BlackList` 表检查用户是否被拉黑
+- 拉黑检查作用域为账号组（`group_name`）
+- 黑名单可设置过期时间或永久
+
+## 3. 处理管道阶段
+
+### 3.1 管道触发
+
+```python
+from processors.pipeline import get_shared_pipeline
+
+pipeline = get_shared_pipeline()
+await pipeline.process_submission(submission_id)
+```
+
+### 3.2 状态流转
+
+```
+PENDING -> PROCESSING -> WAITING -> PUBLISHED
+   ↓          ↓            ↓          ↓
+ 新建    LLM处理中    等待发布    已发布
+```
+
+**关键节点**:
+1. `PROCESSING`: 进入处理管道时设置
+2. `WAITING`: 渲染完成，等待审核/发布
+3. `PUBLISHED`: 成功发布到至少一个平台
+
+### 3.3 处理失败
+
+- 处理失败时状态回退到 `PENDING`
+- 可通过管理后台重新触发处理
+- 支持跳过 LLM 直接重新渲染（`skip_llm=True`）
+
+## 4. 审核阶段（可选）
+
+### 4.1 自动审核
+
+```python
+# 配置中控制
+audit:
+  auto_approve: false           # 是否自动通过
+  ai_safety_check: true         # AI 安全检查
+  sensitive_words: []           # 敏感词列表
+  skip_image_audit_over_mb: 5.0 # 大图片跳过审核
+```
+
+### 4.2 人工审核
+
+- **管理后台**: `web/backend/app.py` 提供审核接口
+- **操作**: 通过/拒绝/删除/修改
+- **记录**: 所有操作记入 `AuditLog` 表
+
+### 4.3 审核动作
+
+```python
+from core.enums import AuditAction
+
+AuditAction.APPROVE   # 通过
+AuditAction.REJECT    # 拒绝
+AuditAction.DELETE    # 删除
+AuditAction.COMMENT   # 添加评论
+AuditAction.BLACKLIST # 拉黑用户
+```
+
+## 5. 发布阶段
+
+### 5.1 发布触发
+
+**自动发布** (auto_approve=True):
+- 处理完成后自动进入 `StoredPost` 队列
+- 按照 `send_schedule` 配置的时间点发布
+
+**手动发布** (auto_approve=False):
+- 管理员审核通过后加入队列
+- 支持立即发布或定时发布
+
+### 5.2 发布队列
+
+```python
+StoredPost(
+    submission_id=submission_id,
+    group_name=group_name,
+    publish_id=publish_id,          # 发布编号
+    priority=0,                      # 优先级
+    scheduled_time=None,             # 计划时间
+    pending_platforms=["qzone", "bilibili"]  # 待发布平台
+)
+```
+
+### 5.3 独立平台发布模式
+
+- 每个平台独立发布和清理
+- `pending_platforms` 记录待发布平台列表
+- 某平台发布成功后从列表中移除
+- 所有平台都发布后删除 `StoredPost` 记录
+
+## 6. 消息清理
+
+### 6.1 缓存清理时机
+
+```python
+# 在 ProcessingPipeline.process_submission() 完成后
+stmt = delete(MessageCache).where(
+    and_(
+        MessageCache.sender_id == submission.sender_id,
+        MessageCache.receiver_id == submission.receiver_id
+    )
+)
+```
+
+**目的**: 避免历史消息在下次投稿时被重复合并
+
+### 6.2 清理策略
+
+- 处理成功后清理对应用户的所有缓存消息
+- 处理失败不清理，保留消息以便重试
+- 定期清理过期的未处理缓存（可选）
+
+## 7. 通知服务
+
+### 7.1 通知场景
+
+- 投稿处理完成
+- 审核结果（通过/拒绝）
+- 发布成功/失败
+- 系统错误
+
+### 7.2 通知方式
+
+- QQ 私聊消息（通过 OneBot API）
+- 支持消息模板和快捷回复
+- 可配置通知开关
+
+## 8. 相关配置
+
+```yaml
+processing:
+  wait_time: 120              # 消息等待合并时间（秒）
+  max_concurrent: 10          # 最大并发处理数
+
+receivers:
+  qq:
+    enabled: true
+    auto_accept_friend: true  # 自动通过好友申请
+    friend_request_window: 300
+    friend_accept_delay_min: 180
+    friend_accept_delay_max: 240
+    access_token: ""          # OneBot 访问令牌
+
+audit:
+  auto_approve: false         # 自动通过审核
+  ai_safety_check: true       # AI 安全检查
+```
+
+## 9. 关键文件索引
+
+- QQ 接收器: [`receivers/qq/nonebot_receiver.py`](mdc:receivers/qq/nonebot_receiver.py)
+- 接收器基类: [`receivers/base.py`](mdc:receivers/base.py)
+- 投稿服务: [`services/submission_service.py`](mdc:services/submission_service.py)
+- 审核服务: [`services/audit_service.py`](mdc:services/audit_service.py)
+- 通知服务: [`services/notification_service.py`](mdc:services/notification_service.py)
+- 处理管道: [`processors/pipeline.py`](mdc:processors/pipeline.py)
+- 数据模型: [`core/models.py`](mdc:core/models.py)

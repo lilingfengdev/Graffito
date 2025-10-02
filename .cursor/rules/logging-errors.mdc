@@ -1,0 +1,500 @@
+---
+description: "日志记录与错误处理规范"
+globs: "**/*.py"
+---
+
+# 日志记录与错误处理规范
+
+本规则定义了 XWall 项目中日志记录和错误处理的最佳实践。
+
+## 1. 日志系统
+
+### 1.1 使用 Loguru
+
+XWall 使用 [`loguru`](https://github.com/Delgan/loguru) 作为日志库：
+
+```python
+from loguru import logger
+
+logger.info("这是一条信息日志")
+logger.debug("这是一条调试日志")
+logger.warning("这是一条警告日志")
+logger.error("这是一条错误日志")
+logger.critical("这是一条严重错误日志")
+```
+
+**禁止使用标准 logging 模块**（除非与第三方库集成）。
+
+### 1.2 日志配置
+
+日志配置在 [`config/config.yaml`](mdc:config/config.yaml) 中：
+
+```yaml
+system:
+  log_level: "INFO"  # DEBUG | INFO | WARNING | ERROR | CRITICAL
+  data_dir: "./data"
+```
+
+### 1.3 日志文件
+
+```python
+# 在 main.py 中配置
+from loguru import logger
+from config import get_settings
+
+settings = get_settings()
+
+# 添加文件日志
+logger.add(
+    "data/logs/xwall_{time:YYYY-MM-DD}.log",
+    rotation="00:00",              # 每天午夜轮转
+    retention="30 days",           # 保留 30 天
+    level=settings.system.log_level,
+    encoding="utf-8",
+    enqueue=True,                  # 异步写入
+)
+```
+
+**日志目录**:
+- 主服务: `data/logs/xwall_YYYY-MM-DD.log`
+- 渲染服务: `logs/render_service_YYYY-MM-DD_HH-MM-SS_PID.log`
+
+## 2. 日志级别使用指南
+
+### 2.1 DEBUG
+
+用于开发调试，记录详细的执行流程：
+
+```python
+logger.debug(f"处理投稿 {submission_id}，当前状态: {status}")
+logger.debug(f"LLM 请求参数: {params}")
+```
+
+**特点**:
+- 仅在 `debug=True` 时启用
+- 可能包含敏感信息
+- 生产环境不记录
+
+### 2.2 INFO
+
+记录正常的业务流程和关键操作：
+
+```python
+logger.info(f"投稿处理完成: submission_id={submission_id}")
+logger.info(f"用户登录: username={username}")
+logger.info(f"发布成功: platform={platform} tid={tid}")
+```
+
+**特点**:
+- 默认日志级别
+- 记录重要的业务事件
+- 不包含敏感细节
+
+### 2.3 WARNING
+
+记录异常但不致命的情况：
+
+```python
+logger.warning(f"投稿 {submission_id} 包含敏感词")
+logger.warning(f"渲染服务响应慢: {elapsed}秒")
+logger.warning(f"平台 {platform} 剩余配额不足")
+```
+
+**特点**:
+- 需要关注但不影响核心功能
+- 可能需要后续处理
+- 帮助发现潜在问题
+
+### 2.4 ERROR
+
+记录错误和异常：
+
+```python
+logger.error(f"处理投稿失败 {submission_id}: {e}")
+logger.error(f"发布到 {platform} 失败: {error_msg}")
+logger.error(f"数据库连接失败: {e}", exc_info=True)
+```
+
+**特点**:
+- 功能执行失败
+- 包含异常信息
+- 使用 `exc_info=True` 记录堆栈
+
+### 2.5 CRITICAL
+
+记录严重的系统级错误：
+
+```python
+logger.critical("数据库初始化失败，系统无法启动")
+logger.critical("所有渲染后端均不可用")
+```
+
+**特点**:
+- 系统无法正常运行
+- 需要立即处理
+- 可能导致服务终止
+
+## 3. 结构化日志
+
+### 3.1 使用上下文绑定
+
+为特定模块添加上下文信息：
+
+```python
+# 在类或模块中
+class MyService:
+    def __init__(self):
+        self.logger = logger.bind(module="my_service")
+    
+    async def do_something(self):
+        self.logger.info("执行操作")
+        # 输出: [my_service] 执行操作
+```
+
+### 3.2 结构化数据
+
+```python
+logger.info(
+    "投稿处理完成",
+    extra={
+        "submission_id": 123,
+        "status": "WAITING",
+        "duration_ms": 1523
+    }
+)
+```
+
+### 3.3 关键字段
+
+在日志中包含以下关键字段便于追踪：
+
+- `submission_id`: 投稿 ID
+- `user_id` / `sender_id`: 用户 ID
+- `platform`: 发布平台
+- `action`: 操作类型
+- `duration`: 执行时间
+
+## 4. 错误处理
+
+### 4.1 异常捕获
+
+**正确示例**:
+
+```python
+async def process_submission(submission_id: int):
+    try:
+        # 业务逻辑
+        await do_something()
+    except SpecificException as e:
+        logger.error(f"处理失败: {e}", exc_info=True)
+        # 处理或重新抛出
+        raise
+    except Exception as e:
+        logger.critical(f"未知错误: {e}", exc_info=True)
+        raise
+```
+
+**错误示例**:
+
+```python
+# 错误：吞掉异常
+try:
+    await do_something()
+except:
+    pass  # 不记录、不处理
+
+# 错误：捕获过于宽泛
+try:
+    await do_something()
+except Exception:
+    logger.error("失败")  # 没有异常信息
+```
+
+### 4.2 异常传播
+
+- 捕获后重新抛出：保留堆栈信息
+- 不要吞掉异常：除非有充分理由
+- 在顶层统一处理：如 FastAPI 的异常处理器
+
+```python
+# 业务层：记录并重新抛出
+async def service_function():
+    try:
+        result = await risky_operation()
+    except ValueError as e:
+        logger.error(f"参数错误: {e}")
+        raise  # 重新抛出
+
+# API 层：转换为 HTTP 响应
+@app.post("/api/submit")
+async def submit(data: Data):
+    try:
+        return await service_function()
+    except ValueError as e:
+        raise HTTPException(status_code=400, detail=str(e))
+```
+
+### 4.3 自定义异常
+
+定义业务异常类：
+
+```python
+class XWallException(Exception):
+    """XWall 基础异常"""
+    pass
+
+class SubmissionNotFoundError(XWallException):
+    """投稿不存在"""
+    pass
+
+class PlatformPublishError(XWallException):
+    """平台发布失败"""
+    def __init__(self, platform: str, reason: str):
+        self.platform = platform
+        self.reason = reason
+        super().__init__(f"{platform} 发布失败: {reason}")
+```
+
+## 5. 敏感信息保护
+
+### 5.1 不要记录的内容
+
+- 密码（明文或哈希）
+- API 密钥完整内容
+- 用户隐私信息（除非脱敏）
+- Cookie/Token 完整内容
+
+### 5.2 安全记录敏感信息
+
+```python
+# 错误
+logger.debug(f"API Key: {api_key}")
+
+# 正确
+logger.debug(f"API Key: {api_key[:8]}...")
+
+# 正确
+logger.debug(f"使用 API Key: {'已配置' if api_key else '未配置'}")
+```
+
+### 5.3 脱敏处理
+
+```python
+def mask_sensitive(data: str) -> str:
+    """脱敏敏感数据"""
+    if len(data) <= 8:
+        return "*" * len(data)
+    return f"{data[:4]}...{data[-4:]}"
+
+logger.info(f"Token: {mask_sensitive(token)}")
+```
+
+## 6. 性能日志
+
+### 6.1 记录耗时
+
+```python
+import time
+
+start = time.time()
+await expensive_operation()
+duration = time.time() - start
+
+if duration > 5:
+    logger.warning(f"操作耗时过长: {duration:.2f}秒")
+else:
+    logger.debug(f"操作耗时: {duration:.2f}秒")
+```
+
+### 6.2 使用装饰器
+
+```python
+from functools import wraps
+import time
+
+def log_execution_time(func):
+    @wraps(func)
+    async def wrapper(*args, **kwargs):
+        start = time.time()
+        try:
+            result = await func(*args, **kwargs)
+            duration = time.time() - start
+            logger.info(f"{func.__name__} 执行完成: {duration:.2f}秒")
+            return result
+        except Exception as e:
+            duration = time.time() - start
+            logger.error(f"{func.__name__} 执行失败: {e}, 耗时: {duration:.2f}秒")
+            raise
+    return wrapper
+
+@log_execution_time
+async def process_submission(submission_id: int):
+    ...
+```
+
+## 7. 第三方库日志
+
+### 7.1 集成 Loguru
+
+```python
+import logging
+from loguru import logger
+
+# 将标准 logging 重定向到 loguru
+class InterceptHandler(logging.Handler):
+    def emit(self, record):
+        try:
+            level = logger.level(record.levelname).name
+        except ValueError:
+            level = record.levelno
+        
+        frame, depth = logging.currentframe(), 2
+        while frame.f_code.co_filename == logging.__file__:
+            frame = frame.f_back
+            depth += 1
+        
+        logger.opt(depth=depth, exception=record.exc_info).log(
+            level, record.getMessage()
+        )
+
+# 配置第三方库
+logging.getLogger("uvicorn").handlers = [InterceptHandler()]
+logging.getLogger("fastapi").handlers = [InterceptHandler()]
+```
+
+### 7.2 静音噪音日志
+
+```python
+# 降低第三方库日志级别
+logging.getLogger("urllib3").setLevel(logging.WARNING)
+logging.getLogger("aiohttp").setLevel(logging.WARNING)
+```
+
+## 8. 日志最佳实践
+
+### 8.1 日志内容要清晰
+
+```python
+# 不好
+logger.info("完成")
+
+# 好
+logger.info(f"投稿 {submission_id} 处理完成")
+```
+
+### 8.2 包含上下文
+
+```python
+# 不好
+logger.error("发布失败")
+
+# 好
+logger.error(
+    f"发布失败: submission_id={submission_id}, "
+    f"platform={platform}, error={error_msg}"
+)
+```
+
+### 8.3 使用 f-string
+
+```python
+# 不好（拼接字符串）
+logger.info("用户 " + username + " 登录")
+
+# 好
+logger.info(f"用户 {username} 登录")
+```
+
+### 8.4 避免过度日志
+
+```python
+# 不好（循环中记录）
+for item in items:
+    logger.debug(f"处理 {item}")  # 可能产生大量日志
+
+# 好
+logger.debug(f"开始处理 {len(items)} 个项目")
+# ... 处理逻辑
+logger.debug(f"处理完成: 成功 {success_count}, 失败 {fail_count}")
+```
+
+## 9. 错误通知
+
+### 9.1 关键错误告警
+
+对于关键错误，除了记录日志，还应发送通知：
+
+```python
+async def critical_operation():
+    try:
+        await risky_operation()
+    except Exception as e:
+        logger.critical(f"关键操作失败: {e}", exc_info=True)
+        # 发送告警通知
+        await send_admin_notification(f"系统错误: {e}")
+        raise
+```
+
+### 9.2 错误聚合
+
+避免相同错误重复告警：
+
+```python
+from collections import defaultdict
+import time
+
+error_count = defaultdict(int)
+last_notify = {}
+
+async def safe_operation():
+    try:
+        await operation()
+    except Exception as e:
+        error_key = f"{type(e).__name__}:{str(e)}"
+        error_count[error_key] += 1
+        
+        # 每小时最多通知一次
+        if time.time() - last_notify.get(error_key, 0) > 3600:
+            await notify_error(e, error_count[error_key])
+            last_notify[error_key] = time.time()
+```
+
+## 10. 调试技巧
+
+### 10.1 临时启用详细日志
+
+```python
+with logger.contextualize(request_id=request_id):
+    logger.debug("处理请求")
+    # 这个上下文中的所有日志都会包含 request_id
+```
+
+### 10.2 条件日志
+
+```python
+if settings.system.debug:
+    logger.debug(f"详细信息: {complex_object}")
+```
+
+### 10.3 性能分析
+
+```python
+import cProfile
+import pstats
+
+profiler = cProfile.Profile()
+profiler.enable()
+
+await heavy_operation()
+
+profiler.disable()
+stats = pstats.Stats(profiler)
+stats.sort_stats('cumulative')
+stats.print_stats(20)  # 前 20 个最耗时的函数
+```
+
+## 11. 相关文件
+
+- 主入口: [`main.py`](mdc:main.py)
+- 配置: [`config/settings.py`](mdc:config/settings.py)
+- 日志目录: `data/logs/`

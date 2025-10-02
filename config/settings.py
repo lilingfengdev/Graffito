@@ -63,6 +63,30 @@ class RedisConfig(BaseModel):
     port: int = 6379
 
     db: int = 0
+    
+    password: Optional[str] = None
+    
+    # 连接池配置
+    max_connections: int = 50
+    
+    # 连接超时（秒）
+    socket_timeout: int = 5
+    
+    socket_connect_timeout: int = 5
+    
+    # 重试配置
+    retry_on_timeout: bool = True
+    
+    # 键前缀（用于命名空间隔离）
+    key_prefix: str = "xwall:"
+    
+    # 消息缓存配置
+    message_cache_ttl: int = 7200  # 消息缓存过期时间（秒），默认2小时
+    
+    # 分布式锁配置
+    lock_timeout: int = 30  # 锁超时时间（秒）
+    
+    lock_sleep: float = 0.1  # 锁获取重试间隔（秒）
 
 
 class QueueMySQLConfig(BaseModel):

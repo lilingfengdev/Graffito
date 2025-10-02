@@ -1,0 +1,331 @@
+---
+description: "Web 后端 API 约定与鉴权"
+globs: "web/backend/*.py"
+---
+
+# Web 后端 API 约定与鉴权
+
+本规则定义了 Web 管理后台的 API 设计约定、鉴权机制和最佳实践。
+
+## 1. 技术栈
+
+- **框架**: FastAPI
+- **鉴权**: JWT (JSON Web Token)
+- **CORS**: 可配置的跨域资源共享
+- **限流**: 可选的 slowapi 限流支持
+- **数据库**: 异步 SQLAlchemy
+
+## 2. API 入口
+
+主应用文件: [`web/backend/app.py`](mdc:web/backend/app.py)
+
+```python
+from fastapi import FastAPI
+from fastapi.middleware.cors import CORSMiddleware
+
+app = FastAPI(title="XWall API")
+```
+
+## 3. 鉴权机制
+
+### 3.1 用户模型
+
+```python
+# core/models.py
+class User(Base):
+    username: str           # 用户名（唯一）
+    password_hash: str      # 密码哈希
+    is_admin: bool          # 管理员
+    is_superadmin: bool     # 超级管理员
+    is_active: bool         # 账号激活状态
+```
+
+### 3.2 JWT 配置
+
+```yaml
+web:
+  jwt_secret_key: "change-this-secret"
+  jwt_algorithm: "HS256"
+  access_token_expires_minutes: 720  # 12小时
+```
+
+### 3.3 认证流程
+
+```python
+from fastapi import Depends, HTTPException, status
+from fastapi.security import HTTPBearer
+
+security = HTTPBearer()
+
+async def get_current_user(credentials: HTTPAuthorizationCredentials = Depends(security)):
+    """从 JWT token 获取当前用户"""
+    token = credentials.credentials
+    payload = jwt.decode(token, SECRET_KEY, algorithms=[ALGORITHM])
+    user = await fetch_user_by_id(payload["user_id"])
+    if not user or not user.is_active:
+        raise HTTPException(status_code=401, detail="未授权")
+    return user
+```
+
+### 3.4 权限检查
+
+```python
+async def require_admin(user: User = Depends(get_current_user)):
+    """要求管理员权限"""
+    if not user.is_admin:
+        raise HTTPException(status_code=403, detail="需要管理员权限")
+    return user
+
+async def require_superadmin(user: User = Depends(get_current_user)):
+    """要求超级管理员权限"""
+    if not user.is_superadmin:
+        raise HTTPException(status_code=403, detail="需要超级管理员权限")
+    return user
+```
+
+## 4. API 路由组织
+
+### 4.1 路由分组
+
+```python
+# 认证相关
+@app.post("/api/auth/login")
+@app.post("/api/auth/register")
+@app.post("/api/auth/refresh")
+
+# 投稿管理
+@app.get("/api/submissions")           # 列表
+@app.get("/api/submissions/{id}")      # 详情
+@app.post("/api/submissions/{id}/process")  # 重新处理
+
+# 审核管理
+@app.post("/api/audit/approve")
+@app.post("/api/audit/reject")
+@app.post("/api/audit/blacklist")
+
+# 发布管理
+@app.post("/api/publish/now")
+@app.post("/api/publish/scheduled")
+@app.delete("/api/publish/{id}")
+
+# 用户管理
+@app.get("/api/users")
+@app.post("/api/users")
+@app.put("/api/users/{id}")
+
+# 邀请码管理
+@app.get("/api/invites")
+@app.post("/api/invites")
+```
+
+### 4.2 响应格式
+
+**成功响应**:
+```json
+{
+    "code": 0,
+    "message": "success",
+    "data": { /* 实际数据 */ }
+}
+```
+
+**错误响应**:
+```json
+{
+    "code": -1,
+    "message": "错误描述",
+    "data": null
+}
+```
+
+## 5. 限流配置
+
+```yaml
+web:
+  rate_limit:
+    enabled: true
+    default: "120/minute"
+    login: "10/minute"
+    register_invite: "5/hour"
+    create_invite: "20/hour"
+    storage_uri: null          # Redis URI (可选)
+    trust_forwarded_for: true  # 信任 X-Forwarded-For
+```
+
+```python
+from slowapi import Limiter
+from slowapi.util import get_remote_address
+
+limiter = Limiter(key_func=get_remote_address)
+
+@app.post("/api/auth/login")
+@limiter.limit("10/minute")
+async def login(request: Request):
+    ...
+```
+
+## 6. CORS 配置
+
+```yaml
+web:
+  frontend_origin: "http://localhost:5173"  # 简化配置
+  cors_allow_origins: ["*"]
+  cors_allow_credentials: true
+  cors_allow_methods: ["*"]
+  cors_allow_headers: ["*"]
+```
+
+```python
+app.add_middleware(
+    CORSMiddleware,
+    allow_origins=settings.web.cors_allow_origins,
+    allow_credentials=settings.web.cors_allow_credentials,
+    allow_methods=settings.web.cors_allow_methods,
+    allow_headers=settings.web.cors_allow_headers,
+)
+```
+
+## 7. 数据验证
+
+使用 Pydantic 模型进行请求验证：
+
+```python
+from pydantic import BaseModel
+
+class LoginRequest(BaseModel):
+    username: str
+    password: str
+
+class SubmissionFilter(BaseModel):
+    status: Optional[str] = None
+    is_anonymous: Optional[bool] = None
+    start_date: Optional[datetime] = None
+    end_date: Optional[datetime] = None
+    page: int = 1
+    page_size: int = 20
+
+@app.post("/api/auth/login")
+async def login(req: LoginRequest):
+    user = await authenticate(req.username, req.password)
+    ...
+```
+
+## 8. 错误处理
+
+```python
+from fastapi import HTTPException
+
+# 标准错误
+raise HTTPException(
+    status_code=400,
+    detail="参数错误"
+)
+
+# 自定义异常处理器
+@app.exception_handler(Exception)
+async def global_exception_handler(request: Request, exc: Exception):
+    logger.error(f"API 错误: {exc}", exc_info=True)
+    return JSONResponse(
+        status_code=500,
+        content={"code": -1, "message": "服务器内部错误", "data": None}
+    )
+```
+
+## 9. SSE 实时推送
+
+用于实时推送投稿状态、处理进度等：
+
+```python
+from fastapi import Response
+from sse_starlette.sse import EventSourceResponse
+
+@app.get("/api/stream/submissions")
+async def stream_submissions(user: User = Depends(get_current_user)):
+    async def event_generator():
+        while True:
+            # 检查新数据
+            data = await get_latest_submissions()
+            yield {
+                "event": "submission_update",
+                "data": json.dumps(data)
+            }
+            await asyncio.sleep(1)
+    
+    return EventSourceResponse(event_generator())
+```
+
+## 10. 邀请码系统
+
+### 10.1 邀请码模型
+
+```python
+class InviteToken(Base):
+    token: str                    # 唯一令牌
+    created_by_user_id: int       # 创建者
+    used_by_user_id: int          # 使用者（可空）
+    expires_at: datetime          # 过期时间
+    used_at: datetime             # 使用时间
+    is_active: bool               # 是否有效
+    max_uses: int                 # 最大使用次数
+    uses_count: int               # 已使用次数
+```
+
+### 10.2 注册流程
+
+1. 用户提供邀请码
+2. 验证邀请码有效性（`is_valid()` 方法）
+3. 创建新用户
+4. 更新邀请码使用信息
+
+## 11. 安全最佳实践
+
+### 11.1 密码处理
+
+```python
+from passlib.context import CryptContext
+
+pwd_context = CryptContext(schemes=["bcrypt"], deprecated="auto")
+
+def hash_password(password: str) -> str:
+    return pwd_context.hash(password)
+
+def verify_password(plain_password: str, hashed_password: str) -> bool:
+    return pwd_context.verify(plain_password, hashed_password)
+```
+
+### 11.2 敏感信息
+
+- 密码必须经过哈希后存储
+- JWT secret 通过环境变量配置
+- Cookie/Token 配置必须设置在 YAML 文件外部
+- API 响应不包含敏感字段（如 `password_hash`）
+
+### 11.3 输入验证
+
+- 所有用户输入必须经过 Pydantic 验证
+- SQL 查询使用参数化（ORM 自动处理）
+- 文件上传需检查类型和大小
+
+## 12. 异步数据库操作
+
+遵循 [`async-db`](mdc:.cursor/rules/async-db.mdc) 规则：
+
+```python
+from core.database import get_db
+
+@app.get("/api/submissions")
+async def get_submissions(user: User = Depends(get_current_user)):
+    db = await get_db()
+    async with db.get_session() as session:
+        stmt = select(Submission).order_by(Submission.created_at.desc())
+        result = await session.execute(stmt)
+        submissions = result.scalars().all()
+        return {"code": 0, "data": [s.to_dict() for s in submissions]}
+```
+
+## 13. 相关文件
+
+- 主应用: [`web/backend/app.py`](mdc:web/backend/app.py)
+- 前端: [`web/frontend/src/`](mdc:web/frontend/src/)
+- 配置: [`config/settings.py`](mdc:config/settings.py)
+- 用户模型: [`core/models.py`](mdc:core/models.py)

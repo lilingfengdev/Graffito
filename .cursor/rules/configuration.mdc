@@ -1,0 +1,428 @@
+---
+description: "配置系统使用指南"
+globs: "config/*.py,config/*.yaml"
+---
+
+# 配置系统使用指南
+
+本规则定义了 XWall 配置系统的结构、加载机制和最佳实践。
+
+## 1. 配置文件结构
+
+### 1.1 主配置文件
+
+**文件**: [`config/config.yaml`](mdc:config/config.yaml)
+
+```yaml
+system:
+  debug: false
+  log_level: "INFO"
+  data_dir: "./data"
+  cache_dir: "./data/cache"
+
+database:
+  type: "sqlite"
+  url: "sqlite+aiosqlite:///./data/xwall.db"
+  pool_size: 10
+
+llm:
+  api_key: "${OPENAI_API_KEY}"
+  base_url: "https://api.openai.com/v1"
+  text_model: "gpt-4o-mini"
+  vision_model: "gpt-4o-mini"
+
+rendering:
+  backend: "local"
+  font_family: "'Inter', -apple-system, ..."
+
+account_groups:
+  default:
+    name: "默认组"
+    manage_group_id: "123456"
+    main_account:
+      qq_id: "10001"
+      http_port: 3001
+    minor_accounts:
+      - qq_id: "10002"
+        http_port: 3002
+```
+
+### 1.2 平台配置文件
+
+**目录**: `config/publishers/`
+
+- [`bilibili.yml`](mdc:config/publishers/bilibili.yml)
+- [`qzone.yml`](mdc:config/publishers/qzone.yml)
+- [`rednote.yml`](mdc:config/publishers/rednote.yml)
+
+```yaml
+# qzone.yml 示例
+enabled: true
+driver: "aioqzone"
+max_attempts: 3
+batch_size: 30
+max_images_per_post: 9
+publish_text: true
+include_publish_id: true
+include_at_sender: true
+include_segments: true
+image_source: "rendered"
+```
+
+## 2. 配置加载
+
+### 2.1 Settings 类
+
+**文件**: [`config/settings.py`](mdc:config/settings.py)
+
+```python
+from pydantic import BaseModel, Field
+from pydantic_settings import BaseSettings
+
+class Settings(BaseSettings):
+    system: SystemConfig = SystemConfig()
+    database: DatabaseConfig = DatabaseConfig()
+    llm: LLMConfig = LLMConfig()
+    rendering: RenderingConfig = RenderingConfig()
+    account_groups: Dict[str, AccountGroup] = Field(default_factory=dict)
+    
+    @classmethod
+    def from_yaml(cls, yaml_file: str = "config/config.yaml") -> "Settings":
+        """从 YAML 文件加载配置"""
+        ...
+```
+
+### 2.2 获取配置单例
+
+```python
+from config import get_settings
+
+settings = get_settings()  # 全局单例（lru_cache）
+```
+
+## 3. 环境变量替换
+
+### 3.1 语法
+
+在 YAML 中使用 `${ENV_VAR}` 引用环境变量：
+
+```yaml
+llm:
+  api_key: "${OPENAI_API_KEY}"
+  base_url: "${OPENAI_BASE_URL}"
+```
+
+### 3.2 .env 文件
+
+创建 `.env` 文件存储敏感信息：
+
+```env
+OPENAI_API_KEY=sk-xxxxx
+OPENAI_BASE_URL=https://api.openai.com/v1
+```
+
+**注意**: `.env` 文件不应提交到版本控制
+
+### 3.3 环境变量优先级
+
+1. 系统环境变量
+2. `.env` 文件
+3. YAML 默认值
+
+## 4. 配置模型
+
+### 4.1 使用 Pydantic
+
+所有配置都使用 Pydantic 模型定义，提供：
+- 类型验证
+- 默认值
+- 自定义验证器
+
+```python
+class LLMConfig(BaseModel):
+    api_key: Optional[str] = None
+    base_url: Optional[str] = "https://api.openai.com/v1"
+    text_model: str = "gpt-4o-mini"
+    
+    @validator('api_key', pre=True)
+    def get_api_key_from_env(cls, v):
+        if v and v.startswith('${') and v.endswith('}'):
+            env_var = v[2:-1]
+            return os.getenv(env_var)
+        return v
+```
+
+### 4.2 嵌套配置
+
+```python
+class AccountInfo(BaseModel):
+    qq_id: str
+    http_port: int
+    http_host: str = "127.0.0.1"
+    http_token: Optional[str] = None
+
+class AccountGroup(BaseModel):
+    name: str
+    manage_group_id: str
+    main_account: AccountInfo
+    minor_accounts: List[AccountInfo] = Field(default_factory=list)
+```
+
+## 5. 配置访问
+
+### 5.1 全局配置
+
+```python
+from config import get_settings
+
+settings = get_settings()
+
+# 访问配置项
+api_key = settings.llm.api_key
+db_url = settings.database.url
+debug = settings.system.debug
+```
+
+### 5.2 账号组配置
+
+```python
+settings = get_settings()
+
+# 遍历所有账号组
+for group_name, group in settings.account_groups.items():
+    print(f"组名: {group.name}")
+    print(f"主账号: {group.main_account.qq_id}")
+    for minor in group.minor_accounts:
+        print(f"副账号: {minor.qq_id}")
+```
+
+### 5.3 平台配置
+
+```python
+from utils.common import get_platform_config
+
+# 获取平台配置
+qzone_config = get_platform_config("qzone")
+enabled = qzone_config.get("enabled", False)
+batch_size = qzone_config.get("batch_size", 30)
+```
+
+## 6. 配置验证
+
+### 6.1 启动时验证
+
+```python
+# main.py
+try:
+    settings = get_settings()
+    logger.info("配置加载成功")
+except ValidationError as e:
+    logger.error(f"配置验证失败: {e}")
+    sys.exit(1)
+```
+
+### 6.2 自定义验证器
+
+```python
+class QQReceiverConfig(BaseModel):
+    friend_accept_delay_min: int = 180
+    friend_accept_delay_max: int = 240
+    
+    @validator("friend_accept_delay_max")
+    def validate_delay_range(cls, value, values):
+        min_value = values.get("friend_accept_delay_min")
+        if min_value is not None and value < min_value:
+            raise ValueError("max 不能小于 min")
+        return value
+```
+
+## 7. 配置分类
+
+### 7.1 系统配置
+
+```python
+class SystemConfig(BaseModel):
+    debug: bool = False
+    log_level: str = "INFO"
+    data_dir: str = "./data"
+    cache_dir: str = "./data/cache"
+```
+
+### 7.2 数据库配置
+
+```python
+class DatabaseConfig(BaseModel):
+    type: str = "sqlite"
+    url: str = "sqlite+aiosqlite:///./data/xwall.db"
+    pool_size: int = 10
+```
+
+### 7.3 队列配置
+
+```python
+class QueueConfig(BaseModel):
+    backend: str = "AsyncSQLiteQueue"  # AsyncSQLiteQueue | AsyncQueue | MySQLQueue
+    path: str = "data/queues"
+    mysql: QueueMySQLConfig = QueueMySQLConfig()
+```
+
+### 7.4 Web 配置
+
+```python
+class WebConfig(BaseModel):
+    enabled: bool = True
+    host: str = "0.0.0.0"
+    port: int = 8083
+    frontend_origin: Optional[str] = None
+    jwt_secret_key: str = "change-this-secret"
+    access_token_expires_minutes: int = 720
+    rate_limit: RateLimitConfig = RateLimitConfig()
+```
+
+### 7.5 LLM 配置
+
+```python
+class LLMConfig(BaseModel):
+    api_key: Optional[str] = None
+    base_url: Optional[str] = "https://api.openai.com/v1"
+    text_model: str = "gpt-4o-mini"
+    vision_model: str = "gpt-4o-mini"
+    timeout: int = 30
+    max_retry: int = 3
+```
+
+### 7.6 渲染配置
+
+```python
+class RenderingConfig(BaseModel):
+    backend: str = "local"  # local | remote | cloudflare
+    backend_config: Dict[str, Any] = Field(default_factory=dict)
+    font_family: str = "..."
+    static_base_url: str = "file://./static"
+```
+
+### 7.7 审核配置
+
+```python
+class AuditConfig(BaseModel):
+    auto_approve: bool = False
+    ai_safety_check: bool = True
+    sensitive_words: List[str] = Field(default_factory=list)
+    skip_image_audit_over_mb: float = 0.0
+```
+
+## 8. 配置更新
+
+### 8.1 保存配置
+
+```python
+settings = get_settings()
+settings.system.debug = True
+settings.save_yaml()  # 保存到 config/config.yaml
+```
+
+**注意**: 由于 `get_settings()` 使用了 `lru_cache`，运行时修改配置不会生效，需要重启应用。
+
+### 8.2 配置热更新（不推荐）
+
+```python
+# 清除缓存（慎用）
+from config.settings import get_settings
+get_settings.cache_clear()
+settings = get_settings()  # 重新加载
+```
+
+## 9. 配置最佳实践
+
+### 9.1 敏感信息
+
+- **不要**: 在 YAML 中硬编码敏感信息
+- **应该**: 使用环境变量引用 `${VAR}`
+- **应该**: 在 `.env` 文件中定义敏感信息
+- **应该**: 将 `.env` 加入 `.gitignore`
+
+### 9.2 默认值
+
+- 提供合理的默认值
+- 可选配置使用 `Optional[T]`
+- 使用 `Field(default_factory=...)` 处理可变默认值
+
+```python
+class Config(BaseModel):
+    items: List[str] = Field(default_factory=list)  # 正确
+    # items: List[str] = []  # 错误！可变默认值
+```
+
+### 9.3 配置分离
+
+- **开发环境**: `config/config.yaml`
+- **生产环境**: 通过环境变量覆盖关键配置
+- **示例配置**: [`config/config.example.yaml`](mdc:config/config.example.yaml)
+
+### 9.4 配置文档
+
+在配置文件中添加注释：
+
+```yaml
+llm:
+  api_key: "${OPENAI_API_KEY}"  # 从环境变量读取
+  text_model: "gpt-4o-mini"     # 文本处理模型
+  vision_model: "gpt-4o-mini"   # 视觉处理模型
+```
+
+## 10. 常见配置场景
+
+### 10.1 开发模式
+
+```yaml
+system:
+  debug: true
+  log_level: "DEBUG"
+
+rendering:
+  backend: "local"
+```
+
+### 10.2 生产模式
+
+```yaml
+system:
+  debug: false
+  log_level: "INFO"
+
+rendering:
+  backend: "remote"
+  backend_config:
+    render_service_url: "http://render-service:8084"
+
+web:
+  frontend_origin: "https://xwall.example.com"
+  cors_allow_origins: ["https://xwall.example.com"]
+```
+
+### 10.3 多账号组
+
+```yaml
+account_groups:
+  group_a:
+    name: "A组"
+    manage_group_id: "111111"
+    main_account:
+      qq_id: "10001"
+      http_port: 3001
+  
+  group_b:
+    name: "B组"
+    manage_group_id: "222222"
+    main_account:
+      qq_id: "20001"
+      http_port: 4001
+```
+
+## 11. 相关文件
+
+- 配置模型: [`config/settings.py`](mdc:config/settings.py)
+- 主配置: [`config/config.yaml`](mdc:config/config.yaml)
+- 示例配置: [`config/config.example.yaml`](mdc:config/config.example.yaml)
+- 工具函数: [`utils/common.py`](mdc:utils/common.py)
+- 环境变量: `.env` (不在版本控制中)

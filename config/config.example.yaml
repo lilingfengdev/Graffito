@@ -90,17 +90,44 @@ database:
 
 
 
-# Redis配置（可选，用于缓存和消息队列）
+# Redis配置（可选，用于高性能缓存、任务队列和分布式锁）
+# 功能：
+# - 消息缓存：将 MessageCache 从数据库迁移到 Redis，提升性能（自动降级）
+# - 任务队列：支持 RedisQueue 后端（需在 queue.backend 中配置）
+# - 分布式锁：提供跨实例的分布式锁支持
+# - API 限流：可通过 web.rate_limit.storage_uri 使用 Redis 实现分布式限流
 
 redis:
 
-  enabled: false
+  enabled: false  # 是否启用 Redis（false 时自动降级到数据库）
 
   host: localhost
 
   port: 6379
 
   db: 0
+  
+  password: ""  # Redis 密码（可选，留空表示无密码）
+  
+  # 连接池配置
+  max_connections: 50  # 最大连接数
+  
+  # 连接超时配置（秒）
+  socket_timeout: 5  # 读写超时
+  socket_connect_timeout: 5  # 连接超时
+  
+  # 重试配置
+  retry_on_timeout: true  # 超时时是否重试
+  
+  # 键命名空间（用于多项目隔离）
+  key_prefix: "xwall:"
+  
+  # 消息缓存配置
+  message_cache_ttl: 7200  # 消息缓存过期时间（秒），默认 2 小时
+  
+  # 分布式锁配置
+  lock_timeout: 30  # 锁超时时间（秒）
+  lock_sleep: 0.1  # 锁获取重试间隔（秒）
 
 
 
@@ -178,17 +205,19 @@ rendering:
 
 # 队列配置（用于定时发送任务的持久化队列）
 
-# backend 取值：AsyncSQLiteQueue | AsyncQueue | MySQLQueue
+# backend 取值：AsyncSQLiteQueue | AsyncQueue | MySQLQueue | RedisQueue
 
-# - AsyncSQLiteQueue：基于 SQLite 的异步持久化队列（推荐）
+# - AsyncSQLiteQueue：基于 SQLite 的异步持久化队列（默认，推荐单机部署）
 
-# - AsyncQueue：基于文件系统的异步持久化队列
+# - AsyncQueue：基于文件系统的异步持久化队列（轻量级）
 
-# - MySQLQueue：使用 MySQL 作为后端（需提供 mysql 连接参数）
+# - MySQLQueue：使用 MySQL 作为后端（支持多实例共享）
+
+# - RedisQueue：使用 Redis 作为后端（高性能，需启用 redis.enabled，推荐分布式部署）
 
 queue:
 
-  backend: AsyncSQLiteQueue
+  backend: AsyncSQLiteQueue  # 可选: AsyncSQLiteQueue | AsyncQueue | MySQLQueue | RedisQueue
 
   path: data/queues  # 当 backend 为 Async* 时生效，队列数据目录
 
@@ -205,6 +234,9 @@ queue:
     database: xwallqueue
 
     table: xwall_tasks
+  
+  # 注意：RedisQueue 无需额外配置，使用 redis 部分的配置
+  # 队列数据存储在 Redis 中，键格式为 xwall:queue:<queue_name>
 
 
 
