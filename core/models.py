@@ -45,6 +45,7 @@ class Submission(Base):
     # 审核信息
     comment = Column(Text)  # 管理员评论
     rejection_reason = Column(Text)  # 拒绝原因
+    processed_by = Column(String(50))  # 处理管理员用户名
     
     # 时间戳
     created_at = Column(DateTime, default=datetime.now)

@@ -1,33 +1,33 @@
 <template>
   <div class="logs-management">
     <!-- 页面标题 -->
-    <el-page-header @back="$router.back()" class="page-header">
-      <template #content>
+    <el-card shadow="never" class="page-header">
+      <div class="header-wrapper">
         <div class="header-content">
           <h2>系统日志</h2>
           <el-text type="info">查看和搜索系统运行日志</el-text>
         </div>
-      </template>
-      <template #extra>
-        <el-button-group>
-          <el-button 
-            :type="filters.order === 'desc' ? 'primary' : ''" 
-            @click="handleOrderChange('desc')"
-            :disabled="loading"
-          >
-            倒序
-          </el-button>
-          <el-button 
-            :type="filters.order === 'asc' ? 'primary' : ''" 
-            @click="handleOrderChange('asc')"
-            :disabled="loading"
-          >
-            正序
-          </el-button>
-        </el-button-group>
-        <el-button :icon="Refresh" @click="handleRefresh" :loading="loading">刷新</el-button>
-      </template>
-    </el-page-header>
+        <div class="header-actions">
+          <el-button-group>
+            <el-button 
+              :type="filters.order === 'desc' ? 'primary' : ''" 
+              @click="handleOrderChange('desc')"
+              :disabled="loading"
+            >
+              倒序
+            </el-button>
+            <el-button 
+              :type="filters.order === 'asc' ? 'primary' : ''" 
+              @click="handleOrderChange('asc')"
+              :disabled="loading"
+            >
+              正序
+            </el-button>
+          </el-button-group>
+          <el-button :icon="Refresh" @click="handleRefresh" :loading="loading">刷新</el-button>
+        </div>
+      </div>
+    </el-card>
 
     <!-- 过滤器 -->
     <el-card shadow="never" class="filters-card">
@@ -281,21 +281,33 @@ onMounted(() => {
   margin-bottom: 20px;
 }
 
+.header-wrapper {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  gap: 20px;
+}
+
 .header-content {
   display: flex;
   flex-direction: column;
   gap: 4px;
+  flex: 1;
 }
 
 .header-content h2 {
   margin: 0;
   font-size: 20px;
   font-weight: 600;
+  line-height: 1.4;
 }
 
-:deep(.el-page-header__extra) {
+.header-actions {
   display: flex;
   gap: 12px;
+  align-items: center;
+  flex-shrink: 0;
+  flex-wrap: nowrap;
 }
 
 .filters-card {
@@ -304,6 +316,15 @@ onMounted(() => {
 
 .filter-form {
   margin-bottom: 0;
+}
+
+.filter-form :deep(.el-form-item:last-child) {
+  margin-right: 0;
+}
+
+.filter-form :deep(.el-form-item:last-child .el-form-item__content) {
+  display: flex;
+  gap: 12px;
 }
 
 .stats-card {
@@ -364,6 +385,33 @@ html.dark :deep(.el-table__body tr.warning-row:hover > td) {
     padding: 12px;
   }
 
+  .header-wrapper {
+    flex-direction: column;
+    align-items: flex-start;
+    gap: 16px;
+  }
+
+  .header-content h2 {
+    font-size: 18px;
+  }
+
+  .header-actions {
+    width: 100%;
+    justify-content: flex-start;
+    flex-wrap: nowrap !important;
+    gap: 10px;
+    display: flex !important;
+  }
+  
+  .header-actions .el-button-group {
+    flex-shrink: 0;
+    display: inline-flex;
+  }
+  
+  .header-actions .el-button {
+    flex-shrink: 0;
+  }
+
   .filter-form {
     display: flex;
     flex-direction: column;
@@ -371,11 +419,25 @@ html.dark :deep(.el-table__body tr.warning-row:hover > td) {
 
   :deep(.el-form-item) {
     margin-right: 0;
-    width: 100%;
+    margin-bottom: 16px;
   }
 
   :deep(.el-form-item__content) {
     width: 100%;
+  }
+  
+  .filter-form :deep(.el-form-item:last-child) {
+    margin-bottom: 0;
+  }
+  
+  .filter-form :deep(.el-form-item:last-child .el-form-item__content) {
+    display: flex;
+    gap: 10px;
+    width: 100%;
+  }
+  
+  .filter-form :deep(.el-form-item:last-child .el-button) {
+    flex: 1;
   }
 
   :deep(.el-input),
@@ -407,3 +469,4 @@ html.dark :deep(.el-table__body tr.warning-row:hover > td) {
   }
 }
 </style>
+

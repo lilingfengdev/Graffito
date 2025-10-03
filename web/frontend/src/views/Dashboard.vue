@@ -90,7 +90,7 @@
       </el-col>
 
       <!-- 快速操作 -->
-      <el-col :xs="24" :lg="12">
+      <el-col :xs="24" :lg="12" class="quick-actions-col">
         <el-card class="info-card" shadow="hover">
           <template #header>
             <span class="card-title">快速操作</span>
@@ -519,6 +519,18 @@ onMounted(async () => {
   margin-bottom: 20px;
 }
 
+/* 默认隐藏快速操作（移动端） */
+.quick-actions-col {
+  display: none !important;
+}
+
+/* 桌面端显示快速操作 */
+@media (min-width: 769px) {
+  .quick-actions-col {
+    display: block !important;
+  }
+}
+
 /* 响应式设计 */
 @media (max-width: 768px) {
   .dashboard {
@@ -582,17 +594,6 @@ onMounted(async () => {
     padding: 4px 8px;
   }
   
-  .quick-actions {
-    display: grid;
-    grid-template-columns: repeat(2, 1fr);
-    gap: 12px;
-  }
-  
-  .quick-actions .el-button {
-    font-size: 13px;
-    padding: 12px 16px;
-  }
-  
   /* 表格适配 */
   :deep(.el-table) {
     font-size: 13px;
@@ -625,15 +626,6 @@ onMounted(async () => {
   .chart-container {
     height: 200px;
     padding: 8px;
-  }
-  
-  .quick-actions {
-    grid-template-columns: 1fr;
-  }
-  
-  .quick-actions .el-button {
-    font-size: 12px;
-    padding: 10px 12px;
   }
   
   .status-distribution {

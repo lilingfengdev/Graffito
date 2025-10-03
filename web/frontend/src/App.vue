@@ -697,18 +697,6 @@ html.light .el-table--striped .el-table__body tr.el-table__row--striped td {
 
 /* 触摸设备优化 */
 @media (hover: none) and (pointer: coarse) {
-  /* 增大可触摸元素的点击区域 */
-  button,
-  a,
-  .el-button,
-  .el-link,
-  .el-checkbox,
-  .el-radio,
-  .el-switch {
-    min-width: 44px;
-    min-height: 44px;
-  }
-  
   /* 移除悬停效果（触摸设备不需要） */
   .el-button:hover,
   .el-link:hover,
@@ -725,16 +713,7 @@ html.light .el-table--striped .el-table__body tr.el-table__row--striped td {
   
   /* 圆形按钮优化 */
   .el-button.is-circle {
-    min-width: 44px !important;
-    min-height: 44px !important;
     padding: 0 !important;
-  }
-  
-  /* 图标按钮优化 */
-  .el-button.is-text,
-  .el-button.is-link {
-    min-height: 40px;
-    padding: 8px 12px;
   }
 }
 
@@ -755,25 +734,8 @@ html.light .el-table--striped .el-table__body tr.el-table__row--striped td {
   
   /* 触摸友好的交互 - 按钮优化 */
   .el-button {
-    min-height: 44px;
-    padding: 12px 20px;
-    font-size: 15px;
     touch-action: manipulation;
     border-radius: var(--xw-radius-lg) !important;
-    font-weight: 500;
-    letter-spacing: 0.3px;
-  }
-  
-  .el-button--small {
-    min-height: 36px;
-    padding: 8px 14px;
-    font-size: 14px;
-  }
-  
-  .el-button--large {
-    min-height: 48px;
-    padding: 14px 24px;
-    font-size: 16px;
   }
   
   /* 按钮图标间距 */
@@ -839,7 +801,6 @@ html.light .el-table--striped .el-table__body tr.el-table__row--striped td {
   .el-dialog__footer .el-button {
     width: 100%;
     margin: 0 !important;
-    min-height: 44px;
   }
   
   /* 按钮组移动端优化 */
@@ -906,27 +867,10 @@ html.light .el-table--striped .el-table__body tr.el-table__row--striped td {
     font-size: 13px;
   }
   
-  .el-button {
-    min-height: 44px;
-    padding: 11px 18px;
-    font-size: 14px;
-  }
-  
-  .el-button--small {
-    min-height: 36px;
-    padding: 8px 12px;
-    font-size: 13px;
-  }
-  
   /* 超小屏对话框按钮优化 */
   .el-dialog__footer {
     padding: 12px 20px !important;
     gap: 10px;
-  }
-  
-  .el-dialog__footer .el-button {
-    min-height: 48px;
-    font-size: 15px;
   }
   
   .el-card {

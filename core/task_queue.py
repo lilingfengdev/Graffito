@@ -176,23 +176,23 @@ class MySQLQueueBackend(TaskQueueBackend):
 
 
 class RedisQueueBackend(TaskQueueBackend):
-    """Redis 队列后端（使用 redis-py 原生 List 操作）"""
+    """Redis 队列后端（使用 aiocache）"""
     def __init__(self):
-        self._redis = None
+        self._cache = None
         self._initialized = False
-        self._key_prefix = ""
+        self._namespace = ""
     
     async def _ensure_redis(self):
         if not self._initialized:
-            from core.redis_client import get_redis
-            from config import get_settings
+            from core.cache_client import get_cache
             
-            self._redis = await get_redis()
-            if not self._redis.enabled:
-                raise RuntimeError("Redis is not enabled in configuration")
+            self._cache = await get_cache()
+            if self._cache.backend != "redis":
+                raise RuntimeError("Redis backend is required for RedisQueueBackend")
             
-            settings = get_settings()
-            self._key_prefix = settings.redis.key_prefix
+            # 使用 aiocache 的 raw 方法访问 Redis
+            self._namespace = self._cache._namespace or ""
+            
             self._initialized = True
     
     async def ensure_queue(self, name: str):
@@ -201,22 +201,25 @@ class RedisQueueBackend(TaskQueueBackend):
     async def enqueue(self, name: str, job: Dict[str, Any]):
         await self._ensure_redis()
         import json
-        queue_key = f"{self._key_prefix}queue:{name}"
+        queue_key = f"{self._namespace}:queue:{name}" if self._namespace else f"queue:{name}"
         job_str = json.dumps(job, ensure_ascii=False)
-        await self._redis.client.rpush(queue_key, job_str)
+        await self._cache.raw("rpush", queue_key, job_str)
     
     async def pop(self, name: str, timeout: int = 5) -> Optional[Tuple[Any, Dict[str, Any]]]:
         await self._ensure_redis()
         import json
         
-        queue_key = f"{self._key_prefix}queue:{name}"
+        queue_key = f"{self._namespace}:queue:{name}" if self._namespace else f"queue:{name}"
         
         try:
-            result = await self._redis.client.blpop(queue_key, timeout=timeout)
+            result = await self._cache.raw("blpop", queue_key, timeout)
             if result is None:
                 return None
             
             _, job_str = result
+            # 处理 bytes
+            if isinstance(job_str, bytes):
+                job_str = job_str.decode('utf-8')
             job = json.loads(job_str)
             return job, job
             

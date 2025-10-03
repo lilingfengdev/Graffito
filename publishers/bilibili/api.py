@@ -142,3 +142,64 @@ class BilibiliAPI:
             logger.error(f"B站删除动态失败: {e}")
             return {'success': False, 'message': str(e)}
 
+    async def get_comments(self, dynamic_id: int, page: int = 1, page_size: int = 20) -> Dict[str, Any]:
+        """获取动态的评论列表。
+        
+        Args:
+            dynamic_id: 动态ID
+            page: 页码（从1开始）
+            page_size: 每页数量
+        Returns:
+            {'success': True, 'comments': [...], 'total': int} 或 {'success': False, 'message': str}
+        """
+        try:
+            dyn = dynamic.Dynamic(int(dynamic_id), credential=self._bili_credential)
+            rid = await dyn.get_rid()
+            
+            # 使用 comment 模块获取评论列表
+            comments_data = await bili_comment.get_comments(
+                oid=int(rid),
+                type_=CommentResourceType.DYNAMIC,
+                page_index=page,
+                credential=self._bili_credential
+            )
+            
+            # 格式化评论数据
+            comments_list = []
+            if isinstance(comments_data, dict):
+                replies = comments_data.get('replies') or []
+                for reply in replies:
+                    if not isinstance(reply, dict):
+                        continue
+                    member = reply.get('member') or {}
+                    content_data = reply.get('content') or {}
+                    
+                    # B站头像字段可能是 'avatar' 或 'face'
+                    user_avatar = member.get('avatar') or member.get('face') or ''
+                    
+                    comments_list.append({
+                        'id': reply.get('rpid'),
+                        'user_id': member.get('mid'),
+                        'user_name': member.get('uname'),
+                        'user_avatar': user_avatar,
+                        'content': content_data.get('message', ''),
+                        'like_count': reply.get('like', 0),
+                        'reply_count': reply.get('rcount', 0),
+                        'created_at': reply.get('ctime'),
+                    })
+                
+                total = comments_data.get('page', {}).get('count', 0) if isinstance(comments_data.get('page'), dict) else len(comments_list)
+                
+                return {
+                    'success': True,
+                    'comments': comments_list,
+                    'total': total,
+                    'page': page,
+                    'page_size': page_size
+                }
+            
+            return {'success': True, 'comments': [], 'total': 0}
+        except Exception as e:
+            logger.error(f"B站获取评论失败: {e}")
+            return {'success': False, 'message': str(e)}
+

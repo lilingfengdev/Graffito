@@ -1,17 +1,11 @@
 <template>
   <el-container class="layout-container">
-    <!-- 移动端遮罩层 -->
-    <div 
-      v-if="isMobile && !collapsed" 
-      class="mobile-overlay" 
-      @click="toggleCollapse"
-    ></div>
-    
-    <!-- 侧边栏 -->
+    <!-- 侧边栏（桌面端） / 底部导航栏（移动端） -->
     <el-aside 
-      :width="isMobile ? '280px' : (collapsed ? '64px' : '250px')" 
+      v-if="!isMobile"
+      :width="collapsed ? '64px' : '250px'" 
       class="sidebar"
-      :class="{ 'mobile': isMobile, 'mobile-hidden': isMobile && collapsed, 'collapsed': collapsed }"
+      :class="{ 'collapsed': collapsed }"
     >
       <div class="logo-container" :class="{ 'collapsed': collapsed }">
         <!-- Logo区域 - 统一容器，避免跳动 -->
@@ -85,15 +79,11 @@
             </div>
             <template #dropdown>
               <el-dropdown-menu>
-                <el-dropdown-item command="profile">
-                  <el-icon><User /></el-icon>
-                  个人信息
-                </el-dropdown-item>
                 <el-dropdown-item command="invite" v-if="user?.is_superadmin">
                   <el-icon><Plus /></el-icon>
                   创建邀请链接
                 </el-dropdown-item>
-                <el-dropdown-item command="theme" divided>
+                <el-dropdown-item command="theme" :divided="user?.is_superadmin">
                   <el-icon><component :is="themeIcon" /></el-icon>
                   {{ themeText }}
                 </el-dropdown-item>
@@ -113,14 +103,6 @@
       <!-- 顶部面包屑 -->
       <el-header class="header">
         <div class="header-left">
-          <!-- 移动端菜单按钮 -->
-          <el-button 
-            v-if="isMobile"
-            :icon="Menu" 
-            text 
-            @click="toggleCollapse"
-            class="mobile-menu-btn"
-          />
           <el-breadcrumb separator=">" class="breadcrumb">
             <el-breadcrumb-item :to="{ path: '/' }">首页</el-breadcrumb-item>
             <el-breadcrumb-item v-if="currentRoute.meta?.title">
@@ -139,16 +121,60 @@
               :class="{ 'has-notification': pendingCount > 0 }"
             />
           </el-badge>
+          
+          <!-- 移动端用户菜单 -->
+          <el-dropdown 
+            v-if="isMobile"
+            placement="bottom-end" 
+            @command="handleUserCommand"
+            trigger="click"
+          >
+            <el-avatar :size="32" style="background-color: #6366f1; cursor: pointer;">
+              {{ userInitial }}
+            </el-avatar>
+            <template #dropdown>
+              <el-dropdown-menu>
+                <el-dropdown-item command="invite" v-if="user?.is_superadmin">
+                  <el-icon><Plus /></el-icon>
+                  创建邀请链接
+                </el-dropdown-item>
+                <el-dropdown-item command="theme" :divided="user?.is_superadmin">
+                  <el-icon><component :is="themeIcon" /></el-icon>
+                  {{ themeText }}
+                </el-dropdown-item>
+                <el-dropdown-item command="logout" divided>
+                  <el-icon><SwitchButton /></el-icon>
+                  退出登录
+                </el-dropdown-item>
+              </el-dropdown-menu>
+            </template>
+          </el-dropdown>
         </div>
       </el-header>
 
       <!-- 主要内容 -->
-      <el-main class="content">
+      <el-main class="content" :class="{ 'mobile-content': isMobile }">
         <transition name="page-fade" mode="out-in">
           <router-view />
         </transition>
       </el-main>
     </el-container>
+
+    <!-- 移动端底部导航栏 -->
+    <nav v-if="isMobile" class="mobile-bottom-nav">
+      <div 
+        v-for="route in menuRoutes" 
+        :key="route.path" 
+        class="nav-item-mobile"
+        :class="{ 'active': activeMenu === '/' + route.path }"
+        @click="router.push('/' + route.path)"
+      >
+        <el-icon :size="20">
+          <component :is="route.meta.icon" />
+        </el-icon>
+        <span class="nav-label">{{ route.meta.title }}</span>
+      </div>
+    </nav>
 
     <!-- 邀请链接对话框 -->
     <el-dialog v-model="showInviteDialog" title="创建邀请链接" width="500px">
@@ -263,7 +289,7 @@ import { useRoute, useRouter } from 'vue-router'
 import { ElMessage } from 'element-plus'
 import { 
   Document, Expand, Fold, User, SwitchButton, Bell,
-  Odometer, Box, Plus, DocumentCopy, Menu
+  Odometer, Box, Plus, DocumentCopy
 } from '@element-plus/icons-vue'
 import api from '../api'
 import { useTheme } from '../composables/useTheme'
@@ -275,13 +301,6 @@ const collapsed = ref(false)
 const isMobile = ref(false)
 const user = ref(null)
 const pendingCount = ref(0)
-
-// 触摸手势相关
-const touchStartX = ref(0)
-const touchStartY = ref(0)
-const touchEndX = ref(0)
-const touchEndY = ref(0)
-const isSwiping = ref(false)
 
 // 邀请功能相关
 const showInviteDialog = ref(false)
@@ -349,10 +368,6 @@ const toggleCollapse = () => {
 
 const handleUserCommand = (command) => {
   switch (command) {
-    case 'profile':
-      // TODO: 实现个人信息页面
-      ElMessage.info('功能开发中')
-      break
     case 'invite':
       showInviteDialog.value = true
       inviteLink.value = '' // 重置邀请链接
@@ -485,55 +500,11 @@ const resetInviteDialog = () => {
 
 // 键盘快捷键处理
 const handleKeydown = (event) => {
-  // Ctrl/Cmd + B 切换侧边栏
+  // Ctrl/Cmd + B 切换侧边栏（仅桌面端）
   if ((event.ctrlKey || event.metaKey) && event.key === 'b' && !isMobile.value) {
     event.preventDefault()
     toggleCollapse()
   }
-}
-
-// 触摸手势处理
-const handleTouchStart = (e) => {
-  if (!isMobile.value) return
-  
-  touchStartX.value = e.touches[0].clientX
-  touchStartY.value = e.touches[0].clientY
-  isSwiping.value = true
-}
-
-const handleTouchMove = (e) => {
-  if (!isMobile.value || !isSwiping.value) return
-  
-  touchEndX.value = e.touches[0].clientX
-  touchEndY.value = e.touches[0].clientY
-}
-
-const handleTouchEnd = () => {
-  if (!isMobile.value || !isSwiping.value) return
-  
-  isSwiping.value = false
-  
-  const deltaX = touchEndX.value - touchStartX.value
-  const deltaY = touchEndY.value - touchStartY.value
-  const minSwipeDistance = 50
-  
-  // 确保水平滑动距离大于垂直滑动距离（避免与页面滚动冲突）
-  if (Math.abs(deltaX) > Math.abs(deltaY) && Math.abs(deltaX) > minSwipeDistance) {
-    // 从左边缘向右滑动，打开侧边栏
-    if (deltaX > 0 && touchStartX.value < 20 && collapsed.value) {
-      collapsed.value = false
-    }
-    // 向左滑动，关闭侧边栏
-    else if (deltaX < 0 && !collapsed.value) {
-      collapsed.value = true
-    }
-  }
-  
-  // 重置触摸坐标
-  touchStartX.value = 0
-  touchStartY.value = 0
-  touchEndX.value = 0
-  touchEndY.value = 0
 }
 
 onMounted(async () => {
@@ -543,13 +514,6 @@ onMounted(async () => {
   
   // 添加键盘快捷键
   window.addEventListener('keydown', handleKeydown)
-  
-  // 添加移动端触摸手势支持
-  if (isMobile.value) {
-    document.addEventListener('touchstart', handleTouchStart, { passive: true })
-    document.addEventListener('touchmove', handleTouchMove, { passive: true })
-    document.addEventListener('touchend', handleTouchEnd, { passive: true })
-  }
   
   await fetchUserInfo()
   await fetchPendingCount()
@@ -562,11 +526,6 @@ onMounted(async () => {
 onUnmounted(() => {
   window.removeEventListener('resize', handleResize)
   window.removeEventListener('keydown', handleKeydown)
-  
-  // 移除触摸事件监听
-  document.removeEventListener('touchstart', handleTouchStart)
-  document.removeEventListener('touchmove', handleTouchMove)
-  document.removeEventListener('touchend', handleTouchEnd)
 })
 </script>
 
@@ -1107,16 +1066,120 @@ html.dark .user-info:hover {
   margin-left: 4px;
 }
 
-/* 移动端遮罩层 */
-.mobile-overlay {
+/* 移动端底部导航栏 */
+.mobile-bottom-nav {
   position: fixed;
-  top: 0;
+  bottom: 0;
   left: 0;
   right: 0;
-  bottom: 0;
-  background: rgba(0, 0, 0, 0.5);
-  z-index: 999;
-  backdrop-filter: blur(2px);
+  height: 60px;
+  background: var(--sidebar-bg);
+  border-top: 1px solid var(--el-border-color);
+  display: flex;
+  justify-content: space-around;
+  align-items: center;
+  z-index: 1000;
+  padding: 4px 8px;
+  backdrop-filter: blur(20px);
+  -webkit-backdrop-filter: blur(20px);
+  box-shadow: 0 -2px 12px rgba(0, 0, 0, 0.08);
+}
+
+html.light .mobile-bottom-nav {
+  background: linear-gradient(0deg, 
+    rgba(255, 255, 255, 0.98) 0%, 
+    rgba(249, 250, 251, 0.95) 100%
+  );
+}
+
+html.dark .mobile-bottom-nav {
+  background: linear-gradient(0deg, 
+    rgba(10, 15, 30, 0.98) 0%, 
+    rgba(20, 27, 45, 0.95) 100%
+  );
+  border-top-color: rgba(99, 102, 241, 0.15);
+  box-shadow: 0 -2px 20px rgba(0, 0, 0, 0.5);
+}
+
+.nav-item-mobile {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  gap: 2px;
+  flex: 1;
+  min-width: 56px;
+  max-width: 90px;
+  height: 52px;
+  cursor: pointer;
+  color: var(--xw-text-tertiary);
+  transition: all 0.3s cubic-bezier(0.4, 0, 0.2, 1);
+  border-radius: var(--xw-radius-lg);
+  position: relative;
+  -webkit-tap-highlight-color: transparent;
+}
+
+.nav-item-mobile::before {
+  content: '';
+  position: absolute;
+  top: 0;
+  left: 50%;
+  transform: translateX(-50%);
+  width: 0;
+  height: 3px;
+  background: linear-gradient(90deg, var(--xw-primary), var(--xw-primary-light));
+  transition: width 0.3s cubic-bezier(0.4, 0, 0.2, 1);
+  border-radius: 0 0 4px 4px;
+}
+
+.nav-item-mobile:active {
+  transform: scale(0.92);
+  background: var(--xw-bg-secondary);
+}
+
+.nav-item-mobile.active {
+  color: var(--xw-primary);
+  background: var(--xw-gradient-highlight);
+}
+
+.nav-item-mobile.active::before {
+  width: 70%;
+}
+
+html.dark .nav-item-mobile.active {
+  background: rgba(99, 102, 241, 0.15);
+  box-shadow: inset 0 0 15px rgba(99, 102, 241, 0.1);
+}
+
+.nav-item-mobile .el-icon {
+  transition: transform 0.3s cubic-bezier(0.4, 0, 0.2, 1);
+}
+
+.nav-item-mobile:active .el-icon {
+  transform: scale(0.9);
+}
+
+.nav-item-mobile.active .el-icon {
+  transform: scale(1.1);
+}
+
+.nav-label {
+  font-size: 11px;
+  font-weight: 500;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  max-width: 100%;
+  text-align: center;
+}
+
+.nav-item-mobile.active .nav-label {
+  font-weight: 600;
+}
+
+/* 移动端内容区域调整 */
+.mobile-content {
+  padding-bottom: 76px !important; /* 为底部导航栏留出空间 */
 }
 
 /* 头部移动端适配 */
@@ -1127,95 +1190,8 @@ html.dark .user-info:hover {
   flex: 1;
 }
 
-.mobile-menu-btn {
-  color: var(--el-text-color-primary);
-  font-size: 20px;
-}
-
 .breadcrumb {
   flex: 1;
-}
-
-/* 移动端适配 - 优化动画效果和触摸体验 */
-.sidebar.mobile {
-  position: fixed;
-  top: 0;
-  left: 0;
-  z-index: 1000;
-  height: 100vh;
-  box-shadow: var(--xw-shadow-xl);
-  transform: translateX(0);
-  transition: transform 0.3s cubic-bezier(0.4, 0, 0.2, 1);
-  border-right: none;
-  touch-action: pan-y; /* 允许垂直滚动 */
-  -webkit-overflow-scrolling: touch; /* iOS 平滑滚动 */
-}
-
-.sidebar.mobile::before {
-  display: none;
-}
-
-.sidebar.mobile-hidden {
-  transform: translateX(-100%);
-  box-shadow: none;
-}
-
-.sidebar.mobile:not(.mobile-hidden) {
-  animation: slideInFromLeft 0.3s cubic-bezier(0.4, 0, 0.2, 1);
-}
-
-@keyframes slideInFromLeft {
-  from {
-    transform: translateX(-100%);
-    opacity: 0.8;
-  }
-  to {
-    transform: translateX(0);
-    opacity: 1;
-  }
-}
-
-/* 移动端菜单按钮优化 - 增强触摸反馈 */
-.mobile-menu-btn {
-  color: var(--xw-text-primary);
-  font-size: 22px;
-  padding: 10px;
-  border-radius: var(--xw-radius-lg);
-  transition: all 0.2s cubic-bezier(0.4, 0, 0.2, 1);
-  position: relative;
-  overflow: hidden;
-  min-width: 44px; /* iOS 推荐的最小触摸目标 */
-  min-height: 44px;
-  display: flex;
-  align-items: center;
-  justify-content: center;
-  -webkit-tap-highlight-color: transparent; /* 移除 iOS 点击高亮 */
-}
-
-.mobile-menu-btn::before {
-  content: '';
-  position: absolute;
-  top: 50%;
-  left: 50%;
-  width: 0;
-  height: 0;
-  background: var(--xw-primary-lightest);
-  transition: all 0.2s ease;
-  border-radius: 50%;
-  transform: translate(-50%, -50%);
-  z-index: 0;
-}
-
-.mobile-menu-btn:active::before {
-  width: 100%;
-  height: 100%;
-  transition: all 0.1s ease;
-}
-
-.mobile-menu-btn:active {
-  color: var(--xw-primary);
-  transform: scale(0.92);
-  background: var(--xw-bg-secondary);
 }
 
 /* 通知按钮样式优化 */
@@ -1295,31 +1271,6 @@ html.dark .notification-btn.has-notification {
   background: rgba(99, 102, 241, 0.2);
 }
 
-/* 移动端遮罩层 - 优化触摸交互 */
-.mobile-overlay {
-  position: fixed;
-  top: 0;
-  left: 0;
-  right: 0;
-  bottom: 0;
-  background: rgba(0, 0, 0, 0.5);
-  backdrop-filter: blur(4px);
-  -webkit-backdrop-filter: blur(4px);
-  z-index: 999;
-  animation: fadeIn 0.3s cubic-bezier(0.4, 0, 0.2, 1);
-  touch-action: none; /* 防止遮罩层下的内容滚动 */
-  -webkit-tap-highlight-color: transparent;
-}
-
-@keyframes fadeIn {
-  from {
-    opacity: 0;
-  }
-  to {
-    opacity: 1;
-  }
-}
-
 /* 通用触摸优化 */
 * {
   -webkit-tap-highlight-color: transparent;
@@ -1344,12 +1295,12 @@ button, a, .clickable {
   }
   
   .header {
-    padding: 0 16px;
+    padding: 0 12px;
     height: 56px; /* 移动端减小高度 */
   }
   
   .header-actions {
-    gap: 12px; /* 减小按钮间距 */
+    gap: 8px; /* 减小按钮间距 */
   }
   
   .breadcrumb {
@@ -1358,7 +1309,7 @@ button, a, .clickable {
   
   .content {
     padding: 16px;
-    min-height: calc(100vh - 56px); /* 调整最小高度 */
+    min-height: calc(100vh - 56px - 60px); /* 减去头部和底部导航栏高度 */
   }
   
   .user-section {
@@ -1366,8 +1317,7 @@ button, a, .clickable {
   }
   
   .user-info {
-    padding: 10px 8px;
-    min-height: 44px; /* iOS 推荐的最小触摸目标 */
+    padding: 8px 6px;
   }
   
   .username {
@@ -1378,14 +1328,8 @@ button, a, .clickable {
   
   /* 导航菜单项移动端优化 */
   .nav-item {
-    margin: 8px 12px;
-    min-height: 48px; /* 增大触摸目标 */
-    font-size: 15px;
-  }
-  
-  :deep(.el-menu-item) {
-    min-height: 48px !important;
-    line-height: 48px !important;
+    margin: 6px 12px;
+    font-size: 14px;
   }
   
   /* 邀请对话框移动端适配 */
@@ -1408,17 +1352,14 @@ button, a, .clickable {
   }
   
   .quick-time-buttons {
-    display: grid;
-    grid-template-columns: repeat(2, 1fr);
-    gap: 10px;
+    display: flex;
+    flex-wrap: wrap;
+    gap: 8px;
   }
   
   .quick-time-buttons .el-button {
-    padding: 12px 16px;
-    min-height: 44px; /* 增大触摸目标 */
-    font-size: 15px;
-    font-weight: 500;
-    border-radius: var(--xw-radius-lg) !important;
+    flex: 1 1 calc(50% - 4px);
+    min-width: 0;
   }
   
   .time-setting .el-row {
@@ -1435,42 +1376,15 @@ button, a, .clickable {
     width: 100% !important;
   }
   
-  :deep(.el-input__wrapper) {
-    min-height: 44px; /* iOS 推荐的最小触摸目标 */
-    font-size: 16px; /* 防止 iOS 自动缩放 */
-  }
-  
   :deep(.el-input__inner) {
     font-size: 16px; /* 防止 iOS 自动缩放 */
-  }
-  
-  /* 按钮移动端优化 - 增强触摸体验 */
-  :deep(.el-button) {
-    min-height: 44px;
-    padding: 12px 20px;
-    font-size: 15px;
-    border-radius: var(--xw-radius-lg) !important;
-    font-weight: 500;
-    letter-spacing: 0.3px;
-  }
-  
-  :deep(.el-button--small) {
-    min-height: 36px;
-    padding: 8px 14px;
-    font-size: 14px;
-  }
-  
-  :deep(.el-button--large) {
-    min-height: 48px;
-    padding: 14px 24px;
-    font-size: 16px;
   }
   
   /* 对话框底部按钮优化 - 堆叠布局 */
   :deep(.el-dialog__footer) {
     display: flex;
     flex-direction: column-reverse;
-    gap: 12px;
+    gap: 10px;
     padding: 16px !important;
   }
   
@@ -1479,38 +1393,6 @@ button, a, .clickable {
     margin: 0 !important;
   }
   
-  /* 按钮组移动端优化 */
-  :deep(.el-button-group) {
-    display: flex;
-    flex-direction: column;
-    gap: 10px;
-  }
-  
-  :deep(.el-button-group .el-button) {
-    width: 100%;
-    margin: 0 !important;
-    border-radius: var(--xw-radius-lg) !important;
-  }
-  
-  :deep(.el-button-group .el-button:first-child) {
-    border-radius: var(--xw-radius-lg) !important;
-  }
-  
-  :deep(.el-button-group .el-button:last-child) {
-    border-radius: var(--xw-radius-lg) !important;
-  }
-  
-  /* 表单项按钮优化 */
-  :deep(.el-form-item__content .el-button + .el-button) {
-    margin-left: 0 !important;
-    margin-top: 10px;
-  }
-  
-  /* 通知按钮移动端优化 */
-  .notification-btn {
-    min-width: 44px;
-    min-height: 44px;
-  }
 }
 
 /* 超小屏幕适配 - 手机竖屏 */
@@ -1562,15 +1444,12 @@ button, a, .clickable {
   }
   
   .quick-time-buttons {
-    grid-template-columns: 1fr;
-    gap: 12px;
+    flex-direction: column;
+    gap: 8px;
   }
   
   .quick-time-buttons .el-button {
-    width: 100%;
-    min-height: 48px;
-    font-size: 15px;
-    font-weight: 500;
+    flex: 1 1 100%;
   }
   
   .header-actions .el-button {
@@ -1580,11 +1459,6 @@ button, a, .clickable {
   /* 对话框底部按钮超小屏优化 */
   :deep(.el-dialog__footer) {
     padding: 12px !important;
-  }
-  
-  :deep(.el-dialog__footer .el-button) {
-    min-height: 48px;
-    font-size: 15px;
   }
   
   /* 表单标签移动端优化 */
@@ -1631,20 +1505,25 @@ button, a, .clickable {
 
 /* 支持安全区域（刘海屏、Home Indicator 等） */
 @supports (padding: max(0px)) {
-  .sidebar.mobile {
-    padding-top: max(0px, env(safe-area-inset-top));
-    padding-bottom: max(0px, env(safe-area-inset-bottom));
+  .mobile-bottom-nav {
+    padding-bottom: max(4px, env(safe-area-inset-bottom));
+    padding-left: max(8px, env(safe-area-inset-left));
+    padding-right: max(8px, env(safe-area-inset-right));
+    height: calc(60px + env(safe-area-inset-bottom));
   }
   
   .header {
-    padding-left: max(16px, env(safe-area-inset-left));
-    padding-right: max(16px, env(safe-area-inset-right));
+    padding-left: max(12px, env(safe-area-inset-left));
+    padding-right: max(12px, env(safe-area-inset-right));
   }
   
   .content {
     padding-left: max(16px, env(safe-area-inset-left));
     padding-right: max(16px, env(safe-area-inset-right));
-    padding-bottom: max(16px, env(safe-area-inset-bottom));
+  }
+  
+  .mobile-content {
+    padding-bottom: calc(76px + env(safe-area-inset-bottom)) !important;
   }
 }
 </style>

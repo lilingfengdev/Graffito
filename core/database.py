@@ -63,21 +63,20 @@ class Database:
         # 创建所有表
         async with self.engine.begin() as conn:
             await conn.run_sync(Base.metadata.create_all)
-            # 轻量迁移：为 invite_tokens 增加 max_uses 与 uses_count（若不存在）
-            try:
-                await conn.execute(text("ALTER TABLE invite_tokens ADD COLUMN max_uses INTEGER"))
-            except Exception:
-                pass
-            try:
-                await conn.execute(text("ALTER TABLE invite_tokens ADD COLUMN uses_count INTEGER DEFAULT 0"))
-            except Exception:
-                pass
             
-            # 独立模式迁移：为 stored_posts 增加 pending_platforms（若不存在）
-            try:
-                await conn.execute(text("ALTER TABLE stored_posts ADD COLUMN pending_platforms JSON"))
-            except Exception:
-                pass
+            # 批量执行轻量级迁移（提升启动速度）
+            migrations = [
+                "ALTER TABLE invite_tokens ADD COLUMN max_uses INTEGER",
+                "ALTER TABLE invite_tokens ADD COLUMN uses_count INTEGER DEFAULT 0",
+                "ALTER TABLE stored_posts ADD COLUMN pending_platforms JSON"
+            ]
+            
+            for migration_sql in migrations:
+                try:
+                    await conn.execute(text(migration_sql))
+                except Exception:
+                    # 列已存在或其他错误，静默忽略
+                    pass
             
         logger.info(f"数据库初始化完成: {db_url}")
         
@@ -150,20 +149,21 @@ async def close_db():
 from typing import List, Optional as _Opt
 
 
-async def fetch_submission_by_id(submission_id: int) -> _Opt["Submission"]:
-    """Convenience helper to fetch a single Submission by id.
+async def fetch_submission_by_id(submission_id: int, use_cache: bool = True) -> _Opt["Submission"]:
+    """Convenience helper to fetch a single Submission by id (with cache).
 
     It abstracts away boilerplate session handling. Returns ``None`` if not
     found.
+    
+    Args:
+        submission_id: Submission ID
+        use_cache: Whether to use cache (default True)
     """
+    from core.data_cache_service import DataCacheService
+    
     db = await get_db()
     async with db.get_session() as session:
-        from sqlalchemy import select  # local import to avoid top-level heavy dep
-        from core.models import Submission  # import inside to avoid circulars
-
-        stmt = select(Submission).where(Submission.id == submission_id)
-        result = await session.execute(stmt)
-        return result.scalar_one_or_none()
+        return await DataCacheService.get_submission_by_id(submission_id, session, use_cache)
 
 
 async def fetch_submissions_by_ids(submission_ids: List[int]) -> List["Submission"]:

@@ -29,9 +29,8 @@
             :icon="Refresh" 
             @click="loadSubmissions"
             :loading="loading"
-          >
-            刷新
-          </el-button>
+            circle
+          />
           
         </div>
       </div>
@@ -95,7 +94,16 @@
           </template>
         </el-table-column>
         
-        <el-table-column label="操作" width="300" fixed="right">
+        <el-table-column prop="processed_by" label="处理人" width="120">
+          <template #default="{ row }">
+            <el-tag v-if="row.processed_by" size="small" type="success">
+              {{ row.processed_by }}
+            </el-tag>
+            <span v-else style="color: #999">-</span>
+          </template>
+        </el-table-column>
+        
+        <el-table-column label="操作" width="300" :fixed="isMobile ? false : 'right'" class-name="action-column">
           <template #default="{ row }">
             <div class="action-buttons" @click.stop>
               <!-- 基础审核操作 -->
@@ -216,7 +224,7 @@
 </template>
 
 <script setup>
-import { ref, onMounted, computed } from 'vue'
+import { ref, onMounted, onUnmounted, computed } from 'vue'
 import { ElMessage, ElMessageBox } from 'element-plus'
 import { 
   Refresh, Check, Close, More, View, Clock, 
@@ -232,6 +240,16 @@ const currentPage = ref(1)
 const pageSize = ref(20)
 const total = ref(0)
 const me = ref(null)
+const isMobile = ref(false)
+
+// 检测移动端
+const checkMobile = () => {
+  isMobile.value = window.innerWidth <= 768
+}
+
+const handleResize = () => {
+  checkMobile()
+}
 
 // 对话框相关
 const showCommentDialog = ref(false)
@@ -427,8 +445,14 @@ const formatTime = (timeStr) => {
 }
 
 onMounted(async () => {
+  checkMobile()
+  window.addEventListener('resize', handleResize)
   await fetchMe()
   await loadSubmissions()
+})
+
+onUnmounted(() => {
+  window.removeEventListener('resize', handleResize)
 })
 </script>
 
@@ -541,10 +565,24 @@ onMounted(async () => {
   }
   
   .header-actions {
-    display: grid;
-    grid-template-columns: 1fr auto;
-    gap: 12px;
+    display: flex;
+    flex-wrap: nowrap;
+    gap: 10px;
     align-items: center;
+  }
+  
+  .header-actions .el-select {
+    flex: 1 1 auto;
+    min-width: 120px;
+  }
+  
+  .header-actions .el-button {
+    flex: 0 0 auto;
+  }
+  
+  .header-actions .el-button.is-circle {
+    width: 40px;
+    height: 40px;
   }
   
   /* 表格移动端适配 */
@@ -582,21 +620,46 @@ onMounted(async () => {
   }
   
   .action-buttons {
-    flex-direction: column;
-    gap: 4px;
+    display: flex;
+    flex-direction: row;
+    gap: 6px;
+    justify-content: flex-start;
   }
   
   .action-buttons .el-button {
-    font-size: 12px;
-    padding: 6px 12px;
+    flex: 0 0 auto;
+    min-width: 54px;
+    max-width: 64px;
+    height: 52px;
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    justify-content: center;
+    gap: 3px;
+    padding: 6px 3px;
+    font-size: 11px;
+  }
+  
+  .action-buttons .el-button .el-icon {
+    font-size: 18px;
+    margin: 0;
+  }
+  
+  .action-buttons .el-button > span {
+    white-space: nowrap;
+    text-align: center;
+    width: 100%;
+    overflow: hidden;
+    text-overflow: ellipsis;
   }
   
   .action-buttons .el-dropdown {
-    width: 100%;
+    flex: 0 0 auto;
   }
   
   .action-buttons .el-dropdown .el-button {
-    width: 100%;
+    min-width: 50px;
+    max-width: 60px;
   }
   
   /* 分页器移动端适配 */
@@ -617,8 +680,12 @@ onMounted(async () => {
   }
   
   .header-actions {
-    grid-template-columns: 1fr;
     gap: 8px;
+  }
+  
+  .header-actions .el-button.is-circle {
+    width: 36px;
+    height: 36px;
   }
   
   /* 表格内容更紧凑 */
@@ -634,9 +701,30 @@ onMounted(async () => {
     gap: 8px;
   }
   
+  .action-buttons {
+    gap: 5px;
+  }
+  
   .action-buttons .el-button {
-    font-size: 11px;
-    padding: 4px 8px;
+    min-width: 50px;
+    max-width: 58px;
+    height: 48px;
+    padding: 5px 2px;
+    font-size: 10px;
+    gap: 2px;
+  }
+  
+  .action-buttons .el-button .el-icon {
+    font-size: 16px;
+  }
+  
+  .action-buttons .el-button > span {
+    white-space: nowrap;
+  }
+  
+  .action-buttons .el-dropdown .el-button {
+    min-width: 50px;
+    max-width: 58px;
   }
   
   /* 隐藏不重要的列 */

@@ -41,8 +41,19 @@
                     <el-avatar :size="24" style="background-color: #6366f1;">
                       {{ (submission.sender_nickname || submission.sender_id)[0] }}
                     </el-avatar>
-                    <span>{{ submission.sender_nickname || submission.sender_id }}</span>
+                    <span class="submitter-name">{{ submission.sender_nickname || submission.sender_id }}</span>
                     <el-tag size="small" type="info">{{ submission.sender_id }}</el-tag>
+                    <el-button 
+                      size="small" 
+                      type="primary" 
+                      plain
+                      round
+                      @click="viewUserDetail(submission.sender_id)"
+                      :icon="View"
+                      class="view-detail-btn"
+                    >
+                      详情
+                    </el-button>
                   </div>
                 </el-descriptions-item>
                 <el-descriptions-item label="群组">
@@ -85,6 +96,9 @@
                 </el-descriptions-item>
                 <el-descriptions-item label="处理时间" v-if="submission.processed_at">
                   {{ formatTime(submission.processed_at) }}
+                </el-descriptions-item>
+                <el-descriptions-item label="处理管理员" v-if="submission.processed_by">
+                  <el-tag type="success" size="small">{{ submission.processed_by }}</el-tag>
                 </el-descriptions-item>
               </el-descriptions>
             </div>
@@ -199,7 +213,7 @@
       </el-card>
 
       <!-- 渲染结果 -->
-      <el-card v-if="submission.rendered_images" class="render-card" shadow="hover">
+      <el-card v-if="submission.rendered_images && submission.status !== 'deleted'" class="render-card" shadow="hover">
         <template #header>
           <span class="card-title">渲染结果</span>
         </template>
@@ -316,6 +330,132 @@
           >
             立即发布
           </el-button>
+          <el-button 
+            v-if="['approved', 'published'].includes(submission.status)"
+            type="danger" 
+            :icon="Delete"
+            @click="handleAction('delete')"
+            plain
+          >
+            删除投稿
+          </el-button>
+        </div>
+      </el-card>
+
+      <!-- 平台评论区域 -->
+      <el-card 
+        v-if="submission.status === 'published'" 
+        class="platform-comments-card" 
+        shadow="hover"
+      >
+        <template #header>
+          <div class="card-header">
+            <span class="card-title">平台评论</span>
+            <el-button 
+              type="primary" 
+              size="small"
+              :icon="Refresh"
+              :loading="loadingComments"
+              @click="loadPlatformComments"
+            >
+              刷新评论
+            </el-button>
+          </div>
+        </template>
+        
+        <div v-loading="loadingComments">
+          <div v-if="!platformCommentsLoaded && !loadingComments" class="empty-comments">
+            <el-empty description="点击刷新按钮加载平台评论" />
+          </div>
+          
+          <div v-else-if="platformComments.length === 0 && !loadingComments" class="empty-comments">
+            <el-empty description="暂无平台评论" />
+          </div>
+          
+          <div v-else class="platforms-list">
+            <div 
+              v-for="(platform, idx) in platformComments" 
+              :key="idx"
+              class="platform-section"
+            >
+              <h3 class="platform-title">
+                <el-tag :type="getPlatformTagType(platform.platform)" size="large">
+                  {{ getPlatformName(platform.platform) }}
+                </el-tag>
+                <span class="comment-count">共 {{ platform.total }} 条评论</span>
+              </h3>
+              
+              <div class="comments-list">
+                <div 
+                  v-for="comment in platform.comments" 
+                  :key="comment.id"
+                  class="comment-item"
+                >
+                  <div class="comment-header">
+                    <div class="user-info">
+                      <SecureAvatar 
+                        :size="36" 
+                        :src="comment.user_avatar"
+                        :placeholder="comment.user_name ? comment.user_name[0] : '?'"
+                        background-color="#6366f1"
+                        shape="circle"
+                      />
+                      <div class="user-details">
+                        <span class="user-name">{{ comment.user_name }}</span>
+                        <span class="user-id">{{ comment.user_id }}</span>
+                      </div>
+                    </div>
+                    <div class="comment-time">
+                      {{ formatCommentTime(comment.created_at) }}
+                    </div>
+                  </div>
+                  
+                  <div class="comment-content">
+                    {{ comment.content }}
+                  </div>
+                  
+                  <!-- 评论中的图片 -->
+                  <div v-if="comment.images && comment.images.length" class="comment-images">
+                    <div
+                      v-for="(image, imgIndex) in comment.images"
+                      :key="imgIndex"
+                      class="comment-image-wrapper"
+                      @click="openImagePreview(comment.images, imgIndex)"
+                    >
+                      <img
+                        :src="image"
+                        class="comment-image"
+                        referrerpolicy="no-referrer"
+                        loading="lazy"
+                        alt="评论图片"
+                        @error="handleImageError"
+                      />
+                    </div>
+                  </div>
+                  
+                  <!-- 图片预览器 -->
+                  <el-image-viewer
+                    v-if="showImageViewer"
+                    :url-list="previewImages"
+                    :initial-index="previewIndex"
+                    @close="closeImagePreview"
+                    teleported
+                  />
+                  
+                  <div class="comment-footer">
+                    <span class="comment-stat">
+                      <el-icon><Star /></el-icon>
+                      {{ comment.like_count }}
+                    </span>
+                    <span class="comment-stat" v-if="comment.reply_count > 0">
+                      <el-icon><ChatDotRound /></el-icon>
+                      {{ comment.reply_count }}
+                    </span>
+                  </div>
+                </div>
+              </div>
+            </div>
+          </div>
         </div>
       </el-card>
     </div>
@@ -337,20 +477,92 @@
         <el-button type="primary" @click="submitComment">确定</el-button>
       </template>
     </el-dialog>
+
+    <!-- 用户详情对话框 -->
+    <el-dialog v-model="showUserDialog" title="投稿者详情" width="600px">
+      <div v-loading="loadingUser">
+        <div v-if="selectedUser" class="user-detail">
+          <el-descriptions :column="2" border>
+            <el-descriptions-item label="用户ID">
+              {{ selectedUser.user_id }}
+            </el-descriptions-item>
+            <el-descriptions-item label="昵称">
+              {{ selectedUser.nickname || '未知' }}
+            </el-descriptions-item>
+            <el-descriptions-item label="QQ等级">
+              {{ selectedUser.qq_level || '未知' }}
+            </el-descriptions-item>
+            <el-descriptions-item label="在线状态">
+              {{ selectedUser.status || '未知' }}
+            </el-descriptions-item>
+            <el-descriptions-item label="性别" v-if="selectedUser.sex && selectedUser.sex !== '未知'">
+              {{ selectedUser.sex }}
+            </el-descriptions-item>
+            <el-descriptions-item label="年龄" v-if="selectedUser.age && selectedUser.age !== '未知'">
+              {{ selectedUser.age }}
+            </el-descriptions-item>
+            <el-descriptions-item label="登录天数" v-if="selectedUser.login_days && selectedUser.login_days !== '未知'">
+              {{ selectedUser.login_days }}
+            </el-descriptions-item>
+            <el-descriptions-item label="地区" v-if="selectedUser.area">
+              {{ selectedUser.area }}
+            </el-descriptions-item>
+            <el-descriptions-item label="群名片" v-if="selectedUser.card" :span="2">
+              {{ selectedUser.card }}
+            </el-descriptions-item>
+            <el-descriptions-item label="头衔" v-if="selectedUser.title" :span="2">
+              {{ selectedUser.title }}
+            </el-descriptions-item>
+          </el-descriptions>
+          
+          <div class="user-stats" v-if="selectedUser.stats" style="margin-top: 20px;">
+            <h4 style="margin-bottom: 12px;">投稿统计</h4>
+            <el-row :gutter="16">
+              <el-col :span="6">
+                <div class="stat-item" style="text-align: center; padding: 16px; background: var(--el-fill-color-light); border-radius: 8px;">
+                  <div style="font-size: 24px; font-weight: 600; color: var(--el-color-primary);">{{ selectedUser.stats.total || 0 }}</div>
+                  <div style="font-size: 12px; color: var(--el-text-color-secondary); margin-top: 4px;">总投稿</div>
+                </div>
+              </el-col>
+              <el-col :span="6">
+                <div class="stat-item" style="text-align: center; padding: 16px; background: var(--el-fill-color-light); border-radius: 8px;">
+                  <div style="font-size: 24px; font-weight: 600; color: var(--el-color-success);">{{ selectedUser.stats.published || 0 }}</div>
+                  <div style="font-size: 12px; color: var(--el-text-color-secondary); margin-top: 4px;">已发布</div>
+                </div>
+              </el-col>
+              <el-col :span="6">
+                <div class="stat-item" style="text-align: center; padding: 16px; background: var(--el-fill-color-light); border-radius: 8px;">
+                  <div style="font-size: 24px; font-weight: 600; color: var(--el-color-danger);">{{ selectedUser.stats.rejected || 0 }}</div>
+                  <div style="font-size: 12px; color: var(--el-text-color-secondary); margin-top: 4px;">被拒绝</div>
+                </div>
+              </el-col>
+              <el-col :span="6">
+                <div class="stat-item" style="text-align: center; padding: 16px; background: var(--el-fill-color-light); border-radius: 8px;">
+                  <div style="font-size: 24px; font-weight: 600; color: var(--el-color-warning);">{{ selectedUser.stats.pending || 0 }}</div>
+                  <div style="font-size: 12px; color: var(--el-text-color-secondary); margin-top: 4px;">待审核</div>
+                </div>
+              </el-col>
+            </el-row>
+          </div>
+        </div>
+      </div>
+    </el-dialog>
   </div>
 </template>
 
 <script setup>
-import { ref, onMounted, computed } from 'vue'
+import { ref, onMounted, computed, nextTick } from 'vue'
 import { useRoute } from 'vue-router'
 import { ElMessage, ElMessageBox } from 'element-plus'
+import { ElImageViewer } from 'element-plus'
 import { 
   ArrowLeft, Check, Close, View, ChatDotRound, 
-  Refresh, Lightning, ArrowDown, ArrowUp
+  Refresh, Lightning, ArrowDown, ArrowUp, Delete, Star, PictureFilled
 } from '@element-plus/icons-vue'
 import moment from 'moment'
 import api from '../api'
 import SecureImage from '../components/SecureImage.vue'
+import SecureAvatar from '../components/SecureAvatar.vue'
 
 const route = useRoute()
 const loading = ref(false)
@@ -358,6 +570,12 @@ const submission = ref(null)
 const showCommentDialog = ref(false)
 const commentText = ref('')
 const rawContentCollapsed = ref(true)
+const platformComments = ref([])
+const loadingComments = ref(false)
+const platformCommentsLoaded = ref(false)
+const showImageViewer = ref(false)
+const previewImages = ref([])
+const previewIndex = ref(0)
 const processedText = computed(() => {
   const pc = submission.value?.processed_content
   if (!pc) return ''
@@ -479,6 +697,59 @@ const loadSubmissionDetail = async () => {
   }
 }
 
+const loadPlatformComments = async () => {
+  if (!submission.value || submission.value.status !== 'published') {
+    ElMessage.warning('该投稿尚未发布')
+    return
+  }
+  
+  loadingComments.value = true
+  try {
+    const response = await api.get(`/audit/${submission.value.id}/platform-comments`)
+    if (response.data.success && response.data.platforms) {
+      platformComments.value = response.data.platforms
+      platformCommentsLoaded.value = true
+      ElMessage.success('评论加载成功')
+    } else {
+      ElMessage.warning(response.data.message || '未能获取评论')
+      platformComments.value = []
+    }
+  } catch (error) {
+    ElMessage.error('加载评论失败')
+    console.error(error)
+    platformComments.value = []
+  } finally {
+    loadingComments.value = false
+  }
+}
+
+const getPlatformName = (platform) => {
+  const nameMap = {
+    'bilibili': 'B站',
+    'qzone': 'QQ空间',
+    'rednote': '小红书'
+  }
+  return nameMap[platform] || platform
+}
+
+const getPlatformTagType = (platform) => {
+  const typeMap = {
+    'bilibili': 'primary',
+    'qzone': 'success',
+    'rednote': 'danger'
+  }
+  return typeMap[platform] || 'info'
+}
+
+const formatCommentTime = (timestamp) => {
+  if (!timestamp) return '未知时间'
+  // 如果是秒级时间戳，转换为毫秒
+  if (timestamp < 10000000000) {
+    timestamp = timestamp * 1000
+  }
+  return moment(timestamp).format('YYYY-MM-DD HH:mm:ss')
+}
+
 const handleAction = async (action) => {
   const submissionId = submission.value.id
   
@@ -506,6 +777,19 @@ const handleAction = async (action) => {
         break
       case 'approve-immediate':
         result = await api.post(`/audit/${submissionId}/approve-immediate`)
+        break
+      case 'delete':
+        await ElMessageBox.confirm(
+          '确定要删除该投稿吗？此操作将删除本地记录和已发布到平台的内容，不可恢复！', 
+          '确认删除', 
+          {
+            type: 'warning',
+            confirmButtonText: '确定删除',
+            cancelButtonText: '取消',
+            confirmButtonClass: 'el-button--danger'
+          }
+        )
+        result = await api.post(`/audit/${submissionId}/delete`)
         break
     }
     
@@ -618,6 +902,71 @@ const formatTime = (input) => {
   return moment(input).format('YYYY-MM-DD HH:mm:ss')
 }
 
+// 用户详情相关
+const showUserDialog = ref(false)
+const selectedUser = ref(null)
+const loadingUser = ref(false)
+
+const viewUserDetail = async (userId) => {
+  showUserDialog.value = true
+  selectedUser.value = null
+  loadingUser.value = true
+  try {
+    const response = await api.get(`/management/users/${userId}/detail`, {
+      params: { submission_id: submission.value?.id }
+    })
+    selectedUser.value = {
+      user_id: response.data.user_id,
+      nickname: response.data.nickname || '未知',
+      qq_level: response.data.qq_level || '未知',
+      age: response.data.age,
+      sex: response.data.sex,
+      login_days: response.data.login_days,
+      status: response.data.status,
+      card: response.data.card,
+      area: response.data.area,
+      title: response.data.title,
+      stats: response.data.stats || { total: 0, published: 0, rejected: 0, pending: 0 }
+    }
+  } catch (error) {
+    console.error('加载用户详情失败:', error)
+    ElMessage.error('加载用户详情失败')
+  } finally {
+    loadingUser.value = false
+  }
+}
+
+// 打开图片预览
+const openImagePreview = (images, index) => {
+  previewImages.value = images
+  previewIndex.value = index
+  showImageViewer.value = true
+  
+  // 等待预览器渲染后设置 referrerpolicy
+  nextTick(() => {
+    setTimeout(() => {
+      document.querySelectorAll('.el-image-viewer__img').forEach((img) => {
+        if (!img.hasAttribute('referrerpolicy')) {
+          img.setAttribute('referrerpolicy', 'no-referrer')
+        }
+      })
+    }, 50)
+  })
+}
+
+// 关闭图片预览
+const closeImagePreview = () => {
+  showImageViewer.value = false
+  previewImages.value = []
+  previewIndex.value = 0
+}
+
+// 图片加载错误处理
+const handleImageError = (e) => {
+  console.error('图片加载失败:', e.target.src)
+  e.target.style.display = 'none'
+}
+
 onMounted(() => {
   loadSubmissionDetail()
 })
@@ -661,6 +1010,25 @@ onMounted(() => {
   display: flex;
   align-items: center;
   gap: 8px;
+  flex-wrap: wrap;
+}
+
+.submitter-info .submitter-name {
+  font-weight: 500;
+  color: var(--el-text-color-primary);
+}
+
+.submitter-info .view-detail-btn {
+  margin-left: 4px;
+  font-size: 12px;
+  height: 24px;
+  padding: 0 12px;
+  transition: all 0.3s ease;
+}
+
+.submitter-info .view-detail-btn:hover {
+  transform: translateY(-1px);
+  box-shadow: 0 2px 8px rgba(99, 102, 241, 0.3);
 }
 
 .raw-content {
@@ -932,7 +1300,38 @@ onMounted(() => {
   }
   
   .action-buttons {
+    display: flex;
+    flex-wrap: wrap;
+    justify-content: center;
+    gap: 8px;
+  }
+
+  .action-buttons .el-button {
+    flex: 0 1 auto;
+    min-width: 80px;
+    max-width: 95px;
+    height: auto;
+    min-height: 60px;
+    padding: 8px 4px;
+    font-size: 11px;
+    display: flex;
     flex-direction: column;
+    align-items: center;
+    justify-content: center;
+    gap: 4px;
+  }
+  
+  .action-buttons .el-button .el-icon {
+    font-size: 20px;
+    margin: 0;
+  }
+  
+  .action-buttons .el-button > span {
+    white-space: nowrap;
+    text-align: center;
+    width: 100%;
+    overflow: hidden;
+    text-overflow: ellipsis;
   }
 }
 
@@ -978,5 +1377,182 @@ onMounted(() => {
   .message-image {
     height: 120px;
   }
+  
+  .action-buttons {
+    gap: 6px;
+  }
+  
+    .action-buttons .el-button {
+      flex: 0 1 auto;
+      min-width: 72px;
+      max-width: 85px;
+      min-height: 56px;
+    padding: 6px 3px;
+    font-size: 10px;
+    gap: 3px;
+  }
+  
+  .action-buttons .el-button .el-icon {
+    font-size: 18px;
+  }
+  
+  .action-buttons .el-button > span {
+    white-space: nowrap;
+  }
+}
+
+/* 平台评论样式 */
+.platform-comments-card {
+  margin-bottom: 24px;
+}
+
+.platforms-list {
+  display: flex;
+  flex-direction: column;
+  gap: 24px;
+}
+
+.platform-section {
+  border: 1px solid var(--el-border-color);
+  border-radius: 8px;
+  padding: 16px;
+  background: var(--el-fill-color-extra-light);
+}
+
+.platform-title {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  margin: 0 0 16px 0;
+  font-size: 16px;
+  font-weight: 600;
+}
+
+.comment-count {
+  color: var(--el-text-color-secondary);
+  font-size: 14px;
+  font-weight: normal;
+}
+
+.comments-list {
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+}
+
+.comment-item {
+  background: var(--el-bg-color);
+  border: 1px solid var(--el-border-color);
+  border-radius: 8px;
+  padding: 12px;
+  transition: all 0.2s;
+}
+
+.comment-item:hover {
+  box-shadow: 0 2px 12px 0 rgba(0, 0, 0, 0.08);
+  border-color: var(--el-border-color-darker);
+}
+
+.comment-header {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  margin-bottom: 8px;
+}
+
+.user-info {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+
+.user-details {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+}
+
+.user-name {
+  font-size: 14px;
+  font-weight: 600;
+  color: var(--el-text-color-primary);
+}
+
+.user-id {
+  font-size: 12px;
+  color: var(--el-text-color-secondary);
+}
+
+.comment-time {
+  font-size: 12px;
+  color: var(--el-text-color-secondary);
+}
+
+.comment-content {
+  padding: 8px 0;
+  line-height: 1.6;
+  color: var(--el-text-color-regular);
+  word-wrap: break-word;
+}
+
+.comment-images {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+  margin-top: 12px;
+}
+
+.comment-image-wrapper {
+  width: 120px;
+  height: 120px;
+  border-radius: 8px;
+  overflow: hidden;
+  cursor: pointer;
+  transition: transform 0.2s;
+}
+
+.comment-image-wrapper:hover {
+  transform: scale(1.05);
+}
+
+.comment-image {
+  width: 100%;
+  height: 100%;
+  object-fit: cover;
+  display: block;
+}
+
+.image-error {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  width: 100%;
+  height: 100%;
+  background-color: var(--el-fill-color-light);
+  color: var(--el-text-color-placeholder);
+  font-size: 24px;
+}
+
+.comment-footer {
+  display: flex;
+  gap: 16px;
+  padding-top: 8px;
+  border-top: 1px solid var(--el-border-color-lighter);
+}
+
+.comment-stat {
+  display: flex;
+  align-items: center;
+  gap: 4px;
+  font-size: 13px;
+  color: var(--el-text-color-secondary);
+}
+
+.comment-stat .el-icon {
+  font-size: 14px;
+}
+
+.empty-comments {
+  padding: 40px 20px;
 }
 </style>

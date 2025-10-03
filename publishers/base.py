@@ -356,3 +356,17 @@ class BasePublisher(PublisherPlugin):
         默认不支持，由具体平台子类按需覆盖实现。
         """
         return {"success": False, "message": "not supported"}
+
+    async def get_platform_comments(self, record: PublishRecord, page: int = 1, page_size: int = 20) -> Dict[str, Any]:
+        """根据发布记录获取平台评论。
+        
+        Args:
+            record: 发布记录对象
+            page: 页码（从1开始）
+            page_size: 每页数量
+        Returns:
+            {'success': True, 'comments': [...], 'total': int, 'platform': str} 或 {'success': False, 'message': str}
+        
+        默认不支持，由具体平台子类按需覆盖实现。
+        """
+        return {"success": False, "message": "not supported"}

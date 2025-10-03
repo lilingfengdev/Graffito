@@ -64,19 +64,19 @@ class BaseReceiver(ReceiverPlugin):
         return True
         
     async def cache_message(self, message: Dict[str, Any]):
-        """缓存消息"""
+        """缓存消息（使用 MessageCacheService）"""
+        from core.message_cache_service import MessageCacheService
+        
         db = await get_db()
         async with db.get_session() as session:
-            cache = MessageCache(
+            await MessageCacheService.add_message(
                 sender_id=str(message.get('user_id')),
                 receiver_id=str(message.get('self_id')),
                 message_id=str(message.get('message_id')),
                 message_content=message,
-                message_time=float(message.get('time', 0))
+                message_time=float(message.get('time', 0)),
+                db=session
             )
-            session.add(cache)
-            # 需要提交以便后续合并消息时能查询到
-            await session.commit()
             
     async def remove_cached_message(self, sender_id: str, receiver_id: str, message_id: str) -> bool:
         """根据 sender/receiver/message_id 删除一条已缓存的消息。

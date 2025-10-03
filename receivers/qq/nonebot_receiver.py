@@ -127,25 +127,25 @@ class QQReceiver(BaseReceiver):
 
             pass
 
+        # 快速初始化 NoneBot（避免重复配置）
         nonebot.init()
         
         # NoneBot2 初始化后重新配置日志输出（避免被 NoneBot2 覆盖）
+        # 使用缓存的日志配置，避免重复添加
         import os
         if os.getenv("XWALL_LOG_CONFIGURED") == "true":
             from loguru import logger as loguru_logger
             import sys
             
-            # NoneBot2 会移除所有处理器，需要重新添加控制台和文件处理器
-            loguru_logger.remove()  # 先移除 NoneBot2 添加的处理器
+            # NoneBot2 会移除所有处理器，需要重新添加
+            loguru_logger.remove()
             
-            # 重新添加控制台日志处理器
+            # 只添加必要的处理器（避免重复添加）
             loguru_logger.add(
                 sys.stdout,
                 format="<green>{time:YYYY-MM-DD HH:mm:ss}</green> | <level>{level: <8}</level> | <cyan>{name}</cyan>:<cyan>{function}</cyan>:<cyan>{line}</cyan> - <level>{message}</level>",
                 level="INFO"
             )
-            
-            # 重新添加文件日志处理器
             loguru_logger.add(
                 "data/logs/xwall_{time:YYYY-MM-DD}.log",
                 rotation="00:00",
@@ -153,8 +153,6 @@ class QQReceiver(BaseReceiver):
                 level="DEBUG",
                 format="{time:YYYY-MM-DD HH:mm:ss.SSS} | {level: <8} | {name}:{function}:{line} - {message}"
             )
-            
-            logger.info("NoneBot2 初始化后重新配置控制台和文件日志")
 
         driver = nonebot.get_driver()
 
@@ -220,9 +218,6 @@ class QQReceiver(BaseReceiver):
                 elif isinstance(event, GroupMessageEvent):
 
                     message_type = "group"
-
-
-
                 else:
 
                     return
@@ -1768,11 +1763,10 @@ class QQReceiver(BaseReceiver):
 
                             await session.commit()
 
-                    # 同时清理本账号组的历史消息缓存（MessageCache）
+                    # 同时清理本账号组的历史消息缓存（MessageCache，使用 MessageCacheService）
                     try:
-                        from sqlalchemy import delete
                         from config import get_settings
-                        from core.models import MessageCache
+                        from core.message_cache_service import MessageCacheService
 
                         settings = get_settings()
                         group_cfg = (settings.account_groups or {}).get(group_name)
@@ -1797,10 +1791,9 @@ class QQReceiver(BaseReceiver):
                         if receiver_ids:
                             db = await get_db()
                             async with db.get_session() as session2:
-                                await session2.execute(
-                                    delete(MessageCache).where(MessageCache.receiver_id.in_(receiver_ids))
-                                )
-                                await session2.commit()
+                                # 清理每个 receiver 的缓存（包括 Redis/Memory 和数据库）
+                                for receiver_id in receiver_ids:
+                                    await MessageCacheService.clear_all_by_receiver(receiver_id, session2)
                     except Exception:
                         # 清理缓存失败不影响主流程
                         pass

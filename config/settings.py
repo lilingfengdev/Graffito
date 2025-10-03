@@ -1,23 +1,16 @@
 """配置管理"""
 
 import os
-
 from pathlib import Path
-
 from typing import Dict, List, Optional, Any
-
 from functools import lru_cache
 
 import yaml
-
 from pydantic import BaseModel, Field, validator
-
 from pydantic_settings import BaseSettings
-
 from dotenv import load_dotenv
 
 # 加载环境变量
-
 load_dotenv()
 
 
@@ -53,40 +46,48 @@ class DatabaseConfig(BaseModel):
     pool_size: int = 10
 
 
-class RedisConfig(BaseModel):
-    """Redis配置"""
-
-    enabled: bool = False
-
-    host: str = "localhost"
-
-    port: int = 6379
-
-    db: int = 0
+class CacheConfig(BaseModel):
+    """统一缓存配置 (基于 aiocache)
     
-    password: Optional[str] = None
+    支持三种后端:
+    - memory: 本地内存缓存 (SimpleMemoryCache)
+    - redis: Redis 缓存 (RedisCache)
+    - memcached: Memcached 缓存 (MemcachedCache)
+    """
     
-    # 连接池配置
-    max_connections: int = 50
+    # 缓存后端类型: memory | redis | memcached
+    backend: str = "memory"
     
-    # 连接超时（秒）
-    socket_timeout: int = 5
+    # 序列化器: null | string | json | pickle | msgpack
+    serializer: str = "json"
     
-    socket_connect_timeout: int = 5
+    # 命名空间（键前缀）
+    namespace: str = "xwall"
     
-    # 重试配置
-    retry_on_timeout: bool = True
+    # 默认 TTL（秒）
+    ttl: int = 300
     
-    # 键前缀（用于命名空间隔离）
-    key_prefix: str = "xwall:"
+    # 操作超时（秒）
+    timeout: int = 5
     
-    # 消息缓存配置
-    message_cache_ttl: int = 7200  # 消息缓存过期时间（秒），默认2小时
+    # === Redis 后端配置 (backend=redis 时生效) ===
+    redis_endpoint: str = "127.0.0.1"
+    redis_port: int = 6379
+    redis_db: int = 0
+    redis_password: Optional[str] = None
+    redis_pool_size: int = 50
     
-    # 分布式锁配置
-    lock_timeout: int = 30  # 锁超时时间（秒）
+    # === Memcached 后端配置 (backend=memcached 时生效) ===
+    memcached_endpoint: str = "127.0.0.1"
+    memcached_port: int = 11211
+    memcached_pool_size: int = 2
     
-    lock_sleep: float = 0.1  # 锁获取重试间隔（秒）
+    # === 业务配置 ===
+    # 消息缓存过期时间（秒）
+    message_cache_ttl: int = 7200
+    
+    # 分布式锁超时（秒）
+    lock_timeout: int = 30
 
 
 class QueueMySQLConfig(BaseModel):
@@ -414,7 +415,7 @@ class Settings(BaseSettings):
 
     database: DatabaseConfig = DatabaseConfig()
 
-    redis: RedisConfig = RedisConfig()
+    cache: CacheConfig = CacheConfig()
 
     queue: QueueConfig = QueueConfig()
     web: WebConfig = WebConfig()

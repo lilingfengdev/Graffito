@@ -90,44 +90,60 @@ database:
 
 
 
-# Redis配置（可选，用于高性能缓存、任务队列和分布式锁）
+# 缓存配置（基于 aiocache，支持多种后端）
+# 参考文档: http://aiocache.readthedocs.io/
+# 
 # 功能：
-# - 消息缓存：将 MessageCache 从数据库迁移到 Redis，提升性能（自动降级）
+# - 消息缓存：将 MessageCache 从数据库迁移到缓存，提升性能（自动降级）
 # - 任务队列：支持 RedisQueue 后端（需在 queue.backend 中配置）
 # - 分布式锁：提供跨实例的分布式锁支持
 # - API 限流：可通过 web.rate_limit.storage_uri 使用 Redis 实现分布式限流
+#
+# 后端选择：
+# - memory: 本地内存缓存（适合单机/开发/测试，无需外部服务）
+# - redis: Redis 缓存（适合生产/分布式部署，高性能）
+# - memcached: Memcached 缓存（高性能缓存服务器）
 
-redis:
+cache:
 
-  enabled: false  # 是否启用 Redis（false 时自动降级到数据库）
-
-  host: localhost
-
-  port: 6379
-
-  db: 0
+  # 缓存后端类型: memory | redis | memcached
+  backend: "memory"
   
-  password: ""  # Redis 密码（可选，留空表示无密码）
+  # 序列化器: null | string | json | pickle | msgpack
+  # - null: 无序列化（仅内存后端，最快）
+  # - string: 字符串序列化（简单数据）
+  # - json: JSON 序列化（推荐，跨语言兼容）
+  # - pickle: Python Pickle（Python 对象）
+  # - msgpack: MessagePack（高效二进制）
+  serializer: "json"
   
-  # 连接池配置
-  max_connections: 50  # 最大连接数
+  # 命名空间（键前缀，用于多项目隔离）
+  namespace: "xwall"
   
-  # 连接超时配置（秒）
-  socket_timeout: 5  # 读写超时
-  socket_connect_timeout: 5  # 连接超时
+  # 默认 TTL（秒，缓存过期时间）
+  ttl: 300
   
-  # 重试配置
-  retry_on_timeout: true  # 超时时是否重试
+  # 操作超时（秒）
+  timeout: 5
   
-  # 键命名空间（用于多项目隔离）
-  key_prefix: "xwall:"
+  # ==================== Redis 配置 ====================
+  # 仅当 backend="redis" 时生效
+  redis_endpoint: "127.0.0.1"
+  redis_port: 6379
+  redis_db: 0
+  redis_password: null  # Redis 密码（null 表示无密码）
+  redis_pool_size: 50   # 连接池大小
   
-  # 消息缓存配置
+  # ==================== Memcached 配置 ====================
+  # 仅当 backend="memcached" 时生效
+  memcached_endpoint: "127.0.0.1"
+  memcached_port: 11211
+  memcached_pool_size: 2
+  
+  # ==================== 业务配置 ====================
   message_cache_ttl: 7200  # 消息缓存过期时间（秒），默认 2 小时
-  
-  # 分布式锁配置
-  lock_timeout: 30  # 锁超时时间（秒）
-  lock_sleep: 0.1  # 锁获取重试间隔（秒）
+  lock_timeout: 30         # 分布式锁超时时间（秒）
+  lock_sleep: 0.1          # 锁获取重试间隔（秒）
 
 
 
@@ -213,7 +229,7 @@ rendering:
 
 # - MySQLQueue：使用 MySQL 作为后端（支持多实例共享）
 
-# - RedisQueue：使用 Redis 作为后端（高性能，需启用 redis.enabled，推荐分布式部署）
+# - RedisQueue：使用 Redis 作为后端（高性能，需设置 cache.backend="redis"，推荐分布式部署）
 
 queue:
 
@@ -235,8 +251,8 @@ queue:
 
     table: xwall_tasks
   
-  # 注意：RedisQueue 无需额外配置，使用 redis 部分的配置
-  # 队列数据存储在 Redis 中，键格式为 xwall:queue:<queue_name>
+  # 注意：RedisQueue 无需额外配置，使用 cache 部分的配置（需设置 backend="redis"）
+  # 队列数据存储在 Redis 中，键格式为 <namespace>:queue:<queue_name>
 
 
 

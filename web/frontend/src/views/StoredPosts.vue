@@ -31,7 +31,7 @@
             :disabled="!selectedGroup || storedPosts.length === 0"
             :loading="publishing"
           >
-            发布暂存区
+            发布
           </el-button>
           
           <el-button 
@@ -40,7 +40,7 @@
             @click="clearAll"
             :disabled="!selectedGroup || storedPosts.length === 0"
           >
-            清空暂存区
+            清空
           </el-button>
           
           <el-button 
@@ -159,6 +159,13 @@
                 >
                   匿名
                 </el-tag>
+                <el-tag 
+                  v-if="row.submission.processed_by" 
+                  size="mini" 
+                  type="success"
+                >
+                  处理人: {{ row.submission.processed_by }}
+                </el-tag>
               </div>
             </div>
           </template>
@@ -181,7 +188,7 @@
           </template>
         </el-table-column>
         
-        <el-table-column label="操作" width="300" fixed="right">
+        <el-table-column label="操作" width="300" :fixed="isMobile ? false : 'right'" class-name="action-column">
           <template #default="{ row }">
             <div class="action-buttons">
               <el-button 
@@ -255,14 +262,18 @@
 </template>
 
 <script setup>
-import { ref, onMounted, computed } from 'vue'
+import { ref, onMounted, onUnmounted, computed } from 'vue'
 import { ElMessage, ElMessageBox } from 'element-plus'
 import { 
   Position, Delete, Refresh, Box, User, Clock, TrendCharts,
   View, More, Sort
 } from '@element-plus/icons-vue'
 import moment from 'moment'
+import 'moment/dist/locale/zh-cn'
 import api from '../api'
+
+// 设置 moment 为中文
+moment.locale('zh-cn')
 
 const loading = ref(false)
 const publishing = ref(false)
@@ -270,6 +281,16 @@ const storedPosts = ref([])
 const activeGroups = ref([])
 const selectedGroup = ref('')
 const sortBy = ref('priority')
+const isMobile = ref(false)
+
+// 检测移动端
+const checkMobile = () => {
+  isMobile.value = window.innerWidth <= 768
+}
+
+const handleResize = () => {
+  checkMobile()
+}
 
 // 对话框相关
 const showPriorityDialog = ref(false)
@@ -495,11 +516,17 @@ const formatTime = (timeStr) => {
 }
 
 onMounted(async () => {
+  checkMobile()
+  window.addEventListener('resize', handleResize)
   await loadActiveGroups()
   if (activeGroups.value.length > 0) {
     selectedGroup.value = activeGroups.value[0]
     await loadStoredPosts()
   }
+})
+
+onUnmounted(() => {
+  window.removeEventListener('resize', handleResize)
 })
 </script>
 
@@ -659,9 +686,41 @@ onMounted(async () => {
   }
   
   .header-actions {
-    display: grid;
-    grid-template-columns: repeat(auto-fit, minmax(120px, 1fr));
-    gap: 12px;
+    display: flex;
+    flex-wrap: nowrap;
+    gap: 8px;
+    align-items: center;
+  }
+  
+  .header-actions .el-select {
+    flex: 1 1 auto;
+    min-width: 100px;
+  }
+  
+  .header-actions .el-button {
+    flex: 0 0 auto;
+    min-width: 60px;
+    max-width: 70px;
+    height: 56px;
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    justify-content: center;
+    gap: 3px;
+    padding: 6px 4px;
+    font-size: 11px;
+    white-space: nowrap;
+  }
+  
+  .header-actions .el-button .el-icon {
+    font-size: 20px;
+    margin: 0;
+  }
+  
+  .header-actions .el-button > span {
+    line-height: 1.1;
+    text-align: center;
+    width: 100%;
   }
   
   .card-header {
@@ -703,21 +762,47 @@ onMounted(async () => {
   }
   
   .action-buttons {
-    flex-direction: column;
-    gap: 4px;
+    display: flex;
+    flex-direction: row;
+    gap: 6px;
+    justify-content: flex-start;
+    flex-wrap: nowrap;
   }
   
   .action-buttons .el-button {
-    font-size: 12px;
-    padding: 6px 12px;
+    flex: 0 0 auto;
+    min-width: 54px;
+    max-width: 64px;
+    height: 52px;
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    justify-content: center;
+    gap: 3px;
+    padding: 6px 3px;
+    font-size: 11px;
+  }
+  
+  .action-buttons .el-button .el-icon {
+    font-size: 18px;
+    margin: 0;
+  }
+  
+  .action-buttons .el-button > span {
+    white-space: nowrap;
+    text-align: center;
+    width: 100%;
+    overflow: hidden;
+    text-overflow: ellipsis;
   }
   
   .action-buttons .el-dropdown {
-    width: 100%;
+    flex: 0 0 auto;
   }
   
   .action-buttons .el-dropdown .el-button {
-    width: 100%;
+    min-width: 50px;
+    max-width: 60px;
   }
   
   /* 空状态移动端适配 */
@@ -737,8 +822,20 @@ onMounted(async () => {
   }
   
   .header-actions {
-    grid-template-columns: 1fr;
-    gap: 8px;
+    gap: 6px;
+  }
+  
+  .header-actions .el-button {
+    min-width: 56px;
+    max-width: 64px;
+    height: 52px;
+    padding: 5px 3px;
+    font-size: 10px;
+    gap: 2px;
+  }
+  
+  .header-actions .el-button .el-icon {
+    font-size: 18px;
   }
   
   .card-header {
@@ -763,9 +860,30 @@ onMounted(async () => {
     padding: 1px 3px;
   }
   
+  .action-buttons {
+    gap: 5px;
+  }
+  
   .action-buttons .el-button {
-    font-size: 11px;
-    padding: 4px 8px;
+    min-width: 50px;
+    max-width: 58px;
+    height: 48px;
+    padding: 5px 2px;
+    font-size: 10px;
+    gap: 2px;
+  }
+  
+  .action-buttons .el-button .el-icon {
+    font-size: 16px;
+  }
+  
+  .action-buttons .el-button > span {
+    white-space: nowrap;
+  }
+  
+  .action-buttons .el-dropdown .el-button {
+    min-width: 50px;
+    max-width: 58px;
   }
   
   /* 隐藏不重要的列 */

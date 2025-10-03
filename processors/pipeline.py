@@ -83,6 +83,11 @@ class ProcessingPipeline:
                     
                 # 更新状态为处理中
                 submission.status = SubmissionStatus.PROCESSING.value
+                
+                # 清除缓存
+                from core.data_cache_service import DataCacheService
+                await DataCacheService.invalidate_submission(submission_id)
+                
                 await session.commit()
                 
                 # 获取消息缓存
@@ -126,6 +131,10 @@ class ProcessingPipeline:
                 submission.processed_at = datetime.now()
                 submission.status = SubmissionStatus.WAITING.value
                 
+                # 清除缓存
+                from core.data_cache_service import DataCacheService
+                await DataCacheService.invalidate_submission(submission_id)
+                
                 await session.commit()
                 
                 # 清理该投稿对应的历史消息缓存，避免后续投稿重复合并旧消息
@@ -164,25 +173,23 @@ class ProcessingPipeline:
             return False
             
     async def get_messages_for_submission(self, submission: Submission) -> List[Dict[str, Any]]:
-        """获取投稿的所有消息"""
+        """获取投稿的所有消息（使用 MessageCacheService）"""
+        from core.message_cache_service import MessageCacheService
+        
         db = await get_db()
         async with db.get_session() as session:
-            # 获取消息缓存
-            from sqlalchemy import select, and_
-            stmt = select(MessageCache).where(
-                and_(
-                    MessageCache.sender_id == submission.sender_id,
-                    MessageCache.receiver_id == submission.receiver_id
-                )
-            ).order_by(MessageCache.message_time)
+            # 使用 MessageCacheService 获取消息（自动处理缓存/数据库降级）
+            cached_messages = await MessageCacheService.get_messages(
+                sender_id=submission.sender_id,
+                receiver_id=submission.receiver_id,
+                db=session
+            )
             
-            result = await session.execute(stmt)
-            caches = result.scalars().all()
-            
+            # 提取 message_content
             messages = []
-            for cache in caches:
-                if cache.message_content:
-                    messages.append(cache.message_content)
+            for msg_data in cached_messages:
+                if msg_data.get('message_content'):
+                    messages.append(msg_data['message_content'])
                     
             # 如果没有缓存，使用原始内容
             if not messages and submission.raw_content:

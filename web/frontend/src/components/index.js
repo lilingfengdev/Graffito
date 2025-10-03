@@ -4,6 +4,12 @@
  * 统一的组件库，配合设计系统使用
  */
 
+// Vue 单文件组件导入
+import SecureImage from './SecureImage.vue'
+import SecureAvatar from './SecureAvatar.vue'
+import XwImageViewer from './XwImageViewer.vue'
+import XwUpload from './XwUpload.vue'
+
 // 基础组件
 const XwButton = {
   name: 'XwButton',
@@ -1322,5 +1328,10 @@ export {
   XwChart,
   XwDataTable,
   XwFilter,
-  createNotificationMethods
+  createNotificationMethods,
+  // Vue 单文件组件
+  SecureImage,
+  SecureAvatar,
+  XwImageViewer,
+  XwUpload
 }

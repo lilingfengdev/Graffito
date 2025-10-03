@@ -129,6 +129,102 @@ class AioQzoneAPI:
             logger.error(f"删除说说失败: {e}")
             return {"success": False, "message": str(e)}
 
+    async def get_comments(self, tid: str, page: int = 1, page_size: int = 20) -> Dict[str, Any]:
+        """获取说说的评论列表。
+        
+        Args:
+            tid: 说说ID (fid)
+            page: 页码（从1开始）
+            page_size: 每页数量（注意：实际返回数量由QZone接口决定）
+        Returns:
+            {'success': True, 'comments': [...], 'total': int} 或 {'success': False, 'message': str}
+        """
+        try:
+            # 使用 shuoshuo 方法获取说说详情，其中包含评论数据
+            # 参数顺序：fid, uin, appid（位置参数）
+            detail = await self._api.shuoshuo(tid, self.uin, 311)
+            
+            comments_list = []
+            if hasattr(detail, 'comment') and detail.comment:
+                comment_data = detail.comment
+                total = getattr(comment_data, 'num', 0)
+                
+                # 获取评论列表
+                comment_items = getattr(comment_data, 'comments', []) or []
+                for item in comment_items:
+                    if not item:
+                        continue
+                    user_info = getattr(item, 'user', None)
+                    user_uin = getattr(user_info, 'uin', '') if user_info else ''
+                    
+                    # 构造QQ空间头像URL
+                    # 格式: https://qlogo2.store.qq.com/qzone/{QQ号}/{QQ号}/100
+                    user_avatar = ''
+                    if user_uin:
+                        # 移除可能的前缀（如 'o' 或 'O'）
+                        clean_uin = str(user_uin).lstrip('oO')
+                        if clean_uin:
+                            user_avatar = f"https://qlogo2.store.qq.com/qzone/{clean_uin}/{clean_uin}/100"
+                    
+                    # 提取评论中的图片
+                    # commentpic 字段是一个列表，包含评论的图片数据
+                    # 结构: [{'photourl': {'0': {'url': '...', 'width': ..., 'height': ...}, '1': {...}, ...}, ...}]
+                    comment_images = []
+                    commentpic = getattr(item, 'commentpic', None) or []
+                    if commentpic and isinstance(commentpic, list):
+                        for pic_item in commentpic:
+                            pic_url_found = False
+                            if isinstance(pic_item, dict):
+                                # 优先从 photourl 字典中提取图片URL
+                                photourl = pic_item.get('photourl', {})
+                                if isinstance(photourl, dict):
+                                    # 尝试获取最高质量的图片，优先级：'0'(原图) > '1' > '11' > '14'
+                                    for size_key in ['0', '1', '11', '14']:
+                                        size_data = photourl.get(size_key)
+                                        if isinstance(size_data, dict):
+                                            pic_url = size_data.get('url', '')
+                                            if pic_url:
+                                                comment_images.append(pic_url)
+                                                pic_url_found = True
+                                                break  # 只取一个尺寸，避免重复
+                                
+                                # 备选：从 busi_param 中提取（如果当前图片的 photourl 不可用）
+                                if not pic_url_found:
+                                    busi_param = pic_item.get('busi_param', {})
+                                    if isinstance(busi_param, dict):
+                                        # 尝试 '-1' 或 '144' 键
+                                        pic_url = busi_param.get('-1') or busi_param.get('144') or ''
+                                        if pic_url:
+                                            comment_images.append(pic_url)
+                            elif isinstance(pic_item, str):
+                                # 如果直接是字符串URL
+                                comment_images.append(pic_item)
+                    
+                    comments_list.append({
+                        'id': getattr(item, 'commentid', ''),
+                        'user_id': user_uin,
+                        'user_name': getattr(user_info, 'name', '') if user_info else '',
+                        'user_avatar': user_avatar,
+                        'content': getattr(item, 'content', ''),
+                        'like_count': getattr(item, 'likeNum', 0),
+                        'reply_count': 0,  # QZone评论可能没有回复数
+                        'created_at': getattr(item, 'date', 0),
+                        'images': comment_images,  # 评论中的图片列表
+                    })
+                
+                return {
+                    'success': True,
+                    'comments': comments_list,
+                    'total': total,
+                    'page': page,
+                    'page_size': page_size
+                }
+            
+            return {'success': True, 'comments': [], 'total': 0}
+        except Exception as e:
+            logger.error(f"获取QZone评论失败: {e}")
+            return {'success': False, 'message': str(e)}
+
     async def close(self):
         """关闭底层客户端（若有需要）。"""
         close_fn = getattr(self._client, "close", None)
@@ -172,6 +268,10 @@ class OoqzoneAPIAdapter:
 
     async def delete_mood(self, tid: str) -> Dict[str, Any]:
         # 旧实现无删除接口，返回不支持
+        return {"success": False, "message": "not supported"}
+
+    async def get_comments(self, tid: str, page: int = 1, page_size: int = 20) -> Dict[str, Any]:
+        """获取说说的评论列表（旧驱动不支持）。"""
         return {"success": False, "message": "not supported"}
 
     async def close(self):

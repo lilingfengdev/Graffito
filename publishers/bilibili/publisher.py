@@ -286,3 +286,42 @@ class BilibiliPublisher(BasePublisher):
         except Exception as e:
             return {"success": False, "message": str(e)}
 
+    async def get_platform_comments(self, record, page: int = 1, page_size: int = 20) -> Dict[str, Any]:
+        """获取B站动态的评论列表。
+        
+        Args:
+            record: 发布记录对象
+            page: 页码（从1开始）
+            page_size: 每页数量
+        Returns:
+            {'success': True, 'comments': [...], 'total': int, 'platform': 'bilibili'} 或错误信息
+        """
+        try:
+            pr = record.publish_result or {}
+            did = pr.get('dynamic_id') or pr.get('dyn_id')
+            if not did:
+                return {"success": False, "message": "missing dynamic_id"}
+            dynamic_id = int(did)
+            
+            # 获取API客户端
+            api = None
+            if record.account_id and record.account_id in self.api_clients:
+                api = self.api_clients.get(record.account_id)
+            else:
+                for aid, client in self.api_clients.items():
+                    if await client.check_login():
+                        api = client
+                        break
+            if not api:
+                return {"success": False, "message": "api not ready"}
+            
+            # 调用获取评论的API
+            result = await api.get_comments(dynamic_id, page, page_size)
+            if result.get('success'):
+                result['platform'] = 'bilibili'
+                return result
+            return result
+        except Exception as e:
+            self.logger.error(f"获取B站评论失败: {e}")
+            return {"success": False, "message": str(e)}
+

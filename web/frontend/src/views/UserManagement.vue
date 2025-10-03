@@ -593,8 +593,26 @@
           <el-descriptions-item label="QQ等级">
             {{ selectedUser.qq_level || '未知' }}
           </el-descriptions-item>
-          <el-descriptions-item label="空间状态">
-            {{ selectedUser.qzone_status || '未知' }}
+          <el-descriptions-item label="在线状态">
+            {{ selectedUser.status || '未知' }}
+          </el-descriptions-item>
+          <el-descriptions-item label="性别" v-if="selectedUser.sex && selectedUser.sex !== '未知'">
+            {{ selectedUser.sex }}
+          </el-descriptions-item>
+          <el-descriptions-item label="年龄" v-if="selectedUser.age && selectedUser.age !== '未知'">
+            {{ selectedUser.age }}
+          </el-descriptions-item>
+          <el-descriptions-item label="登录天数" v-if="selectedUser.login_days && selectedUser.login_days !== '未知'">
+            {{ selectedUser.login_days }}
+          </el-descriptions-item>
+          <el-descriptions-item label="地区" v-if="selectedUser.area">
+            {{ selectedUser.area }}
+          </el-descriptions-item>
+          <el-descriptions-item label="群名片" v-if="selectedUser.card" :span="2">
+            {{ selectedUser.card }}
+          </el-descriptions-item>
+          <el-descriptions-item label="头衔" v-if="selectedUser.title" :span="2">
+            {{ selectedUser.title }}
           </el-descriptions-item>
         </el-descriptions>
         
@@ -1069,19 +1087,26 @@ const viewUserDetail = async (userId) => {
   selectedUser.value = null
   loadingUser.value = true
   try {
-    // TODO: 待后端实现用户详情API
-    await new Promise(resolve => setTimeout(resolve, 500)); // 模拟网络延迟
+    // 调用后端 API 获取用户详情
+    const response = await api.get(`/management/users/${userId}/detail`)
     selectedUser.value = {
-      user_id: userId,
-      nickname: '模拟用户昵称',
-      qq_level: 'VIP 7',
-      qzone_status: '正常',
-      stats: { total: 25, published: 20, rejected: 3, pending: 2 }
-    };
+      user_id: response.data.user_id,
+      nickname: response.data.nickname || '未知',
+      qq_level: response.data.qq_level || '未知',
+      age: response.data.age,
+      sex: response.data.sex,
+      login_days: response.data.login_days,
+      status: response.data.status,
+      card: response.data.card,
+      area: response.data.area,
+      title: response.data.title,
+      stats: response.data.stats || { total: 0, published: 0, rejected: 0, pending: 0 }
+    }
   } catch (error) {
-    ElMessage.error('加载用户详情失败');
+    console.error('加载用户详情失败:', error)
+    ElMessage.error('加载用户详情失败')
   } finally {
-    loadingUser.value = false;
+    loadingUser.value = false
   }
 }
 

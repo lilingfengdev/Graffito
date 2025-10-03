@@ -653,3 +653,46 @@ class QzonePublisher(BasePublisher):
             return {"success": False, "message": res.get("message", "failed")}
         except Exception as e:
             return {"success": False, "message": str(e)}
+
+    async def get_platform_comments(self, record, page: int = 1, page_size: int = 20) -> Dict[str, Any]:
+        """获取QQ空间说说的评论列表。
+        
+        Args:
+            record: 发布记录对象
+            page: 页码（从1开始）
+            page_size: 每页数量
+        Returns:
+            {'success': True, 'comments': [...], 'total': int, 'platform': 'qzone'} 或错误信息
+        """
+        try:
+            tid = None
+            if isinstance(record.publish_result, dict):
+                tid = record.publish_result.get("tid")
+            if not tid:
+                return {"success": False, "message": "missing tid"}
+            
+            # 获取API客户端
+            api = None
+            if record.account_id and record.account_id in self.api_clients:
+                api = self.api_clients.get(record.account_id)
+            if not api:
+                # 回退：任选一个登录有效的账号
+                for aid, client in self.api_clients.items():
+                    try:
+                        if await client.check_login():
+                            api = client
+                            break
+                    except Exception:
+                        continue
+            if not api:
+                return {"success": False, "message": "account not ready"}
+            
+            # 调用获取评论的API
+            result = await api.get_comments(str(tid), page, page_size)
+            if result.get('success'):
+                result['platform'] = 'qzone'
+                return result
+            return result
+        except Exception as e:
+            self.logger.error(f"获取QQ空间评论失败: {e}")
+            return {"success": False, "message": str(e)}

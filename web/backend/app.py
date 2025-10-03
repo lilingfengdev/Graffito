@@ -28,6 +28,8 @@ from passlib.context import CryptContext
 
 from pydantic import BaseModel
 
+from loguru import logger
+
 from config import get_settings
 from core.database import get_db
 from services.audit_service import AuditService
@@ -324,8 +326,17 @@ def get_current_user_from_headers(authorization: Optional[str]) -> Dict[str, Any
 @app.on_event("startup")
 @limiter.exempt
 async def on_startup():
-    # Ensure DB is initialized
+    # Ensure DB and Cache are initialized
     await get_db()
+    
+    # Initialize cache
+    try:
+        from core.cache_client import get_cache
+        cache = await get_cache()
+        logger.info(f"缓存客户端初始化成功: backend={cache.backend}, serializer={cache.serializer}")
+    except Exception as e:
+        logger.error(f"缓存初始化失败: {e}")
+    
     # Initialize shared services for audit endpoints if not injected
     global audit_service, _owns_audit_service
     if audit_service is None:
@@ -345,6 +356,13 @@ async def on_shutdown():
             await audit_service.shutdown()
         except Exception:
             pass
+    
+    # Close cache
+    try:
+        from core.cache_client import close_cache
+        await close_cache()
+    except Exception:
+        pass
 
 
 @app.get("/health")
@@ -583,6 +601,7 @@ class SubmissionOut(BaseModel):
     is_safe: bool
     is_complete: bool
     publish_id: Optional[int] = None
+    processed_by: Optional[str] = None
     created_at: Optional[str] = None
 
 
@@ -615,6 +634,7 @@ async def list_submissions(status_filter: Optional[str] = None, limit: int = 50,
                 is_safe=bool(s.is_safe),
                 is_complete=bool(s.is_complete),
                 publish_id=s.publish_id,
+                processed_by=s.processed_by,
                 created_at=s.created_at.isoformat() if s.created_at else None,
             ))
         return out
@@ -761,6 +781,7 @@ class SubmissionDetailOut(BaseModel):
     rendered_images: Optional[List[str]] = None
     comment: Optional[str] = None
     rejection_reason: Optional[str] = None
+    processed_by: Optional[str] = None
     created_at: Optional[str] = None
     updated_at: Optional[str] = None
     processed_at: Optional[str] = None
@@ -800,6 +821,7 @@ async def get_submission_detail(submission_id: int, authorization: Optional[str]
             rendered_images=submission.rendered_images,
             comment=submission.comment,
             rejection_reason=submission.rejection_reason,
+            processed_by=submission.processed_by,
             created_at=submission.created_at.isoformat() if submission.created_at else None,
             updated_at=submission.updated_at.isoformat() if submission.updated_at else None,
             processed_at=submission.processed_at.isoformat() if submission.processed_at else None,
@@ -807,7 +829,173 @@ async def get_submission_detail(submission_id: int, authorization: Optional[str]
         )
 
 
+class PlatformCommentOut(BaseModel):
+    id: str
+    user_id: str
+    user_name: str
+    user_avatar: Optional[str] = None
+    content: str
+    like_count: int
+    reply_count: int
+    created_at: Optional[int] = None
+
+
+class PlatformCommentsOut(BaseModel):
+    success: bool
+    platform: str
+    comments: List[PlatformCommentOut]
+    total: int
+    page: int
+    page_size: int
+    message: Optional[str] = None
+
+
+@app.get("/audit/{submission_id}/platform-comments")
+async def get_submission_platform_comments(
+    submission_id: int, 
+    page: int = 1,
+    page_size: int = 20,
+    use_cache: bool = True,
+    authorization: Optional[str] = Header(default=None)
+):
+    """获取投稿在发布平台的评论列表（支持缓存和并行获取）"""
+    payload = get_current_user_from_headers(authorization)
+    
+    from core.models import PublishRecord, Submission
+    from core.enums import SubmissionStatus
+    from publishers.loader import get_publisher
+    from core.data_cache_service import DataCacheService
+    from sqlalchemy import select
+    
+    db = await get_db()
+    async with db.get_session() as session:
+        # 使用缓存获取投稿
+        submission = await DataCacheService.get_submission_by_id(
+            submission_id, session, use_cache=use_cache
+        )
+        
+        if not submission:
+            raise HTTPException(status_code=404, detail="投稿未找到")
+        
+        # 检查状态（处理字典和对象两种情况）
+        if isinstance(submission, dict):
+            status = submission.get('status')
+        else:
+            status = submission.status
+            
+        if status != SubmissionStatus.PUBLISHED.value:
+            raise HTTPException(status_code=400, detail="投稿尚未发布，无法获取评论")
+        
+        # 查询发布记录（不缓存，因为 publisher 需要完整对象）
+        stmt = select(PublishRecord).where(
+            PublishRecord.submission_ids.contains([submission_id])
+        ).order_by(PublishRecord.created_at.desc())
+        result = await session.execute(stmt)
+        records = result.scalars().all()
+        
+        if not records:
+            raise HTTPException(status_code=404, detail="未找到发布记录")
+        
+        # 过滤出成功的发布记录
+        success_records = [record for record in records if record.is_success]
+        
+        if not success_records:
+            return {
+                "success": False,
+                "message": "没有成功的发布记录",
+                "platforms": []
+            }
+        
+        # 定义单个平台评论获取函数（带缓存）
+        async def fetch_comments_for_record(record):
+            """并行获取单个平台的评论（带缓存）"""
+            try:
+                record_id = record.id
+                platform = record.platform
+                
+                # 尝试从缓存获取评论
+                cached_comments = await DataCacheService.get_platform_comments(
+                    record_id, page, page_size, use_cache=use_cache
+                )
+                
+                if cached_comments:
+                    logger.debug(f"使用缓存的评论: record_id={record_id}, platform={platform}")
+                    return cached_comments
+                
+                # 缓存未命中，调用 publisher API
+                publisher = get_publisher(platform)
+                if not publisher:
+                    logger.warning(f"未找到平台发布器: {platform}")
+                    return None
+                
+                # 调用 publisher 获取评论
+                result = await publisher.get_platform_comments(record, page, page_size)
+                
+                if result.get('success'):
+                    comment_data = {
+                        'platform': result.get('platform', platform),
+                        'comments': result.get('comments', []),
+                        'total': result.get('total', 0),
+                        'page': result.get('page', page),
+                        'page_size': result.get('page_size', page_size)
+                    }
+                    
+                    # 写入缓存
+                    await DataCacheService.set_platform_comments(
+                        record_id, page, page_size, comment_data
+                    )
+                    
+                    logger.info(f"获取评论成功: record_id={record_id}, platform={platform}, total={comment_data['total']}")
+                    return comment_data
+                else:
+                    logger.warning(f"获取评论失败: platform={platform}, message={result.get('message')}")
+                    return None
+                    
+            except Exception as e:
+                logger.error(f"获取平台评论异常: platform={record.platform}, error={e}", exc_info=True)
+                return None
+        
+        # 并行获取所有平台的评论
+        comment_tasks = [fetch_comments_for_record(record) for record in success_records]
+        results = await asyncio.gather(*comment_tasks, return_exceptions=True)
+        
+        # 过滤出有效结果
+        all_comments = []
+        for result in results:
+            if isinstance(result, Exception):
+                logger.error(f"并行获取评论时发生异常: {result}")
+                continue
+            if result:
+                all_comments.append(result)
+        
+        if not all_comments:
+            return {
+                "success": False,
+                "message": "未能获取任何平台的评论",
+                "platforms": []
+            }
+        
+        return {
+            "success": True,
+            "platforms": all_comments
+        }
+
+
 # 用户管理相关API
+class UserDetailOut(BaseModel):
+    user_id: str
+    nickname: Optional[str] = None
+    qq_level: Optional[str] = None
+    age: Optional[str] = None
+    sex: Optional[str] = None
+    login_days: Optional[str] = None
+    status: Optional[str] = None
+    card: Optional[str] = None
+    area: Optional[str] = None
+    title: Optional[str] = None
+    stats: Optional[Dict[str, int]] = None
+
+
 class BlacklistUserIn(BaseModel):
     user_id: str
     group_name: str
@@ -921,6 +1109,153 @@ async def remove_from_blacklist(blacklist_id: int, authorization: Optional[str] 
         await session.commit()
         
         return {"success": True, "message": "已从黑名单中移除"}
+
+
+@app.get("/management/users/{user_id}/detail", response_model=UserDetailOut)
+async def get_user_detail(user_id: str, submission_id: Optional[int] = None, authorization: Optional[str] = Header(default=None)):
+    """获取用户详情（通过 NapCat API 和投稿统计）
+    
+    Args:
+        user_id: 用户 QQ 号
+        submission_id: 可选的投稿ID，用于获取对应的 receiver_id
+        authorization: 认证令牌
+    """
+    payload = get_current_user_from_headers(authorization)
+    if not payload.get("is_admin"):
+        raise HTTPException(status_code=403, detail="需要管理员权限")
+    
+    # 获取用户的投稿信息以确定 receiver_id
+    receiver_id = None
+    if submission_id:
+        db = await get_db()
+        async with db.get_session() as session:
+            from sqlalchemy import select
+            from core.models import Submission
+            
+            stmt = select(Submission).where(Submission.id == submission_id)
+            result = await session.execute(stmt)
+            submission = result.scalar_one_or_none()
+            
+            if submission:
+                receiver_id = submission.receiver_id
+    
+    # 如果没有提供 submission_id，尝试从用户的任意投稿中获取 receiver_id
+    if not receiver_id:
+        db = await get_db()
+        async with db.get_session() as session:
+            from sqlalchemy import select
+            from core.models import Submission
+            
+            stmt = select(Submission).where(Submission.sender_id == user_id).limit(1)
+            result = await session.execute(stmt)
+            submission = result.scalar_one_or_none()
+            
+            if submission:
+                receiver_id = submission.receiver_id
+    
+    # 调用审核服务获取用户详细信息
+    if receiver_id and audit_service:
+        result = await audit_service._get_user_info_from_napcat(user_id, receiver_id)
+    else:
+        result = {}
+    
+    # 获取用户的投稿统计
+    stats = {"total": 0, "published": 0, "rejected": 0, "pending": 0}
+    try:
+        db = await get_db()
+        async with db.get_session() as session:
+            from sqlalchemy import select, func
+            from core.models import Submission
+            from core.enums import SubmissionStatus
+            
+            # 总数
+            total_stmt = select(func.count(Submission.id)).where(Submission.sender_id == user_id)
+            total_result = await session.execute(total_stmt)
+            stats["total"] = total_result.scalar() or 0
+            
+            # 已发布
+            published_stmt = select(func.count(Submission.id)).where(
+                Submission.sender_id == user_id,
+                Submission.status == SubmissionStatus.PUBLISHED.value
+            )
+            published_result = await session.execute(published_stmt)
+            stats["published"] = published_result.scalar() or 0
+            
+            # 已拒绝
+            rejected_stmt = select(func.count(Submission.id)).where(
+                Submission.sender_id == user_id,
+                Submission.status == SubmissionStatus.REJECTED.value
+            )
+            rejected_result = await session.execute(rejected_stmt)
+            stats["rejected"] = rejected_result.scalar() or 0
+            
+            # 待处理
+            pending_stmt = select(func.count(Submission.id)).where(
+                Submission.sender_id == user_id,
+                Submission.status.in_([
+                    SubmissionStatus.PENDING.value,
+                    SubmissionStatus.PROCESSING.value,
+                    SubmissionStatus.WAITING.value
+                ])
+            )
+            pending_result = await session.execute(pending_stmt)
+            stats["pending"] = pending_result.scalar() or 0
+    except Exception as e:
+        logger.warning(f"获取用户投稿统计失败: {e}")
+    
+    # 获取昵称（优先从 NapCat 获取，否则从最近投稿获取）
+    nickname = result.get('nickname')
+    if not nickname:
+        try:
+            db = await get_db()
+            async with db.get_session() as session:
+                from sqlalchemy import select
+                from core.models import Submission
+                
+                stmt = select(Submission).where(Submission.sender_id == user_id).order_by(Submission.created_at.desc()).limit(1)
+                result_sub = await session.execute(stmt)
+                latest_sub = result_sub.scalar_one_or_none()
+                
+                if latest_sub and latest_sub.sender_nickname:
+                    nickname = latest_sub.sender_nickname
+        except Exception:
+            pass
+    
+    # 状态码映射
+    status_map = {
+        10: "离线",
+        20: "在线",
+        30: "离开",
+        40: "隐身",
+        50: "忙碌",
+        60: "Q我吧",
+        70: "请勿打扰"
+    }
+    status_code = result.get('status')
+    status_text = status_map.get(status_code, f"未知({status_code})") if status_code is not None else "未知"
+    
+    # 性别映射
+    sex_map = {
+        "male": "男",
+        "female": "女",
+        "unknown": "未知"
+    }
+    sex_value = result.get('sex', 'unknown')
+    sex_text = sex_map.get(sex_value, sex_value)
+    
+    return UserDetailOut(
+        user_id=user_id,
+        nickname=nickname or result.get('nickname'),
+        qq_level=str(result.get('qqLevel', '未知')),
+        age=str(result.get('age', '未知')),
+        sex=sex_text,
+        login_days=str(result.get('login_days', '未知')),
+        status=status_text,
+        card=result.get('card', ''),
+        area=result.get('area', ''),
+        title=result.get('title', ''),
+        stats=stats
+    )
 
 
 # 管理员管理 API（与前端 UserManagement.vue 对接）
@@ -1166,6 +1501,7 @@ async def get_stored_posts(group_name: Optional[str] = None, authorization: Opti
                     is_safe=bool(submissions[sp.submission_id].is_safe),
                     is_complete=bool(submissions[sp.submission_id].is_complete),
                     publish_id=submissions[sp.submission_id].publish_id,
+                    processed_by=submissions[sp.submission_id].processed_by,
                     created_at=submissions[sp.submission_id].created_at.isoformat() if submissions[sp.submission_id].created_at else None,
                 ) if sp.submission_id in submissions else None
             )

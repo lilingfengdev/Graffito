@@ -103,8 +103,13 @@ class AuditService:
                     'message': '该投稿已处于通过/发布状态，不能重复通过'
                 }
                 
-            # 更新状态
+            # 更新状态和处理人
             submission.status = SubmissionStatus.APPROVED.value
+            submission.processed_by = operator_id
+            
+            # 清除缓存
+            from core.data_cache_service import DataCacheService
+            await DataCacheService.invalidate_submission(submission_id)
             
             # 获取发布编号
             settings = get_settings()
@@ -154,6 +159,35 @@ class AuditService:
                 
             await session.commit()
             
+            # 如果没有配置定时发送（scheduled_platforms 为空），则立即发送
+            if not scheduled_platforms:
+                try:
+                    from services.submission_service import SubmissionService
+                    submission_service = SubmissionService()
+                    await submission_service.initialize()
+                    
+                    # 立即发送该投稿
+                    success = await submission_service.publish_single_submission(submission_id)
+                    
+                    await submission_service.shutdown()
+                    
+                    if success:
+                        self.logger.info(f"投稿 {submission_id} 已立即发送")
+                        return {
+                            'success': True,
+                            'message': f'投稿已通过并立即发送，编号 #{submission.publish_id}',
+                            'publish_id': submission.publish_id
+                        }
+                    else:
+                        self.logger.warning(f"投稿 {submission_id} 通过但发送失败")
+                        return {
+                            'success': True,
+                            'message': f'投稿已通过（编号 #{submission.publish_id}），但发送失败，请稍后重试',
+                            'publish_id': submission.publish_id
+                        }
+                except Exception as e:
+                    self.logger.error(f"立即发送投稿失败: {e}", exc_info=True)
+            
             return {
                 'success': True,
                 'message': f'投稿已通过，编号 #{submission.publish_id}',
@@ -162,27 +196,51 @@ class AuditService:
             
     async def approve_immediate(self, submission_id: int, operator_id: str, extra: Optional[str] = None) -> Dict[str, Any]:
         """立即发送投稿"""
-        # 先通过投稿
-        result = await self.approve(submission_id, operator_id, extra)
-        if not result['success']:
-            return result
-            
-        # 触发立即发送
         db = await get_db()
         async with db.get_session() as session:
+            # 检查投稿状态
             stmt = select(Submission).where(Submission.id == submission_id)
             result = await session.execute(stmt)
             submission = result.scalar_one_or_none()
             
-            if submission:
-                # 这里应该触发发送器立即发送
-                # TODO: 集成发送器
-                pass
-                
-        return {
-            'success': True,
-            'message': '投稿已立即发送'
-        }
+            if not submission:
+                return {'success': False, 'message': '投稿不存在'}
+            
+            # 如果还未通过，先通过
+            if submission.status not in (SubmissionStatus.APPROVED.value, SubmissionStatus.PUBLISHED.value):
+                approve_result = await self.approve(submission_id, operator_id, extra)
+                if not approve_result['success']:
+                    return approve_result
+        
+        # 立即发送（无论是否有 send_schedule 配置）
+        try:
+            from services.submission_service import SubmissionService
+            submission_service = SubmissionService()
+            await submission_service.initialize()
+            
+            # 立即发送该投稿
+            success = await submission_service.publish_single_submission(submission_id)
+            
+            await submission_service.shutdown()
+            
+            if success:
+                self.logger.info(f"投稿 {submission_id} 已立即发送")
+                return {
+                    'success': True,
+                    'message': '投稿已立即发送'
+                }
+            else:
+                self.logger.warning(f"投稿 {submission_id} 发送失败")
+                return {
+                    'success': False,
+                    'message': '发送失败，请检查发布器配置或稍后重试'
+                }
+        except Exception as e:
+            self.logger.error(f"立即发送投稿失败: {e}", exc_info=True)
+            return {
+                'success': False,
+                'message': f'发送失败: {str(e)}'
+            }
         
     async def reject(self, submission_id: int, operator_id: str, extra: Optional[str] = None) -> Dict[str, Any]:
         """拒绝投稿（跳过）"""
@@ -197,6 +255,12 @@ class AuditService:
                 
             submission.status = SubmissionStatus.REJECTED.value
             submission.rejection_reason = "管理员跳过处理"
+            submission.processed_by = operator_id
+            
+            # 清除缓存
+            from core.data_cache_service import DataCacheService
+            await DataCacheService.invalidate_submission(submission_id)
+            
             await session.commit()
             
             return {
@@ -217,6 +281,12 @@ class AuditService:
                 
             submission.status = SubmissionStatus.REJECTED.value
             submission.rejection_reason = extra or "投稿未通过审核"
+            submission.processed_by = operator_id
+            
+            # 清除缓存
+            from core.data_cache_service import DataCacheService
+            await DataCacheService.invalidate_submission(submission_id)
+            
             await session.commit()
             
             # 发送通知给投稿者
@@ -232,31 +302,28 @@ class AuditService:
             }
             
     async def delete(self, submission_id: int, operator_id: str, extra: Optional[str] = None) -> Dict[str, Any]:
-        """删除投稿"""
-        db = await get_db()
-        async with db.get_session() as session:
-            stmt = select(Submission).where(Submission.id == submission_id)
-            result = await session.execute(stmt)
-            submission = result.scalar_one_or_none()
+        """删除投稿（包括已发布到平台的内容）"""
+        # 调用 SubmissionService 的完整删除逻辑，包括删除平台内容
+        from services.submission_service import SubmissionService
+        
+        submission_service = SubmissionService()
+        await submission_service.initialize()
+        
+        try:
+            result = await submission_service.delete_submission(submission_id)
             
-            if not submission:
-                return {'success': False, 'message': '投稿不存在'}
-                
-            submission.status = SubmissionStatus.DELETED.value
-            await session.commit()
+            # 删除本地缓存文件
+            if result.get('success'):
+                import shutil
+                cache_dir = f"data/cache/rendered/{submission_id}"
+                try:
+                    shutil.rmtree(cache_dir)
+                except:
+                    pass
             
-            # 删除缓存文件
-            import shutil
-            cache_dir = f"data/cache/rendered/{submission_id}"
-            try:
-                shutil.rmtree(cache_dir)
-            except:
-                pass
-                
-            return {
-                'success': True,
-                'message': '投稿已删除'
-            }
+            return result
+        finally:
+            await submission_service.shutdown()
             
     async def toggle_anonymous(self, submission_id: int, operator_id: str, extra: Optional[str] = None) -> Dict[str, Any]:
         """切换匿名状态"""
@@ -275,6 +342,10 @@ class AuditService:
             # 更新LLM结果
             if submission.llm_result:
                 submission.llm_result['needpriv'] = 'true' if submission.is_anonymous else 'false'
+            
+            # 清除缓存
+            from core.data_cache_service import DataCacheService
+            await DataCacheService.invalidate_submission(submission_id)
                 
             await session.commit()
             
@@ -322,7 +393,7 @@ class AuditService:
         }
         
     async def expand_review(self, submission_id: int, operator_id: str, extra: Optional[str] = None) -> Dict[str, Any]:
-        """扩展审查"""
+        """扩展审查 - 通过 NapCat API 获取用户详细信息"""
         db = await get_db()
         async with db.get_session() as session:
             stmt = select(Submission).where(Submission.id == submission_id)
@@ -332,12 +403,30 @@ class AuditService:
             if not submission:
                 return {'success': False, 'message': '投稿不存在'}
                 
-            # TODO: 获取用户信息、QQ等级、空间状态等
+            # 通过 NapCat API 获取用户信息
+            user_info = await self._get_user_info_from_napcat(
+                user_id=submission.sender_id,
+                receiver_id=submission.receiver_id
+            )
+            
+            # 性别和状态映射
+            sex_map = {"male": "男", "female": "女", "unknown": "未知"}
+            status_map = {10: "离线", 20: "在线", 30: "离开", 40: "隐身", 50: "忙碌", 60: "Q我吧", 70: "请勿打扰"}
+            
+            sex_value = user_info.get('sex', 'unknown')
+            status_code = user_info.get('status')
+            
             info = {
                 'user_id': submission.sender_id,
-                'nickname': submission.sender_nickname,
-                'qq_level': '未知',
-                'qzone_status': '未知'
+                'nickname': user_info.get('nickname') or submission.sender_nickname,
+                'qq_level': str(user_info.get('qqLevel', '未知')),
+                'age': str(user_info.get('age', '未知')),
+                'sex': sex_map.get(sex_value, sex_value),
+                'login_days': str(user_info.get('login_days', '未知')),
+                'status': status_map.get(status_code, f"未知({status_code})") if status_code is not None else "未知",
+                'card': user_info.get('card', ''),
+                'area': user_info.get('area', ''),
+                'title': user_info.get('title', ''),
             }
             
             return {
@@ -345,6 +434,71 @@ class AuditService:
                 'message': '扩展审查完成',
                 'data': info
             }
+    
+    async def _get_user_info_from_napcat(self, user_id: str, receiver_id: str) -> Dict[str, Any]:
+        """通过 NapCat API 获取用户详细信息
+        
+        参考文档: https://napcat.apifox.cn/226656970e0.md
+        """
+        try:
+            # 获取配置
+            settings = get_settings()
+            
+            # 找到对应的账号配置
+            account_config = None
+            for group in settings.account_groups.values():
+                if group.main_account.qq_id == receiver_id:
+                    account_config = group.main_account
+                    break
+                for minor in group.minor_accounts:
+                    if minor.qq_id == receiver_id:
+                        account_config = minor
+                        break
+                if account_config:
+                    break
+            
+            if not account_config:
+                self.logger.warning(f"未找到账号配置: receiver_id={receiver_id}")
+                return {}
+            
+            # 准备 NapCat HTTP 请求
+            import httpx
+            
+            host = account_config.http_host
+            port = account_config.http_port
+            http_token = account_config.http_token
+            
+            headers = {}
+            if http_token:
+                headers['Authorization'] = f'Bearer {http_token}'
+            
+            async with httpx.AsyncClient(headers=headers, timeout=10) as client:
+                # 调用 get_stranger_info API (根据 NapCat 文档应使用 POST 请求)
+                url = f"http://{host}:{port}/get_stranger_info"
+                payload = {"user_id": int(user_id)}
+                
+                try:
+                    resp = await client.post(url, json=payload)
+                    
+                    if resp.status_code != 200:
+                        self.logger.error(f"NapCat API 请求失败: HTTP {resp.status_code}")
+                        return {}
+                    
+                    data = resp.json()
+                    
+                    if data.get('status') == 'ok' and data.get('data'):
+                        return data['data']
+                    else:
+                        self.logger.warning(f"NapCat API 返回异常: {data}")
+                        return {}
+                        
+                except httpx.HTTPError as e:
+                    self.logger.error(f"NapCat API 请求异常: {e}")
+                    return {}
+                    
+        except Exception as e:
+            self.logger.error(f"获取用户信息失败: {e}", exc_info=True)
+            return {}
             
     async def add_comment(self, submission_id: int, operator_id: str, comment: Optional[str] = None) -> Dict[str, Any]:
         """添加评论"""
@@ -361,6 +515,11 @@ class AuditService:
                 return {'success': False, 'message': '投稿不存在'}
                 
             submission.comment = comment
+            
+            # 清除缓存
+            from core.data_cache_service import DataCacheService
+            await DataCacheService.invalidate_submission(submission_id)
+            
             await session.commit()
             
             # 通知审核群重新审核
@@ -442,6 +601,13 @@ class AuditService:
             
             # 删除投稿
             submission.status = SubmissionStatus.DELETED.value
+            submission.processed_by = operator_id
+            
+            # 清除缓存
+            from core.data_cache_service import DataCacheService
+            await DataCacheService.invalidate_submission(submission_id)
+            # 清除黑名单缓存（因为新加入黑名单）
+            await DataCacheService.invalidate_blacklist(str(submission.sender_id), submission.group_name)
             
             await session.commit()
             

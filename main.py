@@ -37,15 +37,8 @@ logging.getLogger('passlib').setLevel(logging.ERROR)
 
 from config import get_settings
 from core.database import get_db, close_db
+from core.cache_client import get_cache, close_cache
 from core.plugin import plugin_manager
-
-# 导入插件
-from receivers.qq import QQReceiver
-from publishers.loader import register_publishers_from_configs
-
-# 导入服务
-from services import AuditService, SubmissionService, NotificationService
-import uvicorn
 
 
 class XWallApp:
@@ -56,12 +49,12 @@ class XWallApp:
         self.is_running = False
         self.shutdown_event = asyncio.Event()
         
-        # 服务实例
-        self.audit_service = AuditService()
-        self.submission_service = SubmissionService()
-        self.notification_service = NotificationService()
+        # 延迟导入服务，避免启动时加载所有模块
+        self.audit_service = None
+        self.submission_service = None
+        self.notification_service = None
         # Web 服务
-        self.web_server: Optional[uvicorn.Server] = None
+        self.web_server = None
         self.web_task: Optional[asyncio.Task] = None
         
     async def initialize(self):
@@ -76,21 +69,25 @@ class XWallApp:
         Path("data/logs").mkdir(exist_ok=True)
         Path("data/cookies").mkdir(exist_ok=True)
         
-        # 初始化数据库
-        db = await get_db()
-        if not await db.health_check():
+        # 并行初始化数据库、缓存和注册插件
+        db_task = asyncio.create_task(self._init_database())
+        cache_task = asyncio.create_task(self._init_cache())
+        plugin_task = asyncio.create_task(self.register_plugins())
+        
+        # 等待数据库、缓存和插件注册完成
+        db_ok, cache_ok, _ = await asyncio.gather(db_task, cache_task, plugin_task)
+        if not db_ok:
             logger.error("数据库健康检查失败")
             return False
-            
-        # 注册插件
-        await self.register_plugins()
+        if not cache_ok:
+            logger.warning("缓存初始化失败，将降级到数据库存储")
         
-        # 初始化所有插件
-        await plugin_manager.initialize_all()
         
-        # 初始化服务
-        await self.audit_service.initialize()
-        await self.submission_service.initialize()
+        # 并行初始化插件和服务
+        await asyncio.gather(
+            plugin_manager.initialize_all(),
+            self._init_services()
+        )
         
         # 设置消息处理器
         self.setup_message_handlers()
@@ -99,9 +96,42 @@ class XWallApp:
         
         logger.info("XWall 初始化完成")
         return True
+    
+    async def _init_database(self):
+        """初始化数据库"""
+        db = await get_db()
+        return await db.health_check()
+    
+    async def _init_cache(self):
+        """初始化缓存"""
+        try:
+            cache = await get_cache()
+            logger.info(f"缓存客户端初始化成功: backend={cache.backend}, serializer={cache.serializer}")
+            return True
+        except Exception as e:
+            logger.error(f"缓存初始化失败: {e}")
+            return False
+    
+    async def _init_services(self):
+        """初始化服务（延迟导入）"""
+        from services import AuditService, SubmissionService, NotificationService
+        
+        self.audit_service = AuditService()
+        self.submission_service = SubmissionService()
+        self.notification_service = NotificationService()
+        
+        # 并行初始化服务
+        await asyncio.gather(
+            self.audit_service.initialize(),
+            self.submission_service.initialize()
+        )
         
     async def register_plugins(self):
-        """注册插件"""
+        """注册插件（延迟导入）"""
+        # 延迟导入插件
+        from receivers.qq import QQReceiver
+        from publishers.loader import register_publishers_from_configs
+        
         # 注册QQ接收器
         if self.settings.receivers.get('qq'):
             qq_config = self.settings.receivers['qq']
@@ -172,7 +202,10 @@ class XWallApp:
         # 启动 Web 后端（可选）
         if getattr(self.settings, 'web', None) and self.settings.web.enabled:
             try:
+                # 延迟导入 uvicorn 和 web 模块
+                import uvicorn
                 from web.backend import app as web_app_module
+                
                 web_app = web_app_module.app
                 # Inject shared services so web reuses initialized pipeline
                 try:
@@ -228,6 +261,9 @@ class XWallApp:
         await self.audit_service.shutdown()
         await self.submission_service.shutdown()
 
+        # 关闭缓存
+        await close_cache()
+        
         # 关闭数据库
         await close_db()
 
