@@ -13,6 +13,8 @@ from processors.pipeline import get_shared_pipeline, ProcessingPipeline
 from config import get_settings
 from sqlalchemy import update, delete, func, select
 from services.notification_service import NotificationService
+from services.submission_operations import SubmissionOperations
+from services.decorators import with_submission, invalidate_cache_after, log_audit_action
 from utils.common import get_platform_config
 
 
@@ -242,64 +244,52 @@ class AuditService:
                 'message': f'发送失败: {str(e)}'
             }
         
+    @invalidate_cache_after
     async def reject(self, submission_id: int, operator_id: str, extra: Optional[str] = None) -> Dict[str, Any]:
         """拒绝投稿（跳过）"""
-        db = await get_db()
-        async with db.get_session() as session:
-            stmt = select(Submission).where(Submission.id == submission_id)
-            result = await session.execute(stmt)
-            submission = result.scalar_one_or_none()
+        result = await SubmissionOperations.update_submission_status(
+            submission_id,
+            SubmissionStatus.REJECTED.value,
+            operator_id,
+            extra_fields={'rejection_reason': "管理员跳过处理"},
+            invalidate_cache=False  # 装饰器会处理
+        )
+        
+        if result['success']:
+            result['message'] = '投稿已跳过'
+        
+        return result
             
-            if not submission:
-                return {'success': False, 'message': '投稿不存在'}
-                
-            submission.status = SubmissionStatus.REJECTED.value
-            submission.rejection_reason = "管理员跳过处理"
-            submission.processed_by = operator_id
-            
-            # 清除缓存
-            from core.data_cache_service import DataCacheService
-            await DataCacheService.invalidate_submission(submission_id)
-            
-            await session.commit()
-            
-            return {
-                'success': True,
-                'message': '投稿已跳过'
-            }
-            
+    @invalidate_cache_after
     async def reject_with_message(self, submission_id: int, operator_id: str, extra: Optional[str] = None) -> Dict[str, Any]:
         """拒绝投稿并通知"""
-        db = await get_db()
-        async with db.get_session() as session:
-            stmt = select(Submission).where(Submission.id == submission_id)
-            result = await session.execute(stmt)
-            submission = result.scalar_one_or_none()
-            
-            if not submission:
-                return {'success': False, 'message': '投稿不存在'}
-                
-            submission.status = SubmissionStatus.REJECTED.value
-            submission.rejection_reason = extra or "投稿未通过审核"
-            submission.processed_by = operator_id
-            
-            # 清除缓存
-            from core.data_cache_service import DataCacheService
-            await DataCacheService.invalidate_submission(submission_id)
-            
-            await session.commit()
-            
-            # 发送通知给投稿者
-            try:
-                notifier = NotificationService()
-                await notifier.send_submission_rejected(submission_id, reason=submission.rejection_reason)
-            except Exception:
-                pass
-            
-            return {
-                'success': True,
-                'message': '投稿已拒绝，已通知投稿者'
-            }
+        reason = extra or "投稿未通过审核"
+        
+        result = await SubmissionOperations.update_submission_status(
+            submission_id,
+            SubmissionStatus.REJECTED.value,
+            operator_id,
+            extra_fields={'rejection_reason': reason},
+            invalidate_cache=False  # 装饰器处理
+        )
+        
+        if not result['success']:
+            return result
+        
+        # 发送通知给投稿者
+        try:
+            submission = result.get('submission')
+            if submission:
+                await SubmissionOperations.send_notification(
+                    submission, 'rejected', reason
+                )
+        except Exception:
+            pass
+        
+        return {
+            'success': True,
+            'message': '投稿已拒绝，已通知投稿者'
+        }
             
     async def delete(self, submission_id: int, operator_id: str, extra: Optional[str] = None) -> Dict[str, Any]:
         """删除投稿（包括已发布到平台的内容）"""
@@ -325,38 +315,28 @@ class AuditService:
         finally:
             await submission_service.shutdown()
             
-    async def toggle_anonymous(self, submission_id: int, operator_id: str, extra: Optional[str] = None) -> Dict[str, Any]:
+    @invalidate_cache_after
+    @with_submission("切换匿名状态失败")
+    async def toggle_anonymous(self, submission: Submission, session, submission_id: int, operator_id: str, extra: Optional[str] = None) -> Dict[str, Any]:
         """切换匿名状态"""
-        db = await get_db()
-        async with db.get_session() as session:
-            stmt = select(Submission).where(Submission.id == submission_id)
-            result = await session.execute(stmt)
-            submission = result.scalar_one_or_none()
+        # 切换匿名状态
+        submission.is_anonymous = not submission.is_anonymous
+        
+        # 更新LLM结果
+        if submission.llm_result:
+            submission.llm_result['needpriv'] = 'true' if submission.is_anonymous else 'false'
             
-            if not submission:
-                return {'success': False, 'message': '投稿不存在'}
-                
-            # 切换匿名状态
-            submission.is_anonymous = not submission.is_anonymous
-            
-            # 更新LLM结果
-            if submission.llm_result:
-                submission.llm_result['needpriv'] = 'true' if submission.is_anonymous else 'false'
-            
-            # 清除缓存
-            from core.data_cache_service import DataCacheService
-            await DataCacheService.invalidate_submission(submission_id)
-                
-            await session.commit()
-            
-            # 重新渲染
-            await self.pipeline.reprocess_submission(submission_id, skip_llm=True)
-            
-            return {
-                'success': True,
-                'message': f'匿名状态已切换为: {"匿名" if submission.is_anonymous else "实名"}',
-                'need_reaudit': True
-            }
+        await session.commit()
+        
+        # 重新渲染
+        await self.pipeline.reprocess_submission(submission_id, skip_llm=True)
+        
+        return {
+            'success': True,
+            'message': f'匿名状态已切换为: {"匿名" if submission.is_anonymous else "实名"}',
+            'submission_id': submission_id,
+            'need_reaudit': True
+        }
             
     async def hold(self, submission_id: int, operator_id: str, extra: Optional[str] = None) -> Dict[str, Any]:
         """暂缓处理"""
@@ -500,121 +480,84 @@ class AuditService:
             self.logger.error(f"获取用户信息失败: {e}", exc_info=True)
             return {}
             
-    async def add_comment(self, submission_id: int, operator_id: str, comment: Optional[str] = None) -> Dict[str, Any]:
+    @invalidate_cache_after
+    @with_submission("添加评论失败")
+    async def add_comment(self, submission: Submission, session, submission_id: int, operator_id: str, comment: Optional[str] = None) -> Dict[str, Any]:
         """添加评论"""
         if not comment:
             return {'success': False, 'message': '评论内容不能为空'}
-            
-        db = await get_db()
-        async with db.get_session() as session:
-            stmt = select(Submission).where(Submission.id == submission_id)
-            result = await session.execute(stmt)
-            submission = result.scalar_one_or_none()
-            
-            if not submission:
-                return {'success': False, 'message': '投稿不存在'}
-                
-            submission.comment = comment
-            
-            # 清除缓存
-            from core.data_cache_service import DataCacheService
-            await DataCacheService.invalidate_submission(submission_id)
-            
-            await session.commit()
-            
-            # 通知审核群重新审核
-            try:
-                notifier = NotificationService()
-                await notifier.send_audit_request(submission_id)
-            except Exception:
-                pass
+        
+        submission.comment = comment
+        await session.commit()
+        
+        # 通知审核群重新审核
+        try:
+            notifier = NotificationService()
+            await notifier.send_audit_request(submission_id)
+        except Exception:
+            pass
 
-            return {
-                'success': True,
-                'message': f'已添加评论: {comment}',
-                'need_reaudit': True
-            }
+        return {
+            'success': True,
+            'message': f'已添加评论: {comment}',
+            'need_reaudit': True
+        }
             
-    async def reply_to_sender(self, submission_id: int, operator_id: str, message: Optional[str] = None) -> Dict[str, Any]:
+    @with_submission("回复投稿者失败")
+    async def reply_to_sender(self, submission: Submission, session, submission_id: int, operator_id: str, message: Optional[str] = None) -> Dict[str, Any]:
         """回复投稿者"""
         if not message:
             return {'success': False, 'message': '回复内容不能为空'}
+        
+        try:
+            notifier = NotificationService()
+            await notifier.send_to_user(submission.sender_id, message, submission.group_name)
+        except Exception:
+            pass
+        
+        return {
+            'success': True,
+            'message': f'已回复: {message}'
+        }
             
-        db = await get_db()
-        async with db.get_session() as session:
-            stmt = select(Submission).where(Submission.id == submission_id)
-            result = await session.execute(stmt)
-            submission = result.scalar_one_or_none()
-            
-            if not submission:
-                return {'success': False, 'message': '投稿不存在'}
-                
-            try:
-                notifier = NotificationService()
-                await notifier.send_to_user(submission.sender_id, message, submission.group_name)
-            except Exception:
-                pass
-            
-            return {
-                'success': True,
-                'message': f'已回复: {message}'
-            }
-            
-    async def show_content(self, submission_id: int, operator_id: str, extra: Optional[str] = None) -> Dict[str, Any]:
+    @with_submission("展示内容失败")
+    async def show_content(self, submission: Submission, session, submission_id: int, operator_id: str, extra: Optional[str] = None) -> Dict[str, Any]:
         """展示内容"""
-        db = await get_db()
-        async with db.get_session() as session:
-            stmt = select(Submission).where(Submission.id == submission_id)
-            result = await session.execute(stmt)
-            submission = result.scalar_one_or_none()
-            
-            if not submission:
-                return {'success': False, 'message': '投稿不存在'}
-                
-            # 返回渲染的图片
-            return {
-                'success': True,
-                'message': '内容展示',
-                'images': submission.rendered_images,
-                'need_reaudit': True
-            }
-            
-    async def blacklist(self, submission_id: int, operator_id: str, reason: Optional[str] = None) -> Dict[str, Any]:
+        # 返回渲染的图片
+        return {
+            'success': True,
+            'message': '内容展示',
+            'images': submission.rendered_images,
+            'need_reaudit': True
+        }
+    
+    @invalidate_cache_after
+    @with_submission("拉黑用户失败")
+    async def blacklist(self, submission: Submission, session, submission_id: int, operator_id: str, reason: Optional[str] = None) -> Dict[str, Any]:
         """拉黑用户"""
-        db = await get_db()
-        async with db.get_session() as session:
-            stmt = select(Submission).where(Submission.id == submission_id)
-            result = await session.execute(stmt)
-            submission = result.scalar_one_or_none()
-            
-            if not submission:
-                return {'success': False, 'message': '投稿不存在'}
-                
-            # 添加到黑名单
-            blacklist = BlackList(
-                user_id=submission.sender_id,
-                group_name=submission.group_name,
-                reason=reason or "违规投稿",
-                operator_id=operator_id
-            )
-            session.add(blacklist)
-            
-            # 删除投稿
-            submission.status = SubmissionStatus.DELETED.value
-            submission.processed_by = operator_id
-            
-            # 清除缓存
-            from core.data_cache_service import DataCacheService
-            await DataCacheService.invalidate_submission(submission_id)
-            # 清除黑名单缓存（因为新加入黑名单）
-            await DataCacheService.invalidate_blacklist(str(submission.sender_id), submission.group_name)
-            
-            await session.commit()
-            
-            return {
-                'success': True,
-                'message': f'用户 {submission.sender_id} 已拉黑'
-            }
+        # 添加到黑名单
+        blacklist = BlackList(
+            user_id=submission.sender_id,
+            group_name=submission.group_name,
+            reason=reason or "违规投稿",
+            operator_id=operator_id
+        )
+        session.add(blacklist)
+        
+        # 删除投稿
+        submission.status = SubmissionStatus.DELETED.value
+        submission.processed_by = operator_id
+        
+        # 清除黑名单缓存（因为新加入黑名单）
+        from core.data_cache_service import DataCacheService
+        await DataCacheService.invalidate_blacklist(str(submission.sender_id), submission.group_name)
+        
+        await session.commit()
+        
+        return {
+            'success': True,
+            'message': f'用户 {submission.sender_id} 已拉黑'
+        }
             
     async def quick_reply(self, submission_id: int, command: str, operator_id: str, extra: Optional[str] = None) -> Dict[str, Any]:
         """快捷回复"""

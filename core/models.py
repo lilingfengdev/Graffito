@@ -9,7 +9,7 @@ from sqlalchemy import (
 from sqlalchemy.ext.declarative import declarative_base
 from sqlalchemy.orm import relationship
 
-from .enums import SubmissionStatus, AuditAction
+from .enums import SubmissionStatus, AuditAction, ReportStatus, ModerationLevel, ModerationAction
 
 Base = declarative_base()
 
@@ -296,3 +296,137 @@ class AdminProfile(Base):
     last_login = Column(DateTime)
     created_at = Column(DateTime, default=datetime.now)
     updated_at = Column(DateTime, default=datetime.now, onupdate=datetime.now)
+
+
+class Feedback(Base):
+    """用户反馈"""
+    __tablename__ = 'feedbacks'
+    
+    id = Column(Integer, primary_key=True, autoincrement=True)
+    user_id = Column(String(20), nullable=False, index=True)  # 反馈者 QQ 号
+    receiver_id = Column(String(20), nullable=False)  # 接收账号
+    group_name = Column(String(50), index=True)  # 账号组名称
+    content = Column(Text, nullable=False)  # 反馈内容
+    status = Column(String(20), default='pending', index=True)  # pending | read | resolved
+    admin_reply = Column(Text)  # 管理员回复
+    replied_by = Column(String(50))  # 回复管理员
+    created_at = Column(DateTime, default=datetime.now, index=True)
+    updated_at = Column(DateTime, default=datetime.now, onupdate=datetime.now)
+    replied_at = Column(DateTime)  # 回复时间
+    
+    # 索引
+    __table_args__ = (
+        Index('idx_feedback_user', 'user_id', 'created_at'),
+        Index('idx_feedback_status', 'status', 'created_at'),
+    )
+    
+    def to_dict(self) -> Dict[str, Any]:
+        """转换为字典"""
+        return {
+            'id': self.id,
+            'user_id': self.user_id,
+            'receiver_id': self.receiver_id,
+            'group_name': self.group_name,
+            'content': self.content,
+            'status': self.status,
+            'admin_reply': self.admin_reply,
+            'replied_by': self.replied_by,
+            'created_at': self.created_at.isoformat() if self.created_at else None,
+            'updated_at': self.updated_at.isoformat() if self.updated_at else None,
+            'replied_at': self.replied_at.isoformat() if self.replied_at else None,
+        }
+
+
+class Report(Base):
+    """举报记录"""
+    __tablename__ = 'reports'
+    
+    id = Column(Integer, primary_key=True, autoincrement=True)
+    submission_id = Column(Integer, ForeignKey('submissions.id'), nullable=False, index=True)
+    reporter_id = Column(String(20), nullable=False, index=True)  # 举报者 QQ 号
+    receiver_id = Column(String(20), nullable=False)  # 接收账号
+    group_name = Column(String(50), index=True)  # 账号组名称
+    reason = Column(Text)  # 举报理由
+    status = Column(String(20), default=ReportStatus.PENDING.value, index=True)
+    
+    # AI 审核结果
+    ai_level = Column(String(20))  # AI 评级: safe/warning/danger
+    ai_reason = Column(Text)  # AI 评级理由
+    ai_processed_at = Column(DateTime)
+    
+    # 人工审核结果
+    manual_action = Column(String(20))  # 人工处理动作
+    manual_reason = Column(Text)  # 人工处理理由
+    processed_by = Column(String(50))  # 处理人（LLM 或管理员用户名）
+    processed_at = Column(DateTime)
+    
+    # 时间戳
+    created_at = Column(DateTime, default=datetime.now, index=True)
+    updated_at = Column(DateTime, default=datetime.now, onupdate=datetime.now)
+    
+    # 关联
+    submission = relationship("Submission", backref="reports")
+    
+    # 索引
+    __table_args__ = (
+        Index('idx_report_status', 'status', 'created_at'),
+        Index('idx_report_submission', 'submission_id', 'status'),
+    )
+    
+    def to_dict(self) -> Dict[str, Any]:
+        """转换为字典"""
+        return {
+            'id': self.id,
+            'submission_id': self.submission_id,
+            'reporter_id': self.reporter_id,
+            'receiver_id': self.receiver_id,
+            'group_name': self.group_name,
+            'reason': self.reason,
+            'status': self.status,
+            'ai_level': self.ai_level,
+            'ai_reason': self.ai_reason,
+            'ai_processed_at': self.ai_processed_at.isoformat() if self.ai_processed_at else None,
+            'manual_action': self.manual_action,
+            'manual_reason': self.manual_reason,
+            'processed_by': self.processed_by,
+            'processed_at': self.processed_at.isoformat() if self.processed_at else None,
+            'created_at': self.created_at.isoformat() if self.created_at else None,
+            'updated_at': self.updated_at.isoformat() if self.updated_at else None,
+        }
+
+
+class PlatformComment(Base):
+    """平台评论记录"""
+    __tablename__ = 'platform_comments'
+    
+    id = Column(Integer, primary_key=True, autoincrement=True)
+    submission_id = Column(Integer, ForeignKey('submissions.id'), nullable=False, index=True)
+    platform = Column(String(20), nullable=False)  # 平台名称
+    comment_id = Column(String(100))  # 平台评论 ID
+    author_id = Column(String(100))  # 评论者 ID
+    author_name = Column(String(100))  # 评论者昵称
+    content = Column(Text)  # 评论内容
+    created_at = Column(DateTime, default=datetime.now)
+    fetched_at = Column(DateTime, default=datetime.now)  # 抓取时间
+    
+    # 关联
+    submission = relationship("Submission", backref="platform_comments")
+    
+    # 索引
+    __table_args__ = (
+        Index('idx_platform_comment', 'submission_id', 'platform'),
+    )
+    
+    def to_dict(self) -> Dict[str, Any]:
+        """转换为字典"""
+        return {
+            'id': self.id,
+            'submission_id': self.submission_id,
+            'platform': self.platform,
+            'comment_id': self.comment_id,
+            'author_id': self.author_id,
+            'author_name': self.author_name,
+            'content': self.content,
+            'created_at': self.created_at.isoformat() if self.created_at else None,
+            'fetched_at': self.fetched_at.isoformat() if self.fetched_at else None,
+        }

@@ -46,3 +46,27 @@ class PublishPlatform(str, Enum):
     BILIBILI = "bilibili" # B站
     WEIBO = "weibo"       # 微博
     REDNOTE = "rednote"   # 小红书
+
+
+class ReportStatus(str, Enum):
+    """举报状态"""
+    PENDING = "pending"           # 待处理
+    AI_PROCESSING = "ai_processing"  # AI 处理中
+    MANUAL_REVIEW = "manual_review"  # 人工审核中
+    RESOLVED = "resolved"         # 已处理
+    REJECTED = "rejected"         # 已驳回
+
+
+class ModerationLevel(str, Enum):
+    """审核等级"""
+    SAFE = "safe"           # 安全
+    WARNING = "warning"     # 警告
+    DANGER = "danger"       # 危险
+
+
+class ModerationAction(str, Enum):
+    """审核处理动作"""
+    DELETE = "delete"       # 删除
+    KEEP = "keep"           # 保留
+    AUTO_DELETE = "auto_delete"  # 自动删除
+    AUTO_PASS = "auto_pass"      # 自动通过

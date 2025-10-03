@@ -364,6 +364,20 @@ class AuditConfig(BaseModel):
     skip_image_audit_over_mb: float = 0.0
 
 
+class XModeratorConfig(BaseModel):
+    """XModerator 举报审核配置"""
+
+    enable: bool = True
+
+    auto_delete: bool = True
+
+    auto_pass: bool = True
+
+    fetch_comments: bool = True
+
+    comment_fetch_limit: int = 50
+
+
 class AccountInfo(BaseModel):
     """账号信息"""
 
@@ -431,6 +445,8 @@ class Settings(BaseSettings):
     publishers: Dict[str, Any] = Field(default_factory=dict)
 
     audit: AuditConfig = AuditConfig()
+
+    xmoderator: XModeratorConfig = XModeratorConfig()
 
     account_groups: Dict[str, AccountGroup] = Field(default_factory=dict)
 

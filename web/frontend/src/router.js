@@ -9,6 +9,8 @@ import SubmissionDetail from './views/SubmissionDetail.vue'
 import UserManagement from './views/UserManagement.vue'
 import StoredPosts from './views/StoredPosts.vue'
 import LogsManagement from './views/LogsManagement.vue'
+import FeedbackManagement from './views/FeedbackManagement.vue'
+import ReportManagement from './views/ReportManagement.vue'
 
 const routes = [
   { path: '/login', component: Login },
@@ -53,6 +55,18 @@ const routes = [
         name: 'LogsManagement',
         component: LogsManagement,
         meta: { title: '系统日志', icon: 'Memo', requiresSuperAdmin: true }
+      },
+      {
+        path: 'feedbacks',
+        name: 'FeedbackManagement',
+        component: FeedbackManagement,
+        meta: { title: '反馈管理', icon: 'ChatDotRound', requiresAdmin: true }
+      },
+      {
+        path: 'reports',
+        name: 'ReportManagement',
+        component: ReportManagement,
+        meta: { title: '举报审核', icon: 'Warning', requiresAdmin: true }
       }
     ]
   }

@@ -130,7 +130,9 @@
                 <span class="message-time">{{ formatTime(message.time) }}</span>
               </div>
               <div class="message-content">
-                <div v-if="message.text" class="message-text">{{ message.text }}</div>
+                <div v-if="message.text" class="message-text">
+                  <EmoticonText :content="message.text" />
+                </div>
                 <div v-if="message.images && message.images.length" class="message-images">
                   <SecureImage
                     v-for="(image, imgIndex) in message.images"
@@ -151,6 +153,20 @@
         <template #header>
           <span class="card-title">AI分析结果</span>
         </template>
+        
+        <!-- AI生成的总结 - 优先显示 -->
+        <div v-if="submission.llm_result?.summary" class="llm-summary-section">
+          <div class="summary-header">
+            <el-icon :size="18" color="var(--el-color-primary)">
+              <ChatDotRound />
+            </el-icon>
+            <h4>内容总结</h4>
+          </div>
+          <div class="summary-content">
+            <p>{{ submission.llm_result.summary }}</p>
+          </div>
+        </div>
+
         <el-row :gutter="20">
           <el-col :xs="24" :lg="12">
             <div class="llm-section">
@@ -184,7 +200,7 @@
           </el-col>
           <el-col :xs="24" :lg="12">
             <div class="llm-section">
-              <h4>摘要与分析</h4>
+              <h4>文本片段</h4>
               <div v-if="llmSegments.length">
                 <ol style="padding-left: 18px; margin: 0;">
                   <li v-for="(seg, i) in llmSegments" :key="i" style="margin: 6px 0;">
@@ -192,9 +208,8 @@
                   </li>
                 </ol>
               </div>
-              <div v-else-if="submission.llm_result?.summary" class="summary">
-                <h5>内容摘要</h5>
-                <p>{{ submission.llm_result.summary }}</p>
+              <div v-else class="empty-hint">
+                <el-empty description="无文本片段" :image-size="60" />
               </div>
               <div v-if="llmImageDescs.length" class="summary" style="margin-top: 12px;">
                 <h5>图片描述</h5>
@@ -236,7 +251,9 @@
         <div class="processed-content">
           <div v-if="processedText" class="processed-text">
             <h4>文本内容</h4>
-            <div class="content-text">{{ processedText }}</div>
+            <div class="content-text">
+              <EmoticonText :content="processedText" />
+            </div>
           </div>
           
           <div v-if="processedLinks.length" class="processed-links">
@@ -271,11 +288,15 @@
         </template>
         <div v-if="submission.comment" class="comment-section">
           <h4>管理员评论</h4>
-          <div class="comment-content">{{ submission.comment }}</div>
+          <div class="comment-content">
+            <EmoticonText :content="submission.comment" />
+          </div>
         </div>
         <div v-if="submission.rejection_reason" class="rejection-section">
           <h4>拒绝原因</h4>
-          <div class="rejection-content">{{ submission.rejection_reason }}</div>
+          <div class="rejection-content">
+            <EmoticonText :content="submission.rejection_reason" />
+          </div>
         </div>
       </el-card>
 
@@ -411,7 +432,7 @@
                   </div>
                   
                   <div class="comment-content">
-                    {{ comment.content }}
+                    <EmoticonText :content="comment.content" />
                   </div>
                   
                   <!-- 评论中的图片 -->
@@ -563,6 +584,7 @@ import moment from 'moment'
 import api from '../api'
 import SecureImage from '../components/SecureImage.vue'
 import SecureAvatar from '../components/SecureAvatar.vue'
+import EmoticonText from '../components/EmoticonText.vue'
 
 const route = useRoute()
 const loading = ref(false)
@@ -1105,6 +1127,45 @@ onMounted(() => {
   box-shadow: 0 2px 8px rgba(0, 0, 0, 0.1);
 }
 
+/* AI总结区域样式 */
+.llm-summary-section {
+  margin-bottom: 20px;
+  padding: 16px;
+  background: linear-gradient(135deg, var(--el-color-primary-light-9) 0%, var(--el-fill-color-extra-light) 100%);
+  border-radius: 8px;
+  border: 1px solid var(--el-color-primary-light-8);
+}
+
+.summary-header {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  margin-bottom: 12px;
+}
+
+.summary-header h4 {
+  margin: 0;
+  font-size: 16px;
+  font-weight: 600;
+  color: var(--el-color-primary);
+}
+
+.summary-content {
+  padding: 12px;
+  background: var(--el-bg-color);
+  border-radius: 6px;
+  border-left: 3px solid var(--el-color-primary);
+}
+
+.summary-content p {
+  margin: 0;
+  line-height: 1.8;
+  color: var(--el-text-color-primary);
+  font-size: 14px;
+  white-space: pre-wrap;
+  word-break: break-word;
+}
+
 .llm-section h4 {
   margin: 0 0 12px 0;
   color: var(--el-text-color-primary);
@@ -1130,6 +1191,10 @@ onMounted(() => {
   margin: 0;
   line-height: 1.6;
   color: var(--el-text-color-regular);
+}
+
+.empty-hint {
+  padding: 20px 0;
 }
 
 .rendered-images {
@@ -1489,7 +1554,7 @@ onMounted(() => {
 }
 
 .comment-content {
-  padding: 8px 0;
+  padding: 8px 12px;
   line-height: 1.6;
   color: var(--el-text-color-regular);
   word-wrap: break-word;

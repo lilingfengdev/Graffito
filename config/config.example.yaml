@@ -396,6 +396,30 @@ audit:
   skip_image_audit_over_mb: 0
 
 
+# XModerator 举报审核配置
+# 提供举报处理、AI 自动审核、人工复核等完整的内容审核流程
+xmoderator:
+  # 是否启用 XModerator 举报审核功能
+  enable: true
+  
+  # 自动删除 AI 评级为 danger（危险）的投稿
+  # true: 自动删除并通知举报者和投稿者
+  # false: 所有 danger 级别的举报都进入人工审核
+  auto_delete: true
+  
+  # 自动通过 AI 评级为 safe（安全）的举报
+  # true: 直接判定为安全，不进入人工审核
+  # false: 所有举报都需要人工审核
+  auto_pass: true
+  
+  # 是否抓取平台评论用于 AI 审核
+  # true: AI 审核时会参考平台评论内容
+  # false: AI 仅基于投稿内容和举报理由进行审核
+  fetch_comments: true
+  
+  # 每个平台最多抓取的评论数量（用于 AI 分析）
+  comment_fetch_limit: 50
+
 
 # 账号组配置
 

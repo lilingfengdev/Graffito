@@ -2,7 +2,7 @@
   <div class="dashboard">
     <!-- 统计卡片 -->
     <el-row :gutter="20" class="stats-row">
-      <el-col :xs="12" :sm="6" v-for="stat in stats" :key="stat.key">
+      <el-col :xs="12" :sm="8" :md="6" :lg="4" v-for="stat in stats" :key="stat.key">
         <el-card class="stat-card" shadow="hover">
           <div class="stat-content">
             <div class="stat-icon" :style="{ color: stat.color }">
@@ -117,6 +117,13 @@
             >
               用户管理
             </el-button>
+            <el-button 
+              type="danger" 
+              :icon="ChatDotRound"
+              @click="$router.push('/feedbacks')"
+            >
+              反馈管理
+            </el-button>
           </div>
         </el-card>
       </el-col>
@@ -185,7 +192,7 @@
 import { ref, onMounted, computed, watch } from 'vue'
 import { 
   Document, User, Box, TrendCharts, 
-  DataAnalysis, Refresh, Warning
+  DataAnalysis, Refresh, Warning, ChatDotRound
 } from '@element-plus/icons-vue'
 import { Chart, registerables } from 'chart.js'
 import moment from 'moment'
@@ -230,6 +237,13 @@ const stats = computed(() => [
     value: statsData.value.stored_posts_count || 0,
     icon: Box,
     color: '#8b5cf6'
+  },
+  {
+    key: 'feedbacks',
+    label: '待处理反馈',
+    value: statsData.value.pending_feedbacks || 0,
+    icon: ChatDotRound,
+    color: '#ef4444'
   }
 ])
 

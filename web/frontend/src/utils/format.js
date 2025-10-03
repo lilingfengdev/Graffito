@@ -233,3 +233,23 @@ export function buildQueryString(params) {
   const queryString = searchParams.toString()
   return queryString ? `?${queryString}` : ''
 }
+
+/**
+ * 解析表情包标记为HTML
+ * @param {String} text - 包含 [em]xxx[/em] 标记的文本
+ * @returns {String} 包含 <img> 标签的 HTML 字符串
+ */
+export function parseEmoticons(text) {
+  if (!text || typeof text !== 'string') return text
+  
+  // 匹配 [em]xxx[/em] 格式的表情标记
+  const emoticonRegex = /\[em\]([^[\]]+)\[\/em\]/g
+  
+  return text.replace(emoticonRegex, (match, code) => {
+    const url = `https://qzonestyle.gtimg.cn/qzone/em/${code}.gif`
+    return `<img class="qzone-emoticon" src="${url}" alt="${code}" title="${code}" referrerpolicy="no-referrer" />`
+  })
+}
+
+// 别名导出，保持兼容性
+export const formatDateTime = formatTime

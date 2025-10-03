@@ -7,9 +7,11 @@ import signal
 import sys
 from pathlib import Path
 from typing import Optional
-
+import nest_asyncio
 from loguru import logger
 
+# 修补 asyncio
+nest_asyncio.apply()
 # 配置日志
 logger.remove()  # 移除默认处理器
 # 控制台日志处理器
@@ -93,6 +95,15 @@ class XWallApp:
         self.setup_message_handlers()
         # 注入服务到接收器
         self.inject_services_into_receivers()
+        
+        # 检查 XModerator 状态
+        if self.settings.xmoderator.enable:
+            logger.info("XModerator 举报审核系统已启用")
+            logger.info(f"  - 自动删除 danger 级别: {self.settings.xmoderator.auto_delete}")
+            logger.info(f"  - 自动通过 safe 级别: {self.settings.xmoderator.auto_pass}")
+            logger.info(f"  - 抓取平台评论: {self.settings.xmoderator.fetch_comments}")
+        else:
+            logger.info("XModerator 举报审核系统未启用")
         
         logger.info("XWall 初始化完成")
         return True

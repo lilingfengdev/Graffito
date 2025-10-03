@@ -2256,31 +2256,35 @@ class QQReceiver(BaseReceiver):
 
                 try:
 
-                    from pathlib import Path
+                    from core.database import get_db
 
-                    from config import get_settings
-
-                    settings = get_settings()
-
-                    base_dir = Path(settings.system.data_dir or "./data")
-
-                    fb_dir = base_dir / "feedback"
-
-                    fb_dir.mkdir(parents=True, exist_ok=True)
-
-                    # 按日期分别记录
-
-                    day_str = time.strftime("%Y-%m-%d", time.localtime())
-
-                    ts_str = time.strftime("%Y-%m-%d %H:%M:%S", time.localtime())
+                    from core.models import Feedback
 
                     group_name = self._resolve_group_name_by_self_id(self_id) or "unknown"
 
-                    line = f"[{ts_str}] uid={user_id} sid={self_id} group={group_name} feedback={feedback_text}\n"
+                    # 保存到数据库
 
-                    with open(fb_dir / f"{day_str}.log", "a", encoding="utf-8") as f:
+                    db = await get_db()
 
-                        f.write(line)
+                    async with db.get_session() as session:
+
+                        feedback = Feedback(
+
+                            user_id=user_id,
+
+                            receiver_id=self_id,
+
+                            group_name=group_name,
+
+                            content=feedback_text,
+
+                            status='pending'
+
+                        )
+
+                        session.add(feedback)
+
+                        await session.flush()
 
                     self.logger.info(f"已记录用户反馈: uid={user_id}, group={group_name}")
 
@@ -2293,6 +2297,73 @@ class QQReceiver(BaseReceiver):
                     self.logger.error(f"保存反馈失败: {e}", exc_info=True)
 
                     await self.send_private_message(user_id, "反馈保存失败，请稍后重试")
+
+                return True
+
+            # 举报指令：#举报 <投稿ID> [举报理由]
+
+            m_report = re.match(r"^#?\s*举报\s+(\d+)(?:\s+(.+))?$", text)
+
+            if m_report:
+
+                publish_id = int(m_report.group(1))  # 用户输入的发布编号
+                report_reason = m_report.group(2).strip() if m_report.group(2) else None
+
+                try:
+                    from core.database import get_db
+                    from core.models import Submission
+                    from sqlalchemy import select
+                    from services.report_service import ReportService
+                    from processors.moderator_processor import get_moderator_processor
+                    from config import get_settings
+
+                    # 检查 XModerator 是否开启
+                    settings = get_settings()
+                    if not settings.xmoderator.enable:
+                        await self.send_private_message(user_id, "举报功能未开启")
+                        return True
+
+                    group_name = self._resolve_group_name_by_self_id(self_id) or "unknown"
+
+                    # 创建举报记录（使用 publish_id，create_report 内部会转换）
+                    report = await ReportService.create_report(
+                        publish_id=publish_id,
+                        reporter_id=user_id,
+                        receiver_id=self_id,
+                        group_name=group_name,
+                        reason=report_reason
+                    )
+
+                    if not report:
+                        await self.send_private_message(user_id, f"举报失败：投稿 {publish_id} 不存在或已被删除")
+                        return True
+
+                    # 获取 submission 对象用于后续处理
+                    db = await get_db()
+                    async with db.get_session() as session:
+                        result = await session.execute(
+                            select(Submission).where(Submission.id == report.submission_id)
+                        )
+                        submission = result.scalar_one_or_none()
+
+                    if not submission:
+                        await self.send_private_message(user_id, "系统错误：投稿信息获取失败")
+                        return True
+
+                    # 通知用户举报已收到
+                    await self.send_private_message(
+                        user_id,
+                        "【系统回复】\n\n您的举报已收到，正在处理中..."
+                    )
+
+                    self.logger.info(f"用户 {user_id} 举报投稿 {publish_id}（内部ID: {submission.id}）, 举报ID={report.id}")
+
+                    # 异步处理 AI 审核
+                    asyncio.create_task(self._process_report_ai(report, submission, user_id))
+
+                except Exception as e:
+                    self.logger.error(f"处理举报失败: {e}", exc_info=True)
+                    await self.send_private_message(user_id, "举报处理失败，请稍后重试")
 
                 return True
 
@@ -2807,6 +2878,78 @@ class QQReceiver(BaseReceiver):
                 f"状态：{'未知' if not getattr(sub, 'status', None) else sub.status}"
 
             )
+
+    async def _process_report_ai(self, report, submission, reporter_id: str):
+        """异步处理 AI 审核举报
+
+        Args:
+            report: 举报记录
+            submission: 投稿记录
+            reporter_id: 举报者 QQ 号
+        """
+        try:
+            from processors.moderator_processor import get_moderator_processor
+            from services.report_service import ReportService
+            from core.enums import ModerationAction
+
+            # 获取 AI 处理器
+            processor = get_moderator_processor()
+            
+            # 处理举报
+            result = await processor.process_report(report, submission)
+            
+            if not result.get('success'):
+                self.logger.error(f"AI 审核失败: {result.get('message')}")
+                return
+            
+            ai_result = result.get('ai_result', {})
+            auto_handled = result.get('auto_handled')
+            
+            # 根据自动处理结果发送通知
+            if auto_handled == ModerationAction.AUTO_DELETE.value:
+                # 使用统一的举报处理服务
+                await ReportService.handle_report_action(
+                    report=report,
+                    submission=submission,
+                    action='delete',
+                    reason=ai_result.get('reason', '违规内容'),
+                    processed_by='AI'
+                )
+                
+                self.logger.info(
+                    f"AI 自动删除投稿 {submission.publish_id or submission.id}"
+                    f"（内部ID: {submission.id}）"
+                )
+                
+            elif auto_handled == ModerationAction.AUTO_PASS.value:
+                # 使用统一的举报处理服务
+                await ReportService.handle_report_action(
+                    report=report,
+                    submission=submission,
+                    action='keep',
+                    reason='AI 判定安全',
+                    processed_by='AI'
+                )
+                
+                self.logger.info(
+                    f"AI 自动通过投稿 {submission.publish_id or submission.id} 的举报"
+                    f"（举报ID: {report.id}）"
+                )
+            
+            else:
+                # 进入人工审核，通知举报者
+                await self.send_private_message(
+                    reporter_id,
+                    "【系统回复】\n\n您的举报已经进入人工审核阶段,请耐心等待"
+                )
+                
+                self.logger.info(
+                    f"投稿 {submission.publish_id or submission.id} 的举报"
+                    f"（举报ID: {report.id}）进入人工审核"
+                )
+            
+        except Exception as e:
+            self.logger.error(f"AI 审核处理失败: {e}", exc_info=True)
 
     async def _resolve_submission_id_by_any(self, raw_id: str) -> Optional[int]:
 

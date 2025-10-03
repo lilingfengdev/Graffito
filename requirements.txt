@@ -21,6 +21,7 @@ python-dotenv>=1.0.0
 apscheduler>=3.10.0
 aiofiles>=23.2.1
 tzlocal>=5.2
+nest-asyncio
 
 # ==================== Bot & Platforms ====================
 # QQ机器人
@@ -29,6 +30,7 @@ nonebot-adapter-onebot>=2.4.3
 
 # 平台SDK
 aioqzone
+qzemoji
 bilibili-api-python>=17.3.0
 
 # 平台依赖

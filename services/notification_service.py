@@ -423,3 +423,81 @@ class NotificationService:
         failed = total - success_count
         self.logger.info(f"好友公告推送完成：总计 {total}，成功 {success_count}，失败 {failed}")
         return {"total": total, "success": success_count, "failed": failed}
+    
+    async def notify_report_processed(
+        self,
+        reporter_id: str,
+        receiver_id: str,
+        publish_id: int,
+        action: str,
+        reason: str,
+        sender_id: Optional[str] = None
+    ) -> bool:
+        """发送举报处理通知
+        
+        Args:
+            reporter_id: 举报者 QQ 号
+            receiver_id: 接收账号（用于指定发送 Bot）
+            publish_id: 投稿发布编号
+            action: 处理动作 (delete | keep)
+            reason: 处理理由
+            sender_id: 投稿者 QQ 号（仅删除时需要）
+            
+        Returns:
+            是否发送成功
+        """
+        try:
+            # 获取 QQ 接收器
+            qq_receiver = plugin_manager.get_receiver('qq_receiver')
+            if not qq_receiver:
+                self.logger.error("QQ接收器未初始化")
+                return False
+            
+            # 发送通知给举报者
+            if action == 'delete':
+                reporter_msg = (
+                    f"【系统回复】\n\n"
+                    f"您的举报已经处理,投稿 {publish_id} 已经被删除，"
+                    f"如果你不满意此次处理, 可以使用 #反馈 指令"
+                )
+            else:  # keep
+                reporter_msg = (
+                    f"【系统回复】\n\n"
+                    f"您的举报已经处理,投稿 {publish_id} 被判断为安全，"
+                    f"如果您不满意此次处理, 可以使用 #反馈 指令"
+                )
+            
+            try:
+                await qq_receiver.send_private_message_by_self(
+                    receiver_id,
+                    reporter_id,
+                    reporter_msg
+                )
+                self.logger.info(f"已通知举报者 {reporter_id}: {action}")
+            except Exception as e:
+                self.logger.error(f"通知举报者失败: {e}", exc_info=True)
+            
+            # 如果是删除动作，同时通知投稿者
+            if action == 'delete' and sender_id:
+                sender_msg = (
+                    f"【系统消息】\n\n"
+                    f"您的投稿 {publish_id} 由于举报已经被删除，"
+                    f"如果你不满意此次处理, 可以使用 #反馈 指令\n\n"
+                    f"原因: {reason}"
+                )
+                
+                try:
+                    await qq_receiver.send_private_message_by_self(
+                        receiver_id,
+                        sender_id,
+                        sender_msg
+                    )
+                    self.logger.info(f"已通知投稿者 {sender_id}: 投稿被删除")
+                except Exception as e:
+                    self.logger.error(f"通知投稿者失败: {e}", exc_info=True)
+            
+            return True
+            
+        except Exception as e:
+            self.logger.error(f"发送举报处理通知异常: {e}", exc_info=True)
+            return False

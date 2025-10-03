@@ -9,6 +9,7 @@ import SecureImage from './SecureImage.vue'
 import SecureAvatar from './SecureAvatar.vue'
 import XwImageViewer from './XwImageViewer.vue'
 import XwUpload from './XwUpload.vue'
+import EmoticonText from './EmoticonText.vue'
 
 // 基础组件
 const XwButton = {
@@ -1333,5 +1334,6 @@ export {
   SecureImage,
   SecureAvatar,
   XwImageViewer,
-  XwUpload
+  XwUpload,
+  EmoticonText
 }

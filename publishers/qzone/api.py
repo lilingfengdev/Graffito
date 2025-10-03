@@ -8,6 +8,7 @@
 """
 from typing import Any, Dict, List, Optional, Sequence, Union
 from tenacity import RetryError
+import re
 
 from loguru import logger
 
@@ -17,6 +18,63 @@ from aioqzone.api.h5.model import QzoneH5API
 from aioqzone.api.login import ConstLoginMan
 from aioqzone.model.api.request import PhotoData
 from utils.common import get_platform_config
+
+# QzEmoji 用于转换 QQ 空间表情符号
+try:
+    import qzemoji as qe
+    qe.enable_auto_update = False
+    QZEMOJI_AVAILABLE = True
+except ImportError:
+    logger.warning("qzemoji 未安装，QQ空间评论中的表情符号将不会被转换")
+    QZEMOJI_AVAILABLE = False
+
+
+async def _process_qzone_emoji(content: str) -> str:
+    """处理 QQ 空间评论中的表情符号，转换为可读文本或 emoji
+    
+    Args:
+        content: 原始评论内容，可能包含 [em]e113[/em] 格式的表情符号
+    
+    Returns:
+        处理后的内容，表情符号已被转换为文本或 emoji
+    
+    Examples:
+        "[em]e113[/em][em]e150[/em] nn" -> "😊😃 nn"
+        "[em]e100[/em]" -> "微笑"
+    """
+    if not QZEMOJI_AVAILABLE or not content:
+        return content
+    
+    # 匹配 [em]e数字[/em] 格式的表情符号
+    emoji_pattern = r'\[em\]e(\d+)\[/em\]'
+    
+    async def replace_emoji(match):
+        """异步替换单个表情符号"""
+        emoji_id = int(match.group(1))
+        try:
+            # 查询表情符号对应的文本或 emoji
+            emoji_text = await qe.query(emoji_id)
+            if emoji_text:
+                return emoji_text
+            # 如果未找到，保留原始格式
+            return match.group(0)
+        except Exception as e:
+            logger.debug(f"转换表情符号 {emoji_id} 失败: {e}")
+            return match.group(0)
+    
+    # 找到所有匹配项
+    matches = list(re.finditer(emoji_pattern, content))
+    if not matches:
+        return content
+    
+    # 异步处理所有表情符号
+    result = content
+    # 从后向前替换，避免索引变化影响
+    for match in reversed(matches):
+        replacement = await replace_emoji(match)
+        result = result[:match.start()] + replacement + result[match.end():]
+    
+    return result
 
 
 class AioQzoneAPI:
@@ -199,6 +257,8 @@ class AioQzoneAPI:
                             elif isinstance(pic_item, str):
                                 # 如果直接是字符串URL
                                 comment_images.append(pic_item)
+                    
+
                     
                     comments_list.append({
                         'id': getattr(item, 'commentid', ''),

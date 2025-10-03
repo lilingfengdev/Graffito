@@ -440,9 +440,23 @@ class SubmissionService:
             except Exception:
                 records = []
 
+            # 动态获取发布器（如果 self.publishers 为空）
+            publishers = self.publishers
+            if not publishers:
+                from core.plugin import plugin_manager
+                publishers = dict(plugin_manager.publishers)
+                if not publishers:
+                    self.logger.warning("未获取到任何发布器，跳过平台删除")
+                    # 即使没有发布器，也标记为删除
+                    async with (await get_db()).get_session() as session2:
+                        upd = update(Submission).where(Submission.id == submission_id).values(status=SubmissionStatus.DELETED.value)
+                        await session2.execute(upd)
+                        await session2.commit()
+                    return {"success": True, "message": "已删除（无平台内容）"}
+
             # 根据平台键映射到具体 publisher 实例
             platform_to_publisher: Dict[str, Any] = {}
-            for name, pub in self.publishers.items():
+            for name, pub in publishers.items():
                 try:
                     key = getattr(pub.platform, 'value', None)
                     if key:

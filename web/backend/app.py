@@ -33,6 +33,7 @@ from loguru import logger
 from config import get_settings
 from core.database import get_db
 from services.audit_service import AuditService
+from web.backend.decorators import execute_audit_action
 import os
 import sys
 import socket
@@ -603,6 +604,7 @@ class SubmissionOut(BaseModel):
     publish_id: Optional[int] = None
     processed_by: Optional[str] = None
     created_at: Optional[str] = None
+    summary: Optional[str] = None  # AI生成的投稿总结
 
 
 @app.get("/audit/submissions", response_model=List[SubmissionOut])
@@ -624,6 +626,14 @@ async def list_submissions(status_filter: Optional[str] = None, limit: int = 50,
         rows = result.scalars().all()
         out: List[SubmissionOut] = []
         for s in rows:
+            # 提取 summary
+            summary = None
+            if s.llm_result and isinstance(s.llm_result, dict):
+                summary = s.llm_result.get('summary', '')
+                # 如果太长，截断到100字符
+                if summary and len(summary) > 100:
+                    summary = summary[:97] + '...'
+            
             out.append(SubmissionOut(
                 id=s.id,
                 sender_id=s.sender_id,
@@ -636,6 +646,7 @@ async def list_submissions(status_filter: Optional[str] = None, limit: int = 50,
                 publish_id=s.publish_id,
                 processed_by=s.processed_by,
                 created_at=s.created_at.isoformat() if s.created_at else None,
+                summary=summary,
             ))
         return out
 
@@ -647,120 +658,125 @@ class AuditActionIn(BaseModel):
 @app.post("/audit/{submission_id}/approve")
 async def api_approve(submission_id: int, authorization: Optional[str] = Header(default=None)):
     payload = get_current_user_from_headers(authorization)
-    res = await audit_service.approve(submission_id, operator_id=str(payload.get("username")))
-    if not res.get("success"):
-        raise HTTPException(status_code=400, detail=res.get("message"))
-    
-    # 发送 SSE 通知
-    await notify_submission_update(submission_id, "submission_approved", {
-        "operator": str(payload.get("username"))
-    })
-    
-    return res
+    return await execute_audit_action(
+        submission_id,
+        str(payload.get("username")),
+        audit_service.approve,
+        send_sse=True,
+        sse_event_type="submission_approved",
+        notify_submission_update=notify_submission_update
+    )
 
 
 @app.post("/audit/{submission_id}/reject")
 async def api_reject(submission_id: int, body: AuditActionIn, authorization: Optional[str] = Header(default=None)):
     payload = get_current_user_from_headers(authorization)
-    res = await audit_service.reject_with_message(submission_id, operator_id=str(payload.get("username")), extra=body.comment)
-    if not res.get("success"):
-        raise HTTPException(status_code=400, detail=res.get("message"))
-    
-    # 发送 SSE 通知
-    await notify_submission_update(submission_id, "submission_rejected", {
-        "operator": str(payload.get("username")),
-        "reason": body.comment
-    })
-    
-    return res
+    return await execute_audit_action(
+        submission_id,
+        str(payload.get("username")),
+        audit_service.reject_with_message,
+        extra=body.comment,
+        send_sse=True,
+        sse_event_type="submission_rejected",
+        notify_submission_update=notify_submission_update
+    )
 
 
 @app.post("/audit/{submission_id}/toggle-anon")
 async def api_toggle_anon(submission_id: int, authorization: Optional[str] = Header(default=None)):
     payload = get_current_user_from_headers(authorization)
-    res = await audit_service.toggle_anonymous(submission_id, operator_id=str(payload.get("username")))
-    if not res.get("success"):
-        raise HTTPException(status_code=400, detail=res.get("message"))
-    return res
+    return await execute_audit_action(
+        submission_id,
+        str(payload.get("username")),
+        audit_service.toggle_anonymous
+    )
 
 
 @app.post("/audit/{submission_id}/comment")
 async def api_comment(submission_id: int, body: AuditActionIn, authorization: Optional[str] = Header(default=None)):
     payload = get_current_user_from_headers(authorization)
-    res = await audit_service.add_comment(submission_id, operator_id=str(payload.get("username")), comment=(body.comment or ""))
-    if not res.get("success"):
-        raise HTTPException(status_code=400, detail=res.get("message"))
-    return res
+    return await execute_audit_action(
+        submission_id,
+        str(payload.get("username")),
+        audit_service.add_comment,
+        extra=body.comment or ""
+    )
 
 
 # 扩展审核操作
 @app.post("/audit/{submission_id}/hold")
 async def api_hold(submission_id: int, authorization: Optional[str] = Header(default=None)):
     payload = get_current_user_from_headers(authorization)
-    res = await audit_service.hold(submission_id, operator_id=str(payload.get("username")))
-    if not res.get("success"):
-        raise HTTPException(status_code=400, detail=res.get("message"))
-    return res
+    return await execute_audit_action(
+        submission_id,
+        str(payload.get("username")),
+        audit_service.hold
+    )
 
 
 @app.post("/audit/{submission_id}/delete")
 async def api_delete(submission_id: int, authorization: Optional[str] = Header(default=None)):
     payload = get_current_user_from_headers(authorization)
-    res = await audit_service.delete(submission_id, operator_id=str(payload.get("username")))
-    if not res.get("success"):
-        raise HTTPException(status_code=400, detail=res.get("message"))
-    return res
+    return await execute_audit_action(
+        submission_id,
+        str(payload.get("username")),
+        audit_service.delete
+    )
 
 
 @app.post("/audit/{submission_id}/approve-immediate")
 async def api_approve_immediate(submission_id: int, authorization: Optional[str] = Header(default=None)):
     payload = get_current_user_from_headers(authorization)
-    res = await audit_service.approve_immediate(submission_id, operator_id=str(payload.get("username")))
-    if not res.get("success"):
-        raise HTTPException(status_code=400, detail=res.get("message"))
-    
-    # 发送 SSE 通知
-    await notify_submission_update(submission_id, "submission_published", {
-        "operator": str(payload.get("username"))
-    })
-    
-    return res
+    return await execute_audit_action(
+        submission_id,
+        str(payload.get("username")),
+        audit_service.approve_immediate,
+        send_sse=True,
+        sse_event_type="submission_published",
+        notify_submission_update=notify_submission_update
+    )
 
 
 @app.post("/audit/{submission_id}/rerender")
 async def api_rerender(submission_id: int, authorization: Optional[str] = Header(default=None)):
     payload = get_current_user_from_headers(authorization)
-    res = await audit_service.rerender(submission_id, operator_id=str(payload.get("username")))
-    if not res.get("success"):
-        raise HTTPException(status_code=400, detail=res.get("message"))
-    return res
+    return await execute_audit_action(
+        submission_id,
+        str(payload.get("username")),
+        audit_service.rerender
+    )
 
 
 @app.post("/audit/{submission_id}/refresh")
 async def api_refresh(submission_id: int, authorization: Optional[str] = Header(default=None)):
     payload = get_current_user_from_headers(authorization)
-    res = await audit_service.refresh(submission_id, operator_id=str(payload.get("username")))
-    if not res.get("success"):
-        raise HTTPException(status_code=400, detail=res.get("message"))
-    return res
+    return await execute_audit_action(
+        submission_id,
+        str(payload.get("username")),
+        audit_service.refresh
+    )
 
 
 @app.post("/audit/{submission_id}/reply")
 async def api_reply(submission_id: int, body: AuditActionIn, authorization: Optional[str] = Header(default=None)):
     payload = get_current_user_from_headers(authorization)
-    res = await audit_service.reply_to_sender(submission_id, operator_id=str(payload.get("username")), extra=body.comment)
-    if not res.get("success"):
-        raise HTTPException(status_code=400, detail=res.get("message"))
-    return res
+    return await execute_audit_action(
+        submission_id,
+        str(payload.get("username")),
+        audit_service.reply_to_sender,
+        extra=body.comment
+    )
 
 
 @app.post("/audit/{submission_id}/blacklist")
 async def api_blacklist(submission_id: int, body: AuditActionIn, authorization: Optional[str] = Header(default=None)):
     payload = get_current_user_from_headers(authorization)
-    res = await audit_service.blacklist(submission_id, operator_id=str(payload.get("username")), extra=body.comment)
-    if not res.get("success"):
-        raise HTTPException(status_code=400, detail=res.get("message"))
-    return res
+    return await execute_audit_action(
+        submission_id,
+        str(payload.get("username")),
+        audit_service.blacklist,
+        extra=body.comment
+    )
 
 
 # 投稿详情
@@ -1555,6 +1571,7 @@ class StatsOut(BaseModel):
     rejected_submissions: int
     stored_posts_count: int
     blacklisted_users: int
+    pending_feedbacks: int
     active_groups: List[str]
     
     # 最近7天的数据
@@ -1601,6 +1618,12 @@ async def get_stats(authorization: Optional[str] = Header(default=None)):
         blacklist_stmt = select(func.count(BlackList.id))
         blacklist_result = await session.execute(blacklist_stmt)
         blacklisted_users = blacklist_result.scalar() or 0
+        
+        # 待处理反馈
+        from core.models import Feedback
+        feedback_stmt = select(func.count(Feedback.id)).where(Feedback.status == 'pending')
+        feedback_result = await session.execute(feedback_stmt)
+        pending_feedbacks = feedback_result.scalar() or 0
         
         # 活跃群组
         groups_stmt = select(Submission.group_name).distinct().where(Submission.group_name.is_not(None))
@@ -1653,6 +1676,7 @@ async def get_stats(authorization: Optional[str] = Header(default=None)):
             rejected_submissions=rejected_submissions,
             stored_posts_count=stored_posts_count,
             blacklisted_users=blacklisted_users,
+            pending_feedbacks=pending_feedbacks,
             active_groups=active_groups,
             recent_submissions=recent_submissions,
             recent_30d_submissions=recent_30d_submissions,
@@ -1966,6 +1990,384 @@ async def list_log_files(authorization: Optional[str] = Header(default=None)):
             continue
     
     return {"files": file_info}
+
+
+# ============================================
+# 反馈管理 API
+# ============================================
+class FeedbackOut(BaseModel):
+    id: int
+    user_id: str
+    receiver_id: str
+    group_name: Optional[str] = None
+    content: str
+    status: str
+    admin_reply: Optional[str] = None
+    replied_by: Optional[str] = None
+    created_at: str
+    updated_at: Optional[str] = None
+    replied_at: Optional[str] = None
+
+
+class FeedbackReplyIn(BaseModel):
+    reply: str
+
+
+@app.get("/management/feedbacks", response_model=List[FeedbackOut])
+async def get_feedbacks(
+    status: Optional[str] = None,
+    user_id: Optional[str] = None,
+    group_name: Optional[str] = None,
+    page: int = 1,
+    page_size: int = 50,
+    authorization: Optional[str] = Header(default=None)
+):
+    """获取反馈列表（管理员可访问）"""
+    payload = get_current_user_from_headers(authorization)
+    if not payload.get("is_admin"):
+        raise HTTPException(status_code=403, detail="需要管理员权限")
+    
+    db = await get_db()
+    async with db.get_session() as session:
+        from sqlalchemy import select, and_
+        from core.models import Feedback
+        
+        # 构建查询
+        stmt = select(Feedback).order_by(Feedback.created_at.desc())
+        
+        # 添加过滤条件
+        filters = []
+        if status:
+            filters.append(Feedback.status == status)
+        if user_id:
+            filters.append(Feedback.user_id == user_id)
+        if group_name:
+            filters.append(Feedback.group_name == group_name)
+        
+        if filters:
+            stmt = stmt.where(and_(*filters))
+        
+        # 分页
+        offset = (page - 1) * page_size
+        stmt = stmt.offset(offset).limit(page_size)
+        
+        result = await session.execute(stmt)
+        feedbacks = result.scalars().all()
+        
+        return [
+            FeedbackOut(
+                id=fb.id,
+                user_id=fb.user_id,
+                receiver_id=fb.receiver_id,
+                group_name=fb.group_name,
+                content=fb.content,
+                status=fb.status,
+                admin_reply=fb.admin_reply,
+                replied_by=fb.replied_by,
+                created_at=fb.created_at.isoformat() if fb.created_at else "",
+                updated_at=fb.updated_at.isoformat() if fb.updated_at else None,
+                replied_at=fb.replied_at.isoformat() if fb.replied_at else None
+            )
+            for fb in feedbacks
+        ]
+
+
+@app.get("/management/feedbacks/{feedback_id}", response_model=FeedbackOut)
+async def get_feedback_detail(feedback_id: int, authorization: Optional[str] = Header(default=None)):
+    """获取反馈详情"""
+    payload = get_current_user_from_headers(authorization)
+    if not payload.get("is_admin"):
+        raise HTTPException(status_code=403, detail="需要管理员权限")
+    
+    db = await get_db()
+    async with db.get_session() as session:
+        from sqlalchemy import select
+        from core.models import Feedback
+        
+        stmt = select(Feedback).where(Feedback.id == feedback_id)
+        result = await session.execute(stmt)
+        feedback = result.scalar_one_or_none()
+        
+        if not feedback:
+            raise HTTPException(status_code=404, detail="反馈未找到")
+        
+        # 自动标记为已读
+        if feedback.status == 'pending':
+            feedback.status = 'read'
+            await session.flush()
+        
+        return FeedbackOut(
+            id=feedback.id,
+            user_id=feedback.user_id,
+            receiver_id=feedback.receiver_id,
+            group_name=feedback.group_name,
+            content=feedback.content,
+            status=feedback.status,
+            admin_reply=feedback.admin_reply,
+            replied_by=feedback.replied_by,
+            created_at=feedback.created_at.isoformat() if feedback.created_at else "",
+            updated_at=feedback.updated_at.isoformat() if feedback.updated_at else None,
+            replied_at=feedback.replied_at.isoformat() if feedback.replied_at else None
+        )
+
+
+@app.post("/management/feedbacks/{feedback_id}/reply")
+async def reply_feedback(
+    feedback_id: int,
+    body: FeedbackReplyIn,
+    authorization: Optional[str] = Header(default=None)
+):
+    """回复反馈"""
+    payload = get_current_user_from_headers(authorization)
+    if not payload.get("is_admin"):
+        raise HTTPException(status_code=403, detail="需要管理员权限")
+    
+    db = await get_db()
+    async with db.get_session() as session:
+        from sqlalchemy import select
+        from core.models import Feedback
+        
+        stmt = select(Feedback).where(Feedback.id == feedback_id)
+        result = await session.execute(stmt)
+        feedback = result.scalar_one_or_none()
+        
+        if not feedback:
+            raise HTTPException(status_code=404, detail="反馈未找到")
+        
+        # 更新回复
+        feedback.admin_reply = body.reply
+        feedback.replied_by = str(payload.get("username"))
+        feedback.replied_at = datetime.now()
+        feedback.status = 'resolved'
+        
+        await session.flush()
+        
+        # 通过 QQ 发送回复给用户
+        try:
+            # 导入必要的模块
+            from core.plugin import plugin_manager
+            receiver = plugin_manager.get_receiver("qq_receiver")
+            
+            if receiver:
+                # 发送私聊消息
+                message = f"【系统回复】您的反馈已收到回复：\n\n{body.reply}"
+                await receiver.send_private_message_by_self(
+                    feedback.receiver_id,
+                    feedback.user_id,
+                    message
+                )
+                logger.info(f"已向用户 {feedback.user_id} 发送反馈回复")
+        except Exception as e:
+            logger.error(f"发送反馈回复失败: {e}", exc_info=True)
+            # 回复失败不影响保存
+        
+        return {"success": True, "message": "回复成功"}
+
+
+@app.patch("/management/feedbacks/{feedback_id}/status")
+async def update_feedback_status(
+    feedback_id: int,
+    status: str,
+    authorization: Optional[str] = Header(default=None)
+):
+    """更新反馈状态"""
+    payload = get_current_user_from_headers(authorization)
+    if not payload.get("is_admin"):
+        raise HTTPException(status_code=403, detail="需要管理员权限")
+    
+    if status not in ['pending', 'read', 'resolved']:
+        raise HTTPException(status_code=400, detail="无效的状态值")
+    
+    db = await get_db()
+    async with db.get_session() as session:
+        from sqlalchemy import select
+        from core.models import Feedback
+        
+        stmt = select(Feedback).where(Feedback.id == feedback_id)
+        result = await session.execute(stmt)
+        feedback = result.scalar_one_or_none()
+        
+        if not feedback:
+            raise HTTPException(status_code=404, detail="反馈未找到")
+        
+        feedback.status = status
+        await session.flush()
+        
+        return {"success": True, "message": "状态已更新"}
+
+
+@app.delete("/management/feedbacks/{feedback_id}")
+async def delete_feedback(feedback_id: int, authorization: Optional[str] = Header(default=None)):
+    """删除反馈"""
+    payload = get_current_user_from_headers(authorization)
+    if not payload.get("is_admin"):
+        raise HTTPException(status_code=403, detail="需要管理员权限")
+    
+    db = await get_db()
+    async with db.get_session() as session:
+        from sqlalchemy import select, delete
+        from core.models import Feedback
+        
+        stmt = select(Feedback).where(Feedback.id == feedback_id)
+        result = await session.execute(stmt)
+        feedback = result.scalar_one_or_none()
+        
+        if not feedback:
+            raise HTTPException(status_code=404, detail="反馈未找到")
+        
+        delete_stmt = delete(Feedback).where(Feedback.id == feedback_id)
+        await session.execute(delete_stmt)
+        await session.commit()
+        
+        return {"success": True, "message": "反馈已删除"}
+
+
+# ============================================
+# 举报审核管理 API
+# ============================================
+class ReportProcessIn(BaseModel):
+    action: str  # delete | keep
+    reason: str
+
+
+@app.get("/management/reports")
+async def get_reports(
+    status: Optional[str] = None,
+    page: int = 1,
+    page_size: int = 20,
+    authorization: Optional[str] = Header(default=None)
+):
+    """获取举报列表"""
+    payload = get_current_user_from_headers(authorization)
+    if not payload.get("is_admin"):
+        raise HTTPException(status_code=403, detail="需要管理员权限")
+    
+    from services.report_service import ReportService
+    from sqlalchemy import select
+    from core.models import Report, Submission
+    
+    offset = (page - 1) * page_size
+    reports, total = await ReportService.get_reports_for_review(
+        status=status,
+        limit=page_size,
+        offset=offset
+    )
+    
+    # 获取关联的投稿信息
+    report_list = []
+    db = await get_db()
+    async with db.get_session() as session:
+        for report in reports:
+            result = await session.execute(
+                select(Submission).where(Submission.id == report.submission_id)
+            )
+            submission = result.scalar_one_or_none()
+            
+            report_dict = report.to_dict()
+            report_dict['submission'] = submission.to_dict() if submission else None
+            report_list.append(report_dict)
+    
+    return {
+        "success": True,
+        "data": {
+            "items": report_list,
+            "total": total,
+            "page": page,
+            "page_size": page_size
+        }
+    }
+
+
+@app.get("/management/reports/{report_id}")
+async def get_report_detail(
+    report_id: int,
+    authorization: Optional[str] = Header(default=None)
+):
+    """获取举报详情"""
+    payload = get_current_user_from_headers(authorization)
+    if not payload.get("is_admin"):
+        raise HTTPException(status_code=403, detail="需要管理员权限")
+    
+    from services.report_service import ReportService
+    from sqlalchemy import select
+    from core.models import Report, Submission, PlatformComment
+    
+    report = await ReportService.get_report(report_id)
+    if not report:
+        raise HTTPException(status_code=404, detail="举报未找到")
+    
+    db = await get_db()
+    async with db.get_session() as session:
+        # 获取投稿信息
+        result = await session.execute(
+            select(Submission).where(Submission.id == report.submission_id)
+        )
+        submission = result.scalar_one_or_none()
+        
+        # 获取评论信息
+        comments = await ReportService.get_platform_comments(report.submission_id)
+        
+        report_dict = report.to_dict()
+        report_dict['submission'] = submission.to_dict() if submission else None
+        report_dict['submission_full'] = {
+            'raw_content': submission.raw_content,
+            'llm_result': submission.llm_result,
+            'processed_content': submission.processed_content
+        } if submission else None
+        report_dict['comments'] = [c.to_dict() for c in comments]
+        
+        return {
+            "success": True,
+            "data": report_dict
+        }
+
+
+@app.post("/management/reports/{report_id}/process")
+async def process_report(
+    report_id: int,
+    body: ReportProcessIn,
+    authorization: Optional[str] = Header(default=None)
+):
+    """处理举报"""
+    payload = get_current_user_from_headers(authorization)
+    if not payload.get("is_admin"):
+        raise HTTPException(status_code=403, detail="需要管理员权限")
+    
+    if body.action not in ['delete', 'keep']:
+        raise HTTPException(status_code=400, detail="无效的处理动作")
+    
+    from services.report_service import ReportService
+    from core.models import Submission
+    from sqlalchemy import select
+    
+    # 获取举报和投稿信息
+    report = await ReportService.get_report(report_id)
+    if not report:
+        raise HTTPException(status_code=404, detail="举报未找到")
+    
+    db = await get_db()
+    async with db.get_session() as session:
+        result = await session.execute(
+            select(Submission).where(Submission.id == report.submission_id)
+        )
+        submission = result.scalar_one_or_none()
+        
+        if not submission:
+            raise HTTPException(status_code=404, detail="投稿未找到")
+    
+    # 使用统一的举报处理服务
+    result = await ReportService.handle_report_action(
+        report=report,
+        submission=submission,
+        action=body.action,
+        reason=body.reason,
+        processed_by=str(payload.get("username"))
+    )
+    
+    if not result.get('success'):
+        raise HTTPException(status_code=500, detail=result.get('message', '处理失败'))
+    
+    return {"success": True, "message": "处理成功"}
 
 
 # ============================================
