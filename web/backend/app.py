@@ -501,8 +501,6 @@ async def me(authorization: Optional[str] = Header(default=None)):
 @rl(getattr(settings.web.rate_limit, "create_invite", None))
 async def create_invite(request: Request, body: InviteCreateIn, authorization: Optional[str] = Header(default=None)):
     payload = get_current_user_from_headers(authorization)
-    if not payload.get("is_admin"):
-        raise HTTPException(status_code=403, detail="需要管理员权限")
 
     db = await get_db()
     async with db.get_session() as session:
@@ -1033,8 +1031,6 @@ class BlacklistOut(BaseModel):
 @app.get("/management/blacklist", response_model=List[BlacklistOut])
 async def get_blacklist(authorization: Optional[str] = Header(default=None)):
     payload = get_current_user_from_headers(authorization)
-    if not payload.get("is_admin"):
-        raise HTTPException(status_code=403, detail="需要管理员权限")
     
     db = await get_db()
     async with db.get_session() as session:
@@ -1063,8 +1059,6 @@ async def get_blacklist(authorization: Optional[str] = Header(default=None)):
 @app.post("/management/blacklist")
 async def add_to_blacklist(body: BlacklistUserIn, authorization: Optional[str] = Header(default=None)):
     payload = get_current_user_from_headers(authorization)
-    if not payload.get("is_admin"):
-        raise HTTPException(status_code=403, detail="需要管理员权限")
     
     db = await get_db()
     async with db.get_session() as session:
@@ -1103,8 +1097,6 @@ async def add_to_blacklist(body: BlacklistUserIn, authorization: Optional[str] =
 @app.delete("/management/blacklist/{blacklist_id}")
 async def remove_from_blacklist(blacklist_id: int, authorization: Optional[str] = Header(default=None)):
     payload = get_current_user_from_headers(authorization)
-    if not payload.get("is_admin"):
-        raise HTTPException(status_code=403, detail="需要管理员权限")
     
     db = await get_db()
     async with db.get_session() as session:
@@ -1137,8 +1129,6 @@ async def get_user_detail(user_id: str, submission_id: Optional[int] = None, aut
         authorization: 认证令牌
     """
     payload = get_current_user_from_headers(authorization)
-    if not payload.get("is_admin"):
-        raise HTTPException(status_code=403, detail="需要管理员权限")
     
     # 获取用户的投稿信息以确定 receiver_id
     receiver_id = None
@@ -1305,8 +1295,6 @@ class AdminUpdateIn(BaseModel):
 @app.get("/management/admins", response_model=List[AdminOut])
 async def list_admins(authorization: Optional[str] = Header(default=None)):
     payload = get_current_user_from_headers(authorization)
-    if not payload.get("is_admin"):
-        raise HTTPException(status_code=403, detail="需要管理员权限")
 
     db = await get_db()
     async with db.get_session() as session:
@@ -1343,8 +1331,6 @@ async def list_admins(authorization: Optional[str] = Header(default=None)):
 @app.post("/management/admins")
 async def create_admin(body: AdminCreateIn, authorization: Optional[str] = Header(default=None)):
     payload = get_current_user_from_headers(authorization)
-    if not payload.get("is_admin"):
-        raise HTTPException(status_code=403, detail="需要管理员权限")
 
     db = await get_db()
     async with db.get_session() as session:
@@ -1379,8 +1365,6 @@ async def create_admin(body: AdminCreateIn, authorization: Optional[str] = Heade
 @app.put("/management/admins/{admin_id}")
 async def update_admin(admin_id: int, body: AdminUpdateIn, authorization: Optional[str] = Header(default=None)):
     payload = get_current_user_from_headers(authorization)
-    if not payload.get("is_admin"):
-        raise HTTPException(status_code=403, detail="需要管理员权限")
 
     db = await get_db()
     async with db.get_session() as session:
@@ -1417,8 +1401,6 @@ class AdminStatusIn(BaseModel):
 @app.patch("/management/admins/{admin_id}/status")
 async def toggle_admin_status(admin_id: int, body: AdminStatusIn, authorization: Optional[str] = Header(default=None)):
     payload = get_current_user_from_headers(authorization)
-    if not payload.get("is_admin"):
-        raise HTTPException(status_code=403, detail="需要管理员权限")
 
     db = await get_db()
     async with db.get_session() as session:
@@ -1441,8 +1423,6 @@ async def toggle_admin_status(admin_id: int, body: AdminStatusIn, authorization:
 @app.delete("/management/admins/{admin_id}")
 async def delete_admin(admin_id: int, authorization: Optional[str] = Header(default=None)):
     payload = get_current_user_from_headers(authorization)
-    if not payload.get("is_admin"):
-        raise HTTPException(status_code=403, detail="需要管理员权限")
 
     db = await get_db()
     async with db.get_session() as session:
@@ -1528,8 +1508,6 @@ async def get_stored_posts(group_name: Optional[str] = None, authorization: Opti
 @app.post("/management/stored-posts/publish")
 async def publish_stored_posts(group_name: str, authorization: Optional[str] = Header(default=None)):
     payload = get_current_user_from_headers(authorization)
-    if not payload.get("is_admin"):
-        raise HTTPException(status_code=403, detail="需要管理员权限")
     
     try:
         from services.submission_service import SubmissionService
@@ -1547,8 +1525,6 @@ async def publish_stored_posts(group_name: str, authorization: Optional[str] = H
 @app.delete("/management/stored-posts/clear")
 async def clear_stored_posts(group_name: str, authorization: Optional[str] = Header(default=None)):
     payload = get_current_user_from_headers(authorization)
-    if not payload.get("is_admin"):
-        raise HTTPException(status_code=403, detail="需要管理员权限")
     
     db = await get_db()
     async with db.get_session() as session:
@@ -1715,8 +1691,6 @@ class LogsOut(BaseModel):
 @app.get("/management/system/status", response_model=SystemStatusOut)
 async def get_system_status(authorization: Optional[str] = Header(default=None)):
     payload = get_current_user_from_headers(authorization)
-    if not payload.get("is_admin"):
-        raise HTTPException(status_code=403, detail="需要管理员权限")
 
     try:
         import psutil  # type: ignore
@@ -2022,10 +1996,8 @@ async def get_feedbacks(
     page_size: int = 50,
     authorization: Optional[str] = Header(default=None)
 ):
-    """获取反馈列表（管理员可访问）"""
+    """获取反馈列表"""
     payload = get_current_user_from_headers(authorization)
-    if not payload.get("is_admin"):
-        raise HTTPException(status_code=403, detail="需要管理员权限")
     
     db = await get_db()
     async with db.get_session() as session:
@@ -2076,8 +2048,6 @@ async def get_feedbacks(
 async def get_feedback_detail(feedback_id: int, authorization: Optional[str] = Header(default=None)):
     """获取反馈详情"""
     payload = get_current_user_from_headers(authorization)
-    if not payload.get("is_admin"):
-        raise HTTPException(status_code=403, detail="需要管理员权限")
     
     db = await get_db()
     async with db.get_session() as session:
@@ -2119,8 +2089,6 @@ async def reply_feedback(
 ):
     """回复反馈"""
     payload = get_current_user_from_headers(authorization)
-    if not payload.get("is_admin"):
-        raise HTTPException(status_code=403, detail="需要管理员权限")
     
     db = await get_db()
     async with db.get_session() as session:
@@ -2172,8 +2140,6 @@ async def update_feedback_status(
 ):
     """更新反馈状态"""
     payload = get_current_user_from_headers(authorization)
-    if not payload.get("is_admin"):
-        raise HTTPException(status_code=403, detail="需要管理员权限")
     
     if status not in ['pending', 'read', 'resolved']:
         raise HTTPException(status_code=400, detail="无效的状态值")
@@ -2200,8 +2166,6 @@ async def update_feedback_status(
 async def delete_feedback(feedback_id: int, authorization: Optional[str] = Header(default=None)):
     """删除反馈"""
     payload = get_current_user_from_headers(authorization)
-    if not payload.get("is_admin"):
-        raise HTTPException(status_code=403, detail="需要管理员权限")
     
     db = await get_db()
     async with db.get_session() as session:
@@ -2239,8 +2203,6 @@ async def get_reports(
 ):
     """获取举报列表"""
     payload = get_current_user_from_headers(authorization)
-    if not payload.get("is_admin"):
-        raise HTTPException(status_code=403, detail="需要管理员权限")
     
     from services.report_service import ReportService
     from sqlalchemy import select
@@ -2285,8 +2247,6 @@ async def get_report_detail(
 ):
     """获取举报详情"""
     payload = get_current_user_from_headers(authorization)
-    if not payload.get("is_admin"):
-        raise HTTPException(status_code=403, detail="需要管理员权限")
     
     from services.report_service import ReportService
     from sqlalchemy import select
@@ -2330,8 +2290,6 @@ async def process_report(
 ):
     """处理举报"""
     payload = get_current_user_from_headers(authorization)
-    if not payload.get("is_admin"):
-        raise HTTPException(status_code=403, detail="需要管理员权限")
     
     if body.action not in ['delete', 'keep']:
         raise HTTPException(status_code=400, detail="无效的处理动作")
@@ -2431,10 +2389,8 @@ async def sse_stream(
 
 @app.get("/events/connections")
 async def get_sse_connections(authorization: Optional[str] = Header(default=None)):
-    """获取 SSE 连接统计（仅管理员）"""
+    """获取 SSE 连接统计"""
     payload = get_current_user_from_headers(authorization)
-    if not payload.get("is_admin"):
-        raise HTTPException(status_code=403, detail="需要管理员权限")
     
     return {
         "active_connections": sse_manager.get_active_connections_count()

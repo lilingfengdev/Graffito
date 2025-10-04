@@ -263,14 +263,13 @@
         </el-form-item>
         
         <el-form-item v-if="inviteLink" label="邀请链接">
-          <el-input v-model="inviteLink" readonly>
-            <template #append>
-              <el-button @click="copyInviteLink">
-                <el-icon><DocumentCopy /></el-icon>
-                复制
-              </el-button>
-            </template>
-          </el-input>
+          <div class="invite-link-container">
+            <el-input v-model="inviteLink" readonly class="invite-link-input" />
+            <el-button @click="copyInviteLink" class="copy-button">
+              <el-icon><DocumentCopy /></el-icon>
+              复制
+            </el-button>
+          </div>
         </el-form-item>
       </el-form>
       <template #footer>
@@ -338,10 +337,6 @@ const menuRoutes = computed(() => {
   return routes.filter(route => {
     // 如果路由需要超级管理员权限，但用户不是超级管理员，则不显示
     if (route.meta?.requiresSuperAdmin && !user.value?.is_superadmin) {
-      return false
-    }
-    // 如果路由需要管理员权限，但用户不是管理员，则不显示
-    if (route.meta?.requiresAdmin && !user.value?.is_admin) {
       return false
     }
     return true
@@ -1038,6 +1033,23 @@ html.dark .user-info:hover {
   margin-top: 2px;
 }
 
+/* 邀请链接容器样式 */
+.invite-link-container {
+  display: flex;
+  gap: 12px;
+  width: 100%;
+  align-items: center;
+}
+
+.invite-link-input {
+  flex: 1;
+}
+
+.copy-button {
+  flex-shrink: 0;
+  min-width: 80px;
+}
+
 /* 总计时长容器样式 */
 .total-duration-container {
   display: flex;
@@ -1378,6 +1390,16 @@ button, a, .clickable {
   
   :deep(.el-input__inner) {
     font-size: 16px; /* 防止 iOS 自动缩放 */
+  }
+  
+  /* 邀请链接容器移动端优化 */
+  .invite-link-container {
+    flex-direction: column;
+    gap: 10px;
+  }
+  
+  .copy-button {
+    width: 100%;
   }
   
   /* 对话框底部按钮优化 - 堆叠布局 */

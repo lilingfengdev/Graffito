@@ -42,7 +42,7 @@ const routes = [
         path: 'users',
         name: 'UserManagement',
         component: UserManagement,
-        meta: { title: '用户管理', icon: 'User', requiresAdmin: true }
+        meta: { title: '用户管理', icon: 'User' }
       },
       {
         path: 'stored',
@@ -60,13 +60,13 @@ const routes = [
         path: 'feedbacks',
         name: 'FeedbackManagement',
         component: FeedbackManagement,
-        meta: { title: '反馈管理', icon: 'ChatDotRound', requiresAdmin: true }
+        meta: { title: '反馈管理', icon: 'ChatDotRound' }
       },
       {
         path: 'reports',
         name: 'ReportManagement',
         component: ReportManagement,
-        meta: { title: '举报审核', icon: 'Warning', requiresAdmin: true }
+        meta: { title: '举报审核', icon: 'Warning' }
       }
     ]
   }
@@ -85,8 +85,8 @@ router.beforeEach(async (to, from, next) => {
     next('/login')
   } else if (token && isAuthPage) {
     next('/')
-  } else if (token && (to.meta.requiresAdmin || to.meta.requiresSuperAdmin)) {
-    // 检查管理员权限
+  } else if (token && to.meta.requiresSuperAdmin) {
+    // 检查超级管理员权限
     try {
       const userStr = localStorage.getItem('user')
       let user = null
@@ -101,13 +101,7 @@ router.beforeEach(async (to, from, next) => {
       }
       
       // 检查超级管理员权限
-      if (to.meta.requiresSuperAdmin && !user.is_superadmin) {
-        next('/')
-        return
-      }
-      
-      // 检查管理员权限
-      if (to.meta.requiresAdmin && !user.is_admin) {
+      if (!user.is_superadmin) {
         next('/')
         return
       }

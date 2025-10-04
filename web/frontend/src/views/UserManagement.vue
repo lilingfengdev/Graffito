@@ -172,8 +172,8 @@
           </div>
         </el-tab-pane>
 
-        <!-- 管理员管理 -->
-        <el-tab-pane label="管理员管理" name="admins" v-if="currentUser.isAdmin">
+        <!-- 管理员管理（仅超级管理员） -->
+        <el-tab-pane label="管理员管理" name="admins" v-if="currentUser.isSuperadmin">
           <div class="tab-content">
             <div class="tab-header">
               <div class="tab-title">
@@ -303,8 +303,8 @@
           </div>
         </el-tab-pane>
 
-        <!-- 系统状态（管理员可见） -->
-        <el-tab-pane label="系统状态" name="system" v-if="currentUser.isAdmin">
+        <!-- 系统状态（仅超级管理员） -->
+        <el-tab-pane label="系统状态" name="system" v-if="currentUser.isSuperadmin">
           <div class="tab-content">
             <div class="tab-header">
               <div class="tab-title">
@@ -820,7 +820,7 @@ const activeGroups = ref([])
 const currentUser = reactive({
   id: '',
   role: '',
-  isAdmin: computed(() => currentUser.role === 'admin')
+  isSuperadmin: false
 })
 
 // 表格状态管理
@@ -924,7 +924,7 @@ const getProgressColor = (percent) => {
 }
 
 watch(activeTab, async (val) => {
-  if (val === 'system' && currentUser.isAdmin) {
+  if (val === 'system') {
     await loadSystemStatus()
     startAutoRefresh()
   } else {
@@ -1019,6 +1019,7 @@ const loadCurrentUser = async () => {
   if (data) {
     currentUser.id = data.user_id
     currentUser.role = data.role
+    currentUser.isSuperadmin = data.is_superadmin || false
   }
 }
 
@@ -1211,9 +1212,9 @@ const formatTime = (timeStr) => {
 const refreshCurrentTab = async () => {
   if (activeTab.value === 'blacklist') {
     await loadBlacklist()
-  } else if (activeTab.value === 'admins') {
+  } else if (activeTab.value === 'admins' && currentUser.isSuperadmin) {
     await loadAdmins()
-  } else if (activeTab.value === 'system') {
+  } else if (activeTab.value === 'system' && currentUser.isSuperadmin) {
     await loadSystemStatus()
   }
 }
@@ -1224,7 +1225,8 @@ onMounted(async () => {
   await loadCurrentUser()
   await loadBlacklist()
   await loadActiveGroups()
-  if (currentUser.isAdmin) {
+  // 只有超级管理员才加载管理员列表
+  if (currentUser.isSuperadmin) {
     await loadAdmins()
   }
 })
