@@ -1,4 +1,4 @@
-# XWall 示例配置文件
+# Graffito 示例配置文件
 
 # 复制此文件为 config.yaml 并根据实际情况修改
 
@@ -84,7 +84,7 @@ database:
 
   type: sqlite
 
-  url: sqlite+aiosqlite:///./data/xwall.db
+  url: sqlite+aiosqlite:///./data/graffito.db
 
   pool_size: 10
 
@@ -118,7 +118,7 @@ cache:
   serializer: "json"
   
   # 命名空间（键前缀，用于多项目隔离）
-  namespace: "xwall"
+  namespace: "graffito"
   
   # 默认 TTL（秒，缓存过期时间）
   ttl: 300
@@ -247,9 +247,9 @@ queue:
 
     password: ""
 
-    database: xwallqueue
+    database: graffito_queue
 
-    table: xwall_tasks
+    table: graffito_tasks
   
   # 注意：RedisQueue 无需额外配置，使用 cache 部分的配置（需设置 backend="redis"）
   # 队列数据存储在 Redis 中，键格式为 <namespace>:queue:<queue_name>
@@ -396,10 +396,10 @@ audit:
   skip_image_audit_over_mb: 0
 
 
-# XModerator 举报审核配置
+# Chisel 举报审核配置
 # 提供举报处理、AI 自动审核、人工复核等完整的内容审核流程
-xmoderator:
-  # 是否启用 XModerator 举报审核功能
+chisel:
+  # 是否启用 Chisel 举报审核功能
   enable: true
   
   # 自动删除 AI 评级为 danger（危险）的投稿
@@ -457,7 +457,7 @@ account_groups:
 
     watermark_text: ""
 
-    wall_mark: "XWall"  # 渲染页底部显示的墙标识（如 学校墙/社团墙）
+    wall_mark: "Graffito"  # 渲染页底部显示的墙标识（如 学校墙/社团墙）
 
     friend_add_message: "你好，欢迎投稿"
 

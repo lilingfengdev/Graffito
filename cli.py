@@ -1,6 +1,6 @@
 #!/usr/bin/env python3
 """
-XWall CLI 管理工具
+Graffito CLI 管理工具
 """
 import asyncio
 import sys
@@ -19,7 +19,7 @@ from core.models import Submission, BlackList, StoredPost
 
 @click.group()
 def cli():
-    """XWall 命令行管理工具"""
+    """Graffito 命令行管理工具"""
     pass
 
 

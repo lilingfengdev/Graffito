@@ -7,7 +7,7 @@
           <div class="login-header">
             <div class="logo">
               <el-icon size="32" color="#6366f1"><Document /></el-icon>
-              <span class="logo-text">XWall 审核后台</span>
+              <span class="logo-text">Graffito 审核后台</span>
             </div>
             <p class="subtitle">邀请注册</p>
           </div>

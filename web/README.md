@@ -1,4 +1,4 @@
-XWall Web 审核后台
+Graffito Web 审核后台
 =================
 
 目录结构

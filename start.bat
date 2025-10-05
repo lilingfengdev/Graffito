@@ -4,7 +4,7 @@ chcp 65001 >nul 2>&1
 
 echo.
 echo ╔═══════════════════════════════════════════╗
-echo ║                XWall 启动脚本           ║
+echo ║             Graffito 启动脚本           ║
 echo ╚═══════════════════════════════════════════╝
 echo.
 
@@ -65,7 +65,7 @@ if defined FORCE_DB_INIT (
     echo [INFO] Force initializing database...
     python cli.py db-init
 ) else (
-    if not exist "data\xwall.db" (
+    if not exist "data\graffito.db" (
         echo [INFO] Initializing database...
         python cli.py db-init
     ) else (
@@ -74,7 +74,7 @@ if defined FORCE_DB_INIT (
 )
 
 REM Start main program
-echo [INFO] Starting XWall...
+echo [INFO] Starting Graffito...
 set DRIVER=~fastapi
 python main.py
 

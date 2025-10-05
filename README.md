@@ -1,7 +1,7 @@
 <div align="center">
-  <img src="logo.png" alt="XWall Logo" width="200" height="200">
+  <img src="logo.png" alt="Graffito Logo" width="200" height="200">
   
-  # XWall - 校园墙自动运营系统
+  # Graffito - 校园墙自动运营系统
   
   ![Python](https://img.shields.io/badge/Python-3.8%2B-blue?style=flat-square&logo=python&logoColor=white)
   ![License](https://img.shields.io/badge/License-MIT-green?style=flat-square)
@@ -101,7 +101,7 @@ graph LR
 ## 📁 项目结构
 
 ```
-XWall/
+Graffito/
 ├── main.py              # 主程序入口
 ├── config/              # 配置文件
 ├── core/                # 核心功能 (数据模型、数据库)

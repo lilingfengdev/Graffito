@@ -14,7 +14,7 @@
             <Document />
           </el-icon>
           <transition name="logo-text-fade">
-            <span v-if="!collapsed" class="logo-text">XWall</span>
+            <span v-if="!collapsed" class="logo-text">Graffito</span>
           </transition>
         </div>
         

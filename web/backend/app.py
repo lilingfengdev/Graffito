@@ -1,4 +1,4 @@
-"""XWall Web Backend (FastAPI)
+"""Graffito Web Backend (FastAPI)
 
 Provides:
 - Auth: initialize superadmin, login, me
@@ -1856,13 +1856,13 @@ async def get_logs(
         try:
             # 验证日期格式
             datetime.strptime(date, "%Y-%m-%d")
-            log_files = [logs_dir / f"xwall_{date}.log"]
+            log_files = [logs_dir / f"graffito_{date}.log"]
             log_files = [f for f in log_files if f.exists()]
         except ValueError:
             raise HTTPException(status_code=400, detail="日期格式错误，应为 YYYY-MM-DD")
     else:
         # 否则读取所有日志文件，按日期倒序
-        log_files = sorted(logs_dir.glob("xwall_*.log"), reverse=True)
+        log_files = sorted(logs_dir.glob("graffito_*.log"), reverse=True)
     
     if not log_files:
         return LogsOut(logs=[], total=0, page=page, page_size=page_size, has_more=False)
@@ -1943,14 +1943,14 @@ async def list_log_files(authorization: Optional[str] = Header(default=None)):
     if not logs_dir.exists():
         return {"files": []}
     
-    log_files = sorted(logs_dir.glob("xwall_*.log"), reverse=True)
+    log_files = sorted(logs_dir.glob("graffito_*.log"), reverse=True)
     
     file_info = []
     for log_file in log_files:
         try:
             stat = log_file.stat()
             # 从文件名提取日期
-            date_match = re.match(r'xwall_(\d{4}-\d{2}-\d{2})\.log', log_file.name)
+            date_match = re.match(r'graffito_(\d{4}-\d{2}-\d{2})\.log', log_file.name)
             date_str = date_match.group(1) if date_match else None
             
             file_info.append({

@@ -70,7 +70,7 @@ async def lifespan(app: FastAPI):
 
 
 app = FastAPI(
-    title="XWall HTML Render Service",
+    title="Graffito HTML Render Service",
     description="独立的 HTML 渲染服务，负责将 HTML 转换为截图",
     version="1.0.0",
     lifespan=lifespan
@@ -123,7 +123,7 @@ class RenderResponse(BaseModel):
 async def root():
     """健康检查"""
     return {
-        "service": "XWall HTML Render Service",
+        "service": "Graffito HTML Render Service",
         "status": "running",
         "browser_ready": browser is not None
     }

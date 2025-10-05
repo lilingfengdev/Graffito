@@ -1,6 +1,6 @@
 /**
  * Composables 统一导出
- * XWall 前端 Composable 系统
+ * Graffito 前端 Composable 系统
  */
 
 export { useTheme } from './useTheme'

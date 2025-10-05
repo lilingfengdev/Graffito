@@ -63,7 +63,7 @@ export function usePWA() {
     setTimeout(() => {
       ElNotification({
         title: '安装应用',
-        message: '将 XWall 添加到主屏幕，获得更好的使用体验',
+        message: '将 Graffito 添加到主屏幕，获得更好的使用体验',
         type: 'info',
         duration: 0,
         position: 'bottom-right',
@@ -71,7 +71,7 @@ export function usePWA() {
         showClose: true,
         dangerouslyUseHTMLString: true,
         message: `
-          <div style="margin-bottom: 12px;">将 XWall 添加到主屏幕，获得更好的使用体验</div>
+          <div style="margin-bottom: 12px;">将 Graffito 添加到主屏幕，获得更好的使用体验</div>
           <div style="display: flex; gap: 8px;">
             <button class="el-button el-button--primary el-button--small" onclick="window.installPWA()">
               <span>立即安装</span>

@@ -133,7 +133,7 @@ class QQReceiver(BaseReceiver):
         # NoneBot2 初始化后重新配置日志输出（避免被 NoneBot2 覆盖）
         # 使用缓存的日志配置，避免重复添加
         import os
-        if os.getenv("XWALL_LOG_CONFIGURED") == "true":
+        if os.getenv("GRAFFITO_LOG_CONFIGURED") == "true":
             from loguru import logger as loguru_logger
             import sys
             
@@ -147,7 +147,7 @@ class QQReceiver(BaseReceiver):
                 level="INFO"
             )
             loguru_logger.add(
-                "data/logs/xwall_{time:YYYY-MM-DD}.log",
+                "data/logs/graffito_{time:YYYY-MM-DD}.log",
                 rotation="00:00",
                 retention="30 days",
                 level="DEBUG",
@@ -2317,9 +2317,9 @@ class QQReceiver(BaseReceiver):
                     from processors.moderator_processor import get_moderator_processor
                     from config import get_settings
 
-                    # 检查 XModerator 是否开启
+                    # 检查 Chisel 是否开启
                     settings = get_settings()
-                    if not settings.xmoderator.enable:
+                    if not settings.chisel.enable:
                         await self.send_private_message(user_id, "举报功能未开启")
                         return True
 

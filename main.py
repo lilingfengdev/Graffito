@@ -1,6 +1,6 @@
 #!/usr/bin/env python3
 """
-XWall 主程序入口
+Graffito 主程序入口
 """
 import asyncio
 import signal
@@ -22,7 +22,7 @@ console_handler_id = logger.add(
 )
 # 文件日志处理器
 file_handler_id = logger.add(
-    "data/logs/xwall_{time:YYYY-MM-DD}.log",
+    "data/logs/graffito_{time:YYYY-MM-DD}.log",
     rotation="00:00",
     retention="30 days",
     level="DEBUG",
@@ -31,7 +31,7 @@ file_handler_id = logger.add(
 
 # 设置全局标志，用于其他模块检查是否需要重新配置日志
 import os
-os.environ["XWALL_LOG_CONFIGURED"] = "true"
+os.environ["GRAFFITO_LOG_CONFIGURED"] = "true"
 
 # 忽略 passlib 的 bcrypt 版本读取警告
 import logging
@@ -43,7 +43,7 @@ from core.cache_client import get_cache, close_cache
 from core.plugin import plugin_manager
 
 
-class XWallApp:
+class GraffitoApp:
     """主应用程序"""
     
     def __init__(self):
@@ -61,7 +61,7 @@ class XWallApp:
         
     async def initialize(self):
         """初始化应用"""
-        logger.info("正在初始化 XWall...")
+        logger.info("正在初始化 Graffito...")
         
         # 创建必要的目录
         Path("data").mkdir(exist_ok=True)
@@ -96,16 +96,16 @@ class XWallApp:
         # 注入服务到接收器
         self.inject_services_into_receivers()
         
-        # 检查 XModerator 状态
-        if self.settings.xmoderator.enable:
-            logger.info("XModerator 举报审核系统已启用")
-            logger.info(f"  - 自动删除 danger 级别: {self.settings.xmoderator.auto_delete}")
-            logger.info(f"  - 自动通过 safe 级别: {self.settings.xmoderator.auto_pass}")
-            logger.info(f"  - 抓取平台评论: {self.settings.xmoderator.fetch_comments}")
+        # 检查 Chisel 状态
+        if self.settings.chisel.enable:
+            logger.info("Chisel 举报审核系统已启用")
+            logger.info(f"  - 自动删除 danger 级别: {self.settings.chisel.auto_delete}")
+            logger.info(f"  - 自动通过 safe 级别: {self.settings.chisel.auto_pass}")
+            logger.info(f"  - 抓取平台评论: {self.settings.chisel.fetch_comments}")
         else:
-            logger.info("XModerator 举报审核系统未启用")
+            logger.info("Chisel 举报审核系统未启用")
         
-        logger.info("XWall 初始化完成")
+        logger.info("Graffito 初始化完成")
         return True
     
     async def _init_database(self):
@@ -202,7 +202,7 @@ class XWallApp:
             return
             
         self.is_running = True
-        logger.info("正在启动 XWall...")
+        logger.info("正在启动 Graffito...")
         
         # 启动所有接收器
         for name, receiver in plugin_manager.receivers.items():
@@ -238,7 +238,7 @@ class XWallApp:
             except Exception as e:
                 logger.error(f"启动 Web 后端失败: {e}")
                 
-        logger.info("XWall 已启动")
+        logger.info("Graffito 已启动")
         
         # 等待关闭信号
         await self.shutdown_event.wait()
@@ -248,7 +248,7 @@ class XWallApp:
         if not self.is_running:
             return
 
-        logger.info("正在停止 XWall...")
+        logger.info("正在停止 Graffito...")
         self.is_running = False
 
         # 停止 Web 后端
@@ -278,7 +278,7 @@ class XWallApp:
         # 关闭数据库
         await close_db()
 
-        logger.info("XWall 已停止")
+        logger.info("Graffito 已停止")
         
     def handle_signal(self, sig):
         """处理系统信号"""
@@ -322,12 +322,12 @@ async def main():
     """主函数"""
     logger.info("""
 ╔═══════════════════════════════════════════╗
-║                 XWall                     ║
+║               Graffito                    ║
 ║         校园墙自动运营系统                    ║
 ╚═══════════════════════════════════════════╝
     """)
     
-    app = XWallApp()
+    app = GraffitoApp()
     await app.run()
 
 

@@ -41,7 +41,7 @@ class DatabaseConfig(BaseModel):
 
     type: str = "sqlite"
 
-    url: str = "sqlite+aiosqlite:///./data/xwall.db"
+    url: str = "sqlite+aiosqlite:///./data/graffito.db"
 
     pool_size: int = 10
 
@@ -62,7 +62,7 @@ class CacheConfig(BaseModel):
     serializer: str = "json"
     
     # 命名空间（键前缀）
-    namespace: str = "xwall"
+    namespace: str = "graffito"
     
     # 默认 TTL（秒）
     ttl: int = 300
@@ -99,9 +99,9 @@ class QueueMySQLConfig(BaseModel):
 
     password: str = ""
 
-    database: str = "xwallqueue"
+    database: str = "graffito_queue"
 
-    table: str = "xwall_tasks"
+    table: str = "graffito_tasks"
 
 
 class QueueConfig(BaseModel):
@@ -364,8 +364,8 @@ class AuditConfig(BaseModel):
     skip_image_audit_over_mb: float = 0.0
 
 
-class XModeratorConfig(BaseModel):
-    """XModerator 举报审核配置"""
+class ChiselConfig(BaseModel):
+    """Chisel 举报审核配置"""
 
     enable: bool = True
 
@@ -446,7 +446,7 @@ class Settings(BaseSettings):
 
     audit: AuditConfig = AuditConfig()
 
-    xmoderator: XModeratorConfig = XModeratorConfig()
+    chisel: ChiselConfig = ChiselConfig()
 
     account_groups: Dict[str, AccountGroup] = Field(default_factory=dict)
 

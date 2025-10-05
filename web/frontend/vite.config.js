@@ -19,11 +19,11 @@ export default defineConfig(({ mode }) => {
       }),
       VitePWA({
         registerType: 'autoUpdate',
-        includeAssets: ['logo.png', 'apple-touch-icon.png', 'favicon.ico'],
+        includeAssets: ['logo.png', 'dark_logo.png', 'apple-touch-icon.png', 'favicon.ico'],
         manifest: {
-          name: 'XWall 审核后台',
-          short_name: 'XWall',
-          description: 'XWall 校园墙审核管理系统',
+          name: 'Graffito 审核后台',
+          short_name: 'Graffito',
+          description: 'Graffito 校园墙审核管理系统',
           theme_color: '#6366f1',
           background_color: '#0f172a',
           display: 'standalone',

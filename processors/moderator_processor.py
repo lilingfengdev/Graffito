@@ -1,4 +1,4 @@
-"""XModerator AI 审核处理器"""
+"""Chisel AI 审核处理器"""
 import json
 import logging
 from typing import Dict, Any, Optional
@@ -13,7 +13,7 @@ logger = logging.getLogger(__name__)
 
 
 class ModeratorProcessor:
-    """XModerator AI 审核处理器"""
+    """Chisel AI 审核处理器"""
     
     def __init__(self):
         """初始化处理器"""
@@ -25,8 +25,8 @@ class ModeratorProcessor:
         self.timeout = settings.llm.timeout or 30
         self.max_retry = settings.llm.max_retry or 3
         
-        # XModerator 配置
-        self.config = settings.xmoderator
+        # Chisel 配置
+        self.config = settings.chisel
         self.enabled = self.config.enable
         self.auto_delete = self.config.auto_delete
         self.auto_pass = self.config.auto_pass
@@ -44,8 +44,8 @@ class ModeratorProcessor:
             Dict: 处理结果
         """
         if not self.enabled:
-            logger.info("XModerator 功能未开启")
-            return {'success': False, 'message': 'XModerator 功能未开启'}
+            logger.info("Chisel 功能未开启")
+            return {'success': False, 'message': 'Chisel 功能未开启'}
         
         try:
             # 1. 获取投稿的 AI 总结

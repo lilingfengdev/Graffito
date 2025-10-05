@@ -52,7 +52,7 @@ class HTMLRenderer(ProcessorPlugin):
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>XWall 消息页</title>
+    <title>Graffito 消息页</title>
     <style>
         :root {
             /* 与前端设计系统保持一致的颜色和样式变量 */
@@ -594,7 +594,7 @@ class HTMLRenderer(ProcessorPlugin):
             watermark_text=watermark_text,
             show_avatar=show_avatar,
             render_time=datetime.now().strftime("%Y-%m-%d %H:%M"),
-            wall_mark=data.get('wall_mark') or 'XWall',
+            wall_mark=data.get('wall_mark') or 'Graffito',
             font_family=self.settings.rendering.font_family
         )
         
