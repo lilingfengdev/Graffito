@@ -1507,7 +1507,6 @@ async def get_stored_posts(group_name: Optional[str] = None, authorization: Opti
 
 @app.post("/management/stored-posts/publish")
 async def publish_stored_posts(group_name: str, authorization: Optional[str] = Header(default=None)):
-    payload = get_current_user_from_headers(authorization)
     
     try:
         from services.submission_service import SubmissionService

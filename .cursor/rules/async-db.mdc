@@ -1,28 +1,27 @@
 ---
 description: "异步数据库访问与会话管理约束"
 ---
-# 异步数据库访问与会话管理约束
 
-本文档规定了在 XWall 项目中访问异步数据库的最佳实践。
+# 异步数据库访问与会话管理
+
+本规则规定了 Graffito 项目中访问异步数据库的**强制性**约定。
 
 ## 1. 获取数据库实例
 
-- **单例模式**: 项目使用一个全局的数据库管理器。通过调用 `get_db()` 函数来获取其实例。
-  ```python
-  from core.database import get_db
+```python
+from core.database import get_db
 
-  async def my_function():
-      db = await get_db()
-      # ... use db instance
-  ```
-- **自动初始化**: `get_db()` 会在首次调用时自动初始化数据库连接和表结构，无需手动操作。
+async def my_function():
+    db = await get_db()  # 全局单例，自动初始化
+    # ... 使用 db
+```
 
-## 2. 会话管理
+- **单例模式**: 通过 `get_db()` 获取全局数据库管理器
+- **自动初始化**: 首次调用时自动初始化连接和表结构
 
-- **使用 `async with`**: 所有数据库操作都必须在 `db.get_session()` 的异步上下文管理器中执行。这能确保会话被正确地创建、提交、回滚和关闭。
-- **严禁手动管理会话**: 不要手动创建 `AsyncSession` 实例，也不要手动调用 `session.commit()`、`session.rollback()` 或 `session.close()`。`get_session()` 上下文管理器会自动处理这一切。
+## 2. 会话管理 (强制规范)
 
-### 正确示例：
+### ✅ 正确做法
 
 ```python
 from core.database import get_db
@@ -37,27 +36,68 @@ async def get_submission(submission_id: int) -> Submission | None:
         return result.scalar_one_or_none()
 ```
 
-### 错误示例：
+**关键点**:
+- 使用 `async with db.get_session()` 上下文管理器
+- 所有数据库操作在 `async with` 块内完成
+- 自动提交（成功时）和回滚（异常时）
+
+### ❌ 错误做法
 
 ```python
 # 错误：手动创建会话
 session = db.async_session()
-# ...
-await session.commit() # 错误：手动提交
-await session.close()  # 错误：手动关闭
+await session.commit()   # 不要手动提交
+await session.close()    # 不要手动关闭
 ```
+
+**禁止**:
+- 手动创建 `AsyncSession` 实例
+- 手动调用 `session.commit()` / `session.rollback()` / `session.close()`
 
 ## 3. CRUD 操作
 
-- **使用 ORM**: 优先使用 SQLAlchemy ORM 进行数据库操作。
-- **添加对象**: `session.add(my_object)`
-- **查询对象**: `await session.execute(select(...))`
-- **删除对象**: `await session.delete(my_object)`
+```python
+async with db.get_session() as session:
+    # 添加对象
+    session.add(my_object)
+    
+    # 查询对象
+    stmt = select(Submission).where(Submission.status == "PENDING")
+    result = await session.execute(stmt)
+    submissions = result.scalars().all()
+    
+    # 删除对象
+    await session.delete(my_object)
+    
+    # 块结束时自动提交
+```
 
-- **事务性**: `get_session()` 的 `async with` 块内的所有操作都在一个事务中。如果块内代码成功执行完毕，事务会自动提交。如果发生异常，事务会自动回滚。
+**事务性**: 
+- `async with` 块内的所有操作在同一事务中
+- 块成功执行完毕 → 自动提交
+- 发生异常 → 自动回滚
 
-## 4. 注意事项
+## 4. 性能优化
 
-- **避免循环导入**: 在服务层或业务逻辑代码中，有时直接导入 `core.models` 可能会导致循环导入。如果遇到这种情况，可以在函数内部进行局部导入，如 `core/database.py` 中的 `fetch_submission_by_id` 所示。
-- **性能**: 对于复杂的查询，可以使用 `selectinload` 或 `joinedload` 来优化关联对象的加载。
+### 关联对象加载
 
+```python
+from sqlalchemy.orm import selectinload
+
+stmt = select(Submission).options(
+    selectinload(Submission.publish_records)
+).where(Submission.id == submission_id)
+```
+
+使用 `selectinload` 或 `joinedload` 优化 N+1 查询问题。
+
+## 5. 注意事项
+
+- **避免循环导入**: 如果遇到循环导入，在函数内部进行局部导入
+- **不要跨上下文使用对象**: 会话外的 ORM 对象可能导致 `DetachedInstanceError`
+- **长时间操作**: 对于长时间运行的任务，避免持有会话过久
+
+## 相关文件
+
+- 数据库管理: [core/database.py](mdc:core/database.py)
+- 数据模型: [core/models.py](mdc:core/models.py)

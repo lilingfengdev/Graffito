@@ -1,79 +1,200 @@
 ---
-description: "处理器数据契约（LLM -> HTML -> Content 渲染）"
+description: "处理器数据契约（LLM → HTML → Content 渲染）"
+globs: "processors/*.py"
 ---
+
 # 处理器数据契约
 
-本规则定义了在 [`processors/pipeline.py`](mdc:processors/pipeline.py) 中，数据在不同处理器之间流转时所遵循的数据结构和约定。
+本规则定义了 Graffito 项目中 [processors/pipeline.py](mdc:processors/pipeline.py) 数据在不同处理器之间流转的数据结构。
 
-## 核心数据结构
+## 核心数据流
 
-处理管道的核心是一个名为 `data` 的 Python 字典，它在各个处理阶段之间传递和扩充。
+处理管道使用一个名为 `data` 的 Python 字典在各阶段之间传递和扩充数据。
+
+```
+初始数据 → LLMProcessor → HTMLRenderer → ContentRenderer → 写回数据库
+          (消息筛选)     (HTML生成)      (图片渲染)
+```
 
 ## 1. 管道初始数据
 
-在调用 `LLMProcessor` 之前，`ProcessingPipeline` 会构建一个初始的 `data` 字典，其结构如下：
+在调用 `LLMProcessor` 之前，`ProcessingPipeline` 构建初始 `data` 字典：
 
 ```python
 {
     "submission_id": int,          # 投稿ID
-    "sender_id": str,              # 发送者ID
+    "sender_id": str,              # 发送者ID（QQ号）
     "nickname": str,               # 发送者昵称
-    "messages": list[dict],        # 从 MessageCache 或 raw_content 中获取的原始消息列表
-    "is_anonymous": bool,          # 初始匿名状态
-    "watermark_text": str,         # 水印文本
-    "wall_mark": str               # 墙标文本
+    "messages": list[dict],        # 原始消息列表（从 MessageCache 或 raw_content）
+    "is_anonymous": bool,          # 是否匿名
+    "watermark_text": str,         # 水印文本（如"投稿编号 #123"）
+    "wall_mark": str               # 墙标识（如"树洞"）
 }
 ```
 
-## 2. `LLMProcessor` 阶段
+## 2. LLMProcessor 阶段
 
--   **输入**: 初始 `data` 字典。
--   **处理**:
-    1.  对消息中的图片进行安全审核和内容描述。
-    2.  调用大语言模型（LLM）对消息进行分组、审核和内容提取。
--   **输出 (对 `data` 字典的修改)**:
-    -   `data['messages']`: 更新为 LLM 判断属于最后一组投稿的消息列表。
-    -   `data['is_anonymous']`: 根据 LLM 判断更新。
-    -   `data['llm_result']`: 新增字段，包含 LLM 的详细分析结果。
-        ```json
-        {
-          "needpriv": "true" | "false",
-          "safemsg": "true" | "false",
-          "isover": "true" | "false",
-          "notregular": "true" | "false",
-          "messages": [ ... ], // 筛选后的消息ID列表
-          "segments": [ "文本片段1", "文本片段2" ] // 提取的文本段落
-        }
-        ```
+**文件**: [processors/llm_processor.py](mdc:processors/llm_processor.py)
 
--   **副作用**: `Submission` 表中的 `llm_result`, `is_anonymous`, `is_safe`, `is_complete` 字段会被更新。
+### 输入
+初始 `data` 字典。
 
-## 3. `HTMLRenderer` 阶段
+### 处理
+1. 对消息中的图片进行安全审核
+2. 调用 LLM 进行消息分组和内容提取
+3. 筛选属于当前投稿的消息
 
--   **输入**: 经过 `LLMProcessor` 处理后的 `data` 字典。
--   **处理**:
-    1.  使用 Jinja2 模板将 `data['messages']` 渲染成一个 HTML 字符串。
-    2.  在渲染过程中，提取所有可点击的链接。
--   **输出 (对 `data` 字典的修改)**:
-    -   `data['rendered_html']`: 新增字段，包含渲染出的完整 HTML 内容。
-    -   `data['extracted_links']`: 新增字段，包含从消息中提取的所有 URL 列表。
+### 输出（修改 data 字典）
 
-## 4. `ContentRenderer` 阶段
+```python
+{
+    # 更新字段
+    "messages": [...],         # 筛选后的消息列表（仅属于当前投稿的）
+    "is_anonymous": bool,      # 根据 LLM 判断更新
+    
+    # 新增字段
+    "llm_result": {
+        "needpriv": "true" | "false",      # 是否需要匿名
+        "safemsg": "true" | "false",       # 是否安全
+        "isover": "true" | "false",        # 投稿是否完整
+        "notregular": "true" | "false",    # 是否为非常规投稿
+        "messages": [1, 2, 3],             # 筛选后的消息ID列表
+        "segments": ["文本1", "文本2"]      # 提取的文本段落
+    }
+}
+```
 
--   **输入**: 经过 `HTMLRenderer` 处理后的 `data` 字典。
--   **处理**:
-    1.  使用 Playwright (无头浏览器) 加载 `data['rendered_html']`。
-    2.  将 HTML 页面截图，并根据内容高度可能分页生成多张图片。
--   **输出 (对 `data` 字典的修改)**:
-    -   `data['rendered_images']`: 新增字段，包含一个或多个渲染后图片的本地文件路径列表。
+### 副作用（写入数据库）
 
-## 5. 管道结束
+更新 `Submission` 表字段：
+- `llm_result`: JSON 字符串
+- `is_anonymous`: 布尔值
+- `is_safe`: 布尔值
+- `is_complete`: 布尔值
 
-`ContentRenderer` 执行完毕后，`ProcessingPipeline` 会将最终结果写回数据库：
+## 3. HTMLRenderer 阶段
 
--   更新 `Submission.rendered_images`。
--   更新 `Submission.processed_content` (包含文本、HTML 和链接)。
--   更新 `Submission.processed_at` 时间戳。
--   将 `Submission.status` 设置为 `WAITING`，等待发布。
--   清理该用户对应的 `MessageCache`。
+**文件**: [processors/html_renderer.py](mdc:processors/html_renderer.py)
 
+### 输入
+经过 `LLMProcessor` 处理后的 `data` 字典。
+
+### 处理
+1. 使用 Jinja2 模板将 `data['messages']` 渲染为 HTML
+2. 提取消息中的链接（http/https URL）
+3. 处理各类消息类型（文本、图片、文件、表情等）
+
+### 输出（修改 data 字典）
+
+```python
+{
+    # 新增字段
+    "rendered_html": str,              # 完整的 HTML 字符串
+    "extracted_links": list[str]       # 提取的链接列表
+}
+```
+
+### HTML 模板
+
+模板文件: `templates/message.html.j2`
+
+**模板变量**:
+- `messages`: 消息列表
+- `nickname`: 昵称（匿名时为空）
+- `watermark_text`: 水印
+- `wall_mark`: 墙标识
+- `static_base_url`: 静态资源 URL
+
+## 4. ContentRenderer 阶段
+
+**文件**: [processors/content_renderer.py](mdc:processors/content_renderer.py)
+
+### 输入
+经过 `HTMLRenderer` 处理后的 `data` 字典。
+
+### 处理
+1. 使用 Playwright (无头浏览器) 加载 `data['rendered_html']`
+2. 截图并根据内容高度自动分页
+3. 生成 PNG 图片
+
+### 输出（修改 data 字典）
+
+```python
+{
+    # 新增字段
+    "rendered_images": [
+        "data/cache/rendered/123/page_01.png",
+        "data/cache/rendered/123/page_02.png",
+        # ...
+    ]
+}
+```
+
+### 分页规则
+
+- **触发条件**: 内容高度 > `page_height` (默认 4000px)
+- **最大高度**: `max_height` (默认 12000px)
+- **命名格式**: `page_01.png`, `page_02.png`, ...
+
+## 5. 管道完成后
+
+`ProcessingPipeline.process_submission()` 将最终结果写回数据库：
+
+```python
+# 更新 Submission 表
+submission.rendered_images = data["rendered_images"]  # 图片路径列表
+submission.processed_content = {
+    "text": data["llm_result"]["segments"],
+    "html": data["rendered_html"],
+    "links": data["extracted_links"]
+}
+submission.processed_at = datetime.now()
+submission.status = SubmissionStatus.WAITING
+
+# 清理消息缓存
+await delete_message_cache(sender_id, receiver_id)
+```
+
+## 数据示例
+
+### 完整的 data 字典（处理完成后）
+
+```python
+{
+    # 初始数据
+    "submission_id": 123,
+    "sender_id": "1234567890",
+    "nickname": "张三",
+    "messages": [...],
+    "is_anonymous": False,
+    "watermark_text": "投稿编号 #123",
+    "wall_mark": "树洞",
+    
+    # LLM 阶段添加
+    "llm_result": {
+        "needpriv": "false",
+        "safemsg": "true",
+        "isover": "true",
+        "notregular": "false",
+        "messages": [1, 2, 3],
+        "segments": ["这是第一段", "这是第二段"]
+    },
+    
+    # HTML 阶段添加
+    "rendered_html": "<html>...</html>",
+    "extracted_links": ["https://example.com"],
+    
+    # Content 阶段添加
+    "rendered_images": [
+        "data/cache/rendered/123/page_01.png"
+    ]
+}
+```
+
+## 相关文件
+
+- 处理管道: [processors/pipeline.py](mdc:processors/pipeline.py)
+- LLM 处理器: [processors/llm_processor.py](mdc:processors/llm_processor.py)
+- HTML 渲染器: [processors/html_renderer.py](mdc:processors/html_renderer.py)
+- 内容渲染器: [processors/content_renderer.py](mdc:processors/content_renderer.py)
+- 数据模型: [core/models.py](mdc:core/models.py)

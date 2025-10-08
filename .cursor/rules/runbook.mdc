@@ -1,95 +1,214 @@
 ---
 description: "本地运行与常见操作手册"
 ---
-# 本地运行与常见操作手册
 
-本手册指导如何在本地环境部署和运行 XWall 系统。
+# Graffito 本地运行与操作手册
 
 ## 1. 环境要求
 
-- Python 3.9 或更高版本。
+- **Python**: 3.9 或更高版本
+- **系统**: Windows / Linux / macOS
 
-## 2. 安装步骤
+## 2. 快速启动
 
-首次运行时，启动脚本会自动处理大部分安装步骤。
+### Windows
 
-### a. 创建虚拟环境与安装依赖
-
-直接运行启动脚本即可自动创建虚拟环境并安装所需依赖。
-
-- **Windows**:
-  ```shell
-  .\start.bat
-  ```
-- **Linux / macOS**:
-  ```shell
-  chmod +x start.sh
-  ./start.sh
-  ```
-
-脚本会自动在项目根目录创建 `venv` 文件夹，并从 [`requirements.txt`](mdc:requirements.txt) 安装依赖包，同时会安装 Playwright 所需的浏览器核心。
-
-### b. 手动安装 (可选)
-
-如果你想手动进行安装：
-
-1.  创建虚拟环境:
-    ```shell
-    python -m venv venv
-    ```
-2.  激活虚拟环境:
-    - Windows: `.\venv\Scripts\activate`
-    - Linux/macOS: `source venv/bin/activate`
-3.  安装依赖:
-    ```shell
-    pip install -r requirements.txt
-    playwright install chromium
-    ```
-
-## 3. 配置
-
-1.  **主配置文件**:
-    首次运行 [`start.sh`](mdc:start.sh) 时，系统会自动将 [`config/config.example.yaml`](mdc:config/config.example.yaml) 复制为 `config/config.yaml`。你需要根据自己的需求修改 `config/config.yaml` 文件中的配置项。
-    对于 Windows 用户，需要手动复制并重命名该文件。
-
-2.  **环境变量**:
-    可以创建一个 `.env` 文件来配置环境变量，例如 `DEBUG` 或 `LOG_LEVEL`。[`start.sh`](mdc:start.sh) 支持通过 `-d` 或 `--debug` 参数来进入调试模式。
-
-## 4. 运行系统
-
-### a. 初始化数据库
-
-如果 `data/xwall.db` 数据库文件不存在，启动脚本会自动初始化数据库。
-你也可以手动或强制初始化数据库：
-
-```shell
-# 激活虚拟环境后运行
-python cli.py db-init
+```powershell
+.\start.bat
 ```
-或者通过启动脚本参数：
-- Windows: `.\start.bat --init-db`
-- Linux/macOS: `./start.sh --init-db`
 
-### b. 启动主程序
+### Linux / macOS
 
-配置完成后，再次运行启动脚本即可启动 XWall：
+```bash
+chmod +x start.sh
+./start.sh
+```
 
-- **Windows**:
-  ```shell
-  .\start.bat
-  ```
-- **Linux / macOS**:
-  ```shell
-  ./start.sh
-  ```
-  
-程序将通过 [`main.py`](mdc:main.py) 启动，并加载 FastAPI 服务。
+启动脚本会自动完成：
+1. 创建 `venv` 虚拟环境
+2. 安装 `requirements.txt` 中的依赖
+3. 安装 Playwright 浏览器核心
+4. 初始化数据库（如果不存在）
+5. 启动主程序
 
-## 5. 常见操作
+## 3. 配置文件
 
-- **强制重新初始化数据库**: `python cli.py db-init` (会清空现有数据)。
-- **登录平台账号**:
-  - Bilibili: 运行 [`bilibili_login_tool.py`](mdc:bilibili_login_tool.py)
-  - 小红书: 运行 [`rednote_login_tool.py`](mdc:rednote_login_tool.py)
-  - QQ空间: Cookies 需要手动获取并配置。
+首次运行时，需要配置以下文件：
 
+### 主配置
+
+```bash
+# 复制示例配置
+cp config/config.example.yaml config/config.yaml
+
+# 编辑配置
+vim config/config.yaml
+```
+
+**关键配置项**:
+- `llm.api_key`: OpenAI API 密钥（从环境变量 `${OPENAI_API_KEY}` 读取）
+- `database.url`: 数据库连接串（默认使用 SQLite）
+- `web.jwt_secret_key`: JWT 密钥（必须修改）
+- `account_groups`: QQ 账号组配置
+
+### 环境变量 (.env)
+
+```bash
+# 创建 .env 文件
+OPENAI_API_KEY=sk-xxxxx
+OPENAI_BASE_URL=https://api.openai.com/v1
+DEBUG=false
+LOG_LEVEL=INFO
+```
+
+**注意**: `.env` 文件不应提交到版本控制。
+
+## 4. 数据库操作
+
+### 初始化数据库
+
+```bash
+# 方式 1: 使用 CLI
+python cli.py db-init
+
+# 方式 2: 使用启动脚本参数
+.\start.bat --init-db        # Windows
+./start.sh --init-db         # Linux/macOS
+```
+
+**警告**: 此操作会清空现有数据！
+
+### 数据库位置
+
+- 默认路径: `data/xwall.db` (SQLite)
+- 可在 `config.yaml` 中修改
+
+## 5. 平台登录
+
+### 哔哩哔哩
+
+```bash
+python bilibili_login_tool.py
+```
+
+按提示完成登录，Cookies 会自动保存。
+
+### 小红书
+
+```bash
+python rednote_login_tool.py
+```
+
+按提示完成登录，凭证会自动保存。
+
+### QQ 空间
+
+QQ 空间需要手动获取 Cookies：
+1. 使用浏览器登录 QQ 空间
+2. 打开开发者工具 → Network → 找到请求
+3. 复制 Cookies 到 `config/publishers/qzone.yml`
+
+## 6. 渲染服务（可选）
+
+如果使用远程渲染后端，需要单独启动渲染服务：
+
+### Windows
+
+```powershell
+.\render.bat
+```
+
+### Linux / macOS
+
+```bash
+chmod +x render.sh
+./render.sh
+```
+
+渲染服务默认监听 `http://localhost:8084`。
+
+## 7. 常见问题
+
+### Playwright 安装失败
+
+```bash
+# 手动安装 Playwright 浏览器
+python -m playwright install chromium
+```
+
+### 数据库连接错误
+
+检查 `config/config.yaml` 中的 `database.url` 配置是否正确。
+
+### 依赖冲突
+
+```bash
+# 清理虚拟环境重新安装
+rm -rf venv
+.\start.bat  # 重新运行启动脚本
+```
+
+### 端口占用
+
+- 主服务默认端口: `8083` (Web API)
+- 渲染服务默认端口: `8084`
+
+可在 `config.yaml` 中修改：
+
+```yaml
+web:
+  port: 8083  # 修改此处
+
+rendering:
+  backend_config:
+    render_service_url: "http://localhost:8084"  # 如果使用远程渲染
+```
+
+## 8. 调试模式
+
+```bash
+# Linux/macOS
+./start.sh --debug
+
+# 或设置环境变量
+export DEBUG=true
+./start.sh
+```
+
+调试模式会：
+- 设置日志级别为 `DEBUG`
+- 启用详细的错误堆栈
+- 关闭某些缓存
+
+## 9. 命令行工具 (CLI)
+
+```bash
+# 初始化数据库
+python cli.py db-init
+
+# 创建管理员账号
+python cli.py create-admin --username admin --password yourpassword
+
+# 查看投稿统计
+python cli.py stats
+
+# 清理过期缓存
+python cli.py clean-cache
+```
+
+## 10. 日志文件
+
+- 主服务日志: `data/logs/xwall_YYYY-MM-DD.log`
+- 渲染服务日志: `logs/render_service_YYYY-MM-DD_HH-MM-SS_PID.log`
+
+日志轮转策略：
+- 每天午夜自动轮转
+- 保留 30 天
+
+## 相关文件
+
+- 启动脚本: [start.bat](mdc:start.bat) / [start.sh](mdc:start.sh)
+- 渲染脚本: [render.bat](mdc:render.bat) / [render.sh](mdc:render.sh)
+- 主程序: [main.py](mdc:main.py)
+- CLI 工具: [cli.py](mdc:cli.py)
+- 配置文件: [config/config.yaml](mdc:config/config.yaml)
