@@ -56,12 +56,11 @@ qrcode>=7.4.2
 httpx>=0.25.0
 linkify-it-py>=2.0.3
 humanfriendly>=10.0
-orjson>=3.9.10
 psutil>=5.9.0
 
 # 认证
 PyJWT>=2.10.1
-passlib[bcrypt]>=1.7.4
+bcrypt>=4.0.0
 
 # ==================== CLI ====================
 click>=8.1.0

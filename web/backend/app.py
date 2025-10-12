@@ -12,8 +12,8 @@ from datetime import datetime, timedelta
 from pathlib import Path
 from typing import Optional, List, Dict, Any
 import asyncio
+import json
 
-import orjson
 from slowapi import Limiter
 from slowapi.errors import RateLimitExceeded
 from slowapi.middleware import SlowAPIMiddleware
@@ -24,7 +24,7 @@ from fastapi.responses import JSONResponse, StreamingResponse
 from fastapi.staticfiles import StaticFiles
 
 import jwt
-from passlib.context import CryptContext
+import bcrypt
 
 from pydantic import BaseModel
 
@@ -42,9 +42,6 @@ import re
 
 
 # Security helpers
-pwd_context = CryptContext(schemes=["bcrypt"], deprecated="auto")
-
-
 def create_access_token(data: dict, expires_delta_minutes: int) -> str:
     settings = get_settings()
     to_encode = data.copy()
@@ -54,11 +51,15 @@ def create_access_token(data: dict, expires_delta_minutes: int) -> str:
 
 
 def verify_password(plain_password: str, hashed_password: str) -> bool:
-    return pwd_context.verify(plain_password, hashed_password)
+    """验证密码"""
+    return bcrypt.checkpw(plain_password.encode('utf-8'), hashed_password.encode('utf-8'))
 
 
 def hash_password(password: str) -> str:
-    return pwd_context.hash(password)
+    """哈希密码"""
+    salt = bcrypt.gensalt()
+    hashed = bcrypt.hashpw(password.encode('utf-8'), salt)
+    return hashed.decode('utf-8')
 
 
 # Pydantic schemas
@@ -90,8 +91,8 @@ class RegisterViaInviteIn(BaseModel):
     display_name: Optional[str] = None
 
 
-def orjson_dumps(v, *, default):
-    return orjson.dumps(v, default=default).decode()
+def json_dumps(v, *, default):
+    return json.dumps(v, default=default)
 
 
 settings = get_settings()
@@ -2334,14 +2335,14 @@ async def event_stream_generator(queue: asyncio.Queue):
     """SSE 事件流生成器"""
     try:
         # 发送初始连接成功消息
-        yield f"data: {orjson.dumps({'type': 'connected', 'data': {}, 'timestamp': datetime.now().isoformat()}).decode()}\n\n"
+        yield f"data: {json.dumps({'type': 'connected', 'data': {}, 'timestamp': datetime.now().isoformat()})}\n\n"
         
         # 持续发送事件
         while True:
             try:
                 # 等待新消息，超时发送心跳
                 message = await asyncio.wait_for(queue.get(), timeout=30.0)
-                yield f"data: {orjson.dumps(message).decode()}\n\n"
+                yield f"data: {json.dumps(message)}\n\n"
             except asyncio.TimeoutError:
                 # 发送心跳保持连接
                 yield f": heartbeat\n\n"

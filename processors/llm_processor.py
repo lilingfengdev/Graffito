@@ -1,5 +1,5 @@
 """LLM处理器 - 重构版本"""
-import orjson
+import json
 import asyncio
 import os
 import time
@@ -290,8 +290,8 @@ class LLMProcessor(ProcessorPlugin):
     
     def _prepare_messages_for_llm(self, messages: List[Dict[str, Any]]) -> Tuple[List[Dict], List[Dict]]:
         """准备LLM输入：清理敏感字段"""
-        original = orjson.loads(orjson.dumps(messages))
-        cleaned = orjson.loads(orjson.dumps(messages))
+        original = json.loads(json.dumps(messages))
+        cleaned = json.loads(json.dumps(messages))
         
         for msg in self._iter_message_nodes(cleaned):
             msg_type = msg.get('type')
@@ -327,7 +327,7 @@ class LLMProcessor(ProcessorPlugin):
     async def _analyze_with_llm(self, messages: List[Dict], notregular: Any) -> Dict[str, Any]:
         """调用LLM分析投稿"""
         input_data = {"notregular": notregular, "messages": messages}
-        input_json = orjson.dumps(input_data, option=orjson.OPT_INDENT_2).decode()
+        input_json = json.dumps(input_data, ensure_ascii=False, indent=2)
         
         prompt = f"""当前时间 {time.time()}
 以下内容是一组按时间顺序排列的校园墙投稿聊天记录：
@@ -439,7 +439,7 @@ class LLMProcessor(ProcessorPlugin):
                 if chunk.choices[0].delta.content:
                     text += chunk.choices[0].delta.content
             
-            return orjson.loads(text.strip())
+            return json.loads(text.strip())
             
         except Exception as e:
             self.logger.error(f"LLM调用失败: {e}")
@@ -468,7 +468,7 @@ class LLMProcessor(ProcessorPlugin):
 
     def _clean_for_output(self, message: Dict) -> Dict:
         """清理输出消息（仅移除永久删除的字段）"""
-        cleaned = orjson.loads(orjson.dumps(message))
+        cleaned = json.loads(json.dumps(message))
         
         for msg in self._iter_message_nodes([cleaned]):
             for field in self.remove_rules.get('global', []):

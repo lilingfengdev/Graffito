@@ -7,6 +7,7 @@
 """
 from pathlib import Path
 from typing import Any, Dict, List, Optional
+import json
 
 import httpx
 from loguru import logger
@@ -14,7 +15,6 @@ from loguru import logger
 from publishers.base import BasePublisher
 from core.enums import PublishPlatform
 from .api import BilibiliAPI
-import orjson
 
 
 class BilibiliPublisher(BasePublisher):
@@ -60,7 +60,7 @@ class BilibiliPublisher(BasePublisher):
             if p.stat().st_size == 0:
                 self.logger.error(f"B站 cookie 文件为空: {cookie_file_path}")
                 return False
-            cookies = orjson.loads(p.read_bytes())
+            cookies = json.loads(p.read_text(encoding='utf-8'))
             # 支持两种格式：{'SESSDATA': '...', 'bili_jct': '...'} 或 [{name, value}...]
             if isinstance(cookies, dict):
                 normalized = cookies

@@ -1,5 +1,5 @@
 """HTML渲染器"""
-import orjson as json
+import json
 from pathlib import Path
 from typing import Dict, Any, List, Optional
 from datetime import datetime

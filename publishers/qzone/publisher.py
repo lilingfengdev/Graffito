@@ -6,7 +6,7 @@
 - 通过 NapCat 本地接口获取/刷新 cookies（仅当无效或缺失时）
 - 发布说说与追加评论
 """
-import orjson
+import json
 import asyncio
 import base64
 from pathlib import Path
@@ -55,8 +55,8 @@ class QzonePublisher(BasePublisher):
         
         if cookie_file.exists() and cookie_file.stat().st_size > 0:
             try:
-                data = cookie_file.read_bytes()
-                cookies = orjson.loads(data)
+                data = cookie_file.read_text(encoding='utf-8')
+                cookies = json.loads(data)
                 self.cookies[account_id] = cookies
                 self.api_clients[account_id] = create_qzone_api(cookies)
                 self.logger.info(f"加载cookies成功: {account_id}")
@@ -71,7 +71,7 @@ class QzonePublisher(BasePublisher):
         cookie_file = Path(f"data/cookies/qzone_{account_id}.json")
         cookie_file.parent.mkdir(parents=True, exist_ok=True)
         
-        cookie_file.write_bytes(orjson.dumps(cookies))
+        cookie_file.write_text(json.dumps(cookies, ensure_ascii=False, indent=2), encoding='utf-8')
             
         self.cookies[account_id] = cookies
         self.api_clients[account_id] = create_qzone_api(cookies)

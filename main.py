@@ -33,10 +33,6 @@ file_handler_id = logger.add(
 import os
 os.environ["GRAFFITO_LOG_CONFIGURED"] = "true"
 
-# 忽略 passlib 的 bcrypt 版本读取警告
-import logging
-logging.getLogger('passlib').setLevel(logging.ERROR)
-
 from config import get_settings
 from core.database import get_db, close_db
 from core.cache_client import get_cache, close_cache

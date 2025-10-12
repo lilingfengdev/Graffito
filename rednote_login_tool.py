@@ -15,8 +15,7 @@ from pathlib import Path
 from typing import Any, Dict, List, Optional
 
 import sys
-
-import orjson
+import json
 
 
 def prompt(msg: str) -> str:
@@ -62,7 +61,7 @@ async def login_and_save(account_id: str, headless: bool = False, user_agent: Op
 
         cookies = await context.cookies()
         cookie_path = ensure_cookie_dir() / f"rednote_{account_id}.json"
-        cookie_path.write_bytes(orjson.dumps(cookies))
+        cookie_path.write_text(json.dumps(cookies, ensure_ascii=False, indent=2), encoding='utf-8')
         print(f"Cookies 已保存至: {cookie_path}")
         await browser.close()
         return ok
@@ -155,7 +154,7 @@ async def import_cookie_and_save(account_id: str, validate: bool = True) -> bool
                     cookies = await context.cookies()
                     await browser.close()
                     cookie_path = ensure_cookie_dir() / f"rednote_{account_id}.json"
-                    cookie_path.write_bytes(orjson.dumps(cookies))
+                    cookie_path.write_text(json.dumps(cookies, ensure_ascii=False, indent=2), encoding='utf-8')
                     print(f"Cookies 已保存至: {cookie_path}")
                     return ok
                 except Exception as e:
@@ -164,7 +163,7 @@ async def import_cookie_and_save(account_id: str, validate: bool = True) -> bool
 
     # Save as-is (unverified)
     cookie_path = ensure_cookie_dir() / f"rednote_{account_id}.json"
-    cookie_path.write_bytes(orjson.dumps(cookies))
+    cookie_path.write_text(json.dumps(cookies, ensure_ascii=False, indent=2), encoding='utf-8')
     print(f"Cookies 已保存至: {cookie_path}")
     return True
 
