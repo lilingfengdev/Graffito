@@ -411,12 +411,14 @@ class AccountGroup(BaseModel):
 
     wall_mark: str = ""
 
+    # 好友添加成功后的欢迎消息（支持多行文本，使用 | 符号表示多行）
     friend_add_message: str = "你好，欢迎投稿"
 
+    # 快捷回复配置（关键词 -> 回复内容）
     quick_replies: Dict[str, str] = Field(default_factory=dict)
 
     # 是否启用 #评论 指令（投稿者可私聊追加评论到已发布平台）
-
+    # 如果为 True，评论时不暴露投稿者身份到外部平台（内部审核日志可见）
     allow_anonymous_comment: bool = True
 
 

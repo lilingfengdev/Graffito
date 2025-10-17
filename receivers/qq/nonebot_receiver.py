@@ -2288,7 +2288,11 @@ class QQReceiver(BaseReceiver):
 
                     self.logger.info(f"已记录用户反馈: uid={user_id}, group={group_name}")
 
-                    await self.send_private_message(user_id, "感谢反馈，我们已记录")
+                    await self.send_private_message(
+                        user_id, 
+                        "✅ 感谢反馈，我们已记录！\n\n"
+                        "您的反馈对我们很重要，我们会认真处理。"
+                    )
 
 
 
@@ -2296,7 +2300,10 @@ class QQReceiver(BaseReceiver):
 
                     self.logger.error(f"保存反馈失败: {e}", exc_info=True)
 
-                    await self.send_private_message(user_id, "反馈保存失败，请稍后重试")
+                    await self.send_private_message(
+                        user_id, 
+                        "❌ 反馈保存失败，请稍后重试"
+                    )
 
                 return True
 
@@ -2320,7 +2327,10 @@ class QQReceiver(BaseReceiver):
                     # 检查 Chisel 是否开启
                     settings = get_settings()
                     if not settings.chisel.enable:
-                        await self.send_private_message(user_id, "举报功能未开启")
+                        await self.send_private_message(
+                            user_id, 
+                            "❌ 举报失败\n\n举报功能未开启"
+                        )
                         return True
 
                     group_name = self._resolve_group_name_by_self_id(self_id) or "unknown"
@@ -2335,7 +2345,11 @@ class QQReceiver(BaseReceiver):
                     )
 
                     if not report:
-                        await self.send_private_message(user_id, f"举报失败：投稿 {publish_id} 不存在或已被删除")
+                        await self.send_private_message(
+                            user_id, 
+                            f"❌ 举报失败\n\n"
+                            f"投稿 #{publish_id} 不存在或已被删除"
+                        )
                         return True
 
                     # 获取 submission 对象用于后续处理
@@ -2347,13 +2361,18 @@ class QQReceiver(BaseReceiver):
                         submission = result.scalar_one_or_none()
 
                     if not submission:
-                        await self.send_private_message(user_id, "系统错误：投稿信息获取失败")
+                        await self.send_private_message(
+                            user_id, 
+                            "❌ 系统错误\n\n投稿信息获取失败，请稍后重试"
+                        )
                         return True
 
                     # 通知用户举报已收到
                     await self.send_private_message(
                         user_id,
-                        "【系统回复】\n\n您的举报已收到，正在处理中..."
+                        f"✅ 举报已收到\n\n"
+                        f"📝 投稿编号: #{publish_id}\n"
+                        f"🔍 我们的 AI 正在审核您的举报，请耐心等待..."
                     )
 
                     self.logger.info(f"用户 {user_id} 举报投稿 {publish_id}（内部ID: {submission.id}）, 举报ID={report.id}")
@@ -2363,7 +2382,10 @@ class QQReceiver(BaseReceiver):
 
                 except Exception as e:
                     self.logger.error(f"处理举报失败: {e}", exc_info=True)
-                    await self.send_private_message(user_id, "举报处理失败，请稍后重试")
+                    await self.send_private_message(
+                        user_id, 
+                        "❌ 举报处理失败\n\n请稍后重试，或使用 #反馈 指令联系我们"
+                    )
 
                 return True
 
@@ -2378,7 +2400,11 @@ class QQReceiver(BaseReceiver):
                 sid = await self._resolve_submission_id_by_any(raw_id)
 
                 if sid is None:
-                    await self.send_private_message(user_id, "错误：未找到该编号对应的投稿")
+                    await self.send_private_message(
+                        user_id, 
+                        f"❌ 删除失败\n\n"
+                        f"未找到编号 #{raw_id} 对应的投稿"
+                    )
 
                     return True
 
@@ -2399,17 +2425,26 @@ class QQReceiver(BaseReceiver):
                     sub = r.scalar_one_or_none()
 
                     if not sub:
-                        await self.send_private_message(user_id, "错误：投稿不存在")
+                        await self.send_private_message(
+                            user_id, 
+                            "❌ 删除失败\n\n投稿不存在"
+                        )
 
                         return True
 
                     if str(sub.sender_id) != str(user_id):
-                        await self.send_private_message(user_id, "错误：只能删除自己的投稿")
+                        await self.send_private_message(
+                            user_id, 
+                            "❌ 删除失败\n\n只能删除自己的投稿"
+                        )
 
                         return True
 
                 if not self.submission_service:
-                    await self.send_private_message(user_id, "服务暂不可用，请稍后再试")
+                    await self.send_private_message(
+                        user_id, 
+                        "❌ 服务暂不可用\n\n请稍后再试"
+                    )
 
                     return True
 
@@ -2417,13 +2452,27 @@ class QQReceiver(BaseReceiver):
 
                     res = await self.submission_service.delete_submission(sid)
 
-                    await self.send_private_message(user_id, res.get("message", "操作完成"))
+                    # 优化删除成功的提示
+                    if res.get("success"):
+                        display_id = sub.publish_id if sub.publish_id else sid
+                        await self.send_private_message(
+                            user_id, 
+                            f"✅ 删除成功\n\n投稿 #{display_id} 已删除"
+                        )
+                    else:
+                        await self.send_private_message(
+                            user_id, 
+                            res.get("message", "操作完成")
+                        )
 
 
 
                 except Exception:
 
-                    await self.send_private_message(user_id, "未能删除，请稍后再试")
+                    await self.send_private_message(
+                        user_id, 
+                        "❌ 删除失败\n\n请稍后再试，或使用 #反馈 指令联系我们"
+                    )
 
                 return True
 
@@ -2439,14 +2488,20 @@ class QQReceiver(BaseReceiver):
             submission_id = await self._resolve_submission_id_by_any(raw_id)
 
             if submission_id is None:
-                await self.send_private_message(user_id, "错误：未找到该编号对应的投稿")
+                await self.send_private_message(
+                    user_id, 
+                    f"❌ 评论失败\n\n未找到编号 #{raw_id} 对应的投稿"
+                )
 
                 return True
 
             comment_text = m.group(2).strip()
 
             if not comment_text:
-                await self.send_private_message(user_id, "错误：评论内容不能为空")
+                await self.send_private_message(
+                    user_id, 
+                    "❌ 评论失败\n\n评论内容不能为空"
+                )
 
                 return True
 
@@ -2469,14 +2524,21 @@ class QQReceiver(BaseReceiver):
                 submission = r.scalar_one_or_none()
 
                 if not submission:
-                    await self.send_private_message(user_id, "错误：投稿不存在")
+                    await self.send_private_message(
+                        user_id, 
+                        "❌ 评论失败\n\n投稿不存在"
+                    )
 
                     return True
 
                 # 仅允许对已发布的投稿同步评论
 
                 if submission.status != SubmissionStatus.PUBLISHED.value:
-                    await self.send_private_message(user_id, "当前投稿尚未发布，无法同步评论到外部平台")
+                    await self.send_private_message(
+                        user_id, 
+                        "❌ 评论失败\n\n"
+                        "投稿尚未发布，无法同步评论到平台"
+                    )
 
                     return True
 
@@ -2497,7 +2559,10 @@ class QQReceiver(BaseReceiver):
                     enable_comment_cmd = bool(getattr(grp, 'allow_anonymous_comment', True))
 
                     if not enable_comment_cmd:
-                        await self.send_private_message(user_id, "本组未启用 #评论 功能")
+                        await self.send_private_message(
+                            user_id, 
+                            "❌ 评论失败\n\n本组未启用 #评论 功能"
+                        )
 
                         return True
 
@@ -2557,8 +2622,13 @@ class QQReceiver(BaseReceiver):
                         results.append((pub.name, False, {"message": str(_e)}))
 
                 if success_any:
-
-                    await self.send_private_message(user_id, "评论成功")
+                    # 构建成功提示，包含投稿编号
+                    display_id = submission.publish_id if submission.publish_id else submission_id
+                    await self.send_private_message(
+                        user_id, 
+                        f"✅ 评论成功\n\n"
+                        f"您的评论已同步到投稿 #{display_id} 的所有发布平台"
+                    )
 
 
 
@@ -2566,7 +2636,10 @@ class QQReceiver(BaseReceiver):
 
                     msg = "；".join([f"{n}:{r.get('message', '失败')}" for n, ok, r in results]) or "未知错误"
 
-                    await self.send_private_message(user_id, f"评论失败：{msg}")
+                    await self.send_private_message(
+                        user_id, 
+                        f"❌ 评论失败\n\n{msg}\n\n请稍后重试，或使用 #反馈 指令联系我们"
+                    )
 
                 return True
 
@@ -2576,7 +2649,10 @@ class QQReceiver(BaseReceiver):
 
                 self.logger.error(f"评论同步失败: {e}")
 
-                await self.send_private_message(user_id, "评论失败：系统异常")
+                await self.send_private_message(
+                    user_id, 
+                    "❌ 评论失败\n\n系统异常，请稍后重试"
+                )
 
                 return True
 
@@ -2940,7 +3016,10 @@ class QQReceiver(BaseReceiver):
                 # 进入人工审核，通知举报者
                 await self.send_private_message(
                     reporter_id,
-                    "【系统回复】\n\n您的举报已经进入人工审核阶段,请耐心等待"
+                    f"⚠️ 举报处理中\n\n"
+                    f"📝 投稿编号: #{submission.publish_id or submission.id}\n"
+                    f"🔍 您的举报已进入人工审核阶段，我们会尽快处理\n\n"
+                    f"处理完成后将通过私聊通知您"
                 )
                 
                 self.logger.info(

@@ -139,10 +139,54 @@ class NotificationService:
             
             if not submission:
                 return False
+            
+            # 构建通知消息
+            message = f"✅ 你的投稿已通过审核！\n"
+            
+            # 使用 publish_id 或 id 作为编号
+            display_id = submission.publish_id if submission.publish_id else submission.id
+            message += f"📝 投稿编号: #{display_id}\n"
+            
+            # 获取下次发布时间
+            try:
+                from utils.common import get_platform_config
+                next_schedule_time = None
                 
-            message = f"您的投稿已通过审核！"
-            if submission.publish_id:
-                message += f"\n编号：#{submission.publish_id}"
+                # 查找最早的定时发布时间
+                if submission.group_name:
+                    group_config = self.settings.account_groups.get(submission.group_name)
+                    if group_config:
+                        # 遍历所有平台，找到最早的发布时间
+                        for platform_name in ['qzone', 'bilibili', 'rednote']:
+                            platform_cfg = get_platform_config(platform_name)
+                            if platform_cfg and platform_cfg.get('enabled'):
+                                schedules = platform_cfg.get('send_schedule', [])
+                                if schedules:
+                                    from datetime import datetime
+                                    now = datetime.now()
+                                    for time_str in schedules:
+                                        try:
+                                            hour, minute = map(int, time_str.split(':'))
+                                            schedule_time = now.replace(hour=hour, minute=minute, second=0, microsecond=0)
+                                            # 如果时间已过，则为明天
+                                            if schedule_time <= now:
+                                                from datetime import timedelta
+                                                schedule_time += timedelta(days=1)
+                                            # 记录最早的时间
+                                            if next_schedule_time is None or schedule_time < next_schedule_time:
+                                                next_schedule_time = schedule_time
+                                        except Exception:
+                                            continue
+                
+                if next_schedule_time:
+                    time_str = next_schedule_time.strftime('%H:%M')
+                    message += f"⏰ 预计在 {time_str} 发布到各平台"
+                else:
+                    message += "⏰ 将尽快发布到各平台"
+                    
+            except Exception as e:
+                self.logger.error(f"获取发布时间失败: {e}")
+                message += "⏰ 将尽快发布到各平台"
                 
             return await self.send_to_user(
                 submission.sender_id, 
@@ -164,10 +208,16 @@ class NotificationService:
             
             if not submission:
                 return False
-                
-            message = "您的投稿未通过审核。"
+            
+            # 构建拒绝通知消息
+            # 使用 publish_id 或 id 作为编号
+            display_id = submission.publish_id if submission.publish_id else submission.id
+            
+            message = f"❌ 很抱歉，你的投稿未通过审核\n"
+            message += f"📝 投稿编号: #{display_id}"
+            
             if reason:
-                message += f"\n原因：{reason}"
+                message += f"\n💬 原因: {reason}"
                 
             return await self.send_to_user(
                 submission.sender_id,

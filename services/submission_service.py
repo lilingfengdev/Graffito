@@ -153,6 +153,20 @@ class SubmissionService:
                 
                 self.logger.info(f"创建投稿: {submission.id}")
                 
+                # 发送确认消息给用户
+                try:
+                    notifier = NotificationService()
+                    confirm_message = (
+                        f"🎉 收到你的投稿！\n"
+                        f"⏰ 投稿编号: #{submission.id}\n\n"
+                        f"我们的 AI 正在审核中，请耐心等待..."
+                    )
+                    asyncio.create_task(
+                        notifier.send_to_user(sender_id, confirm_message, group_name)
+                    )
+                except Exception as e:
+                    self.logger.error(f"发送投稿确认消息失败: {e}")
+                
                 # 异步处理投稿
                 asyncio.create_task(self.process_submission(submission.id))
                 
