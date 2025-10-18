@@ -17,7 +17,7 @@ import json
 from slowapi import Limiter
 from slowapi.errors import RateLimitExceeded
 from slowapi.middleware import SlowAPIMiddleware
-from fastapi import FastAPI, Depends, Header, HTTPException, Request, status
+from fastapi import FastAPI, Depends, Header, HTTPException, Request, status, Query
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.security import OAuth2PasswordRequestForm
 from fastapi.responses import JSONResponse, StreamingResponse
@@ -1507,7 +1507,7 @@ async def get_stored_posts(group_name: Optional[str] = None, authorization: Opti
 
 
 @app.post("/management/stored-posts/publish")
-async def publish_stored_posts(group_name: str, authorization: Optional[str] = Header(default=None)):
+async def publish_stored_posts(group_name: str = Query(...), authorization: Optional[str] = Header(default=None)):
     
     try:
         from services.submission_service import SubmissionService
@@ -1523,7 +1523,7 @@ async def publish_stored_posts(group_name: str, authorization: Optional[str] = H
 
 
 @app.delete("/management/stored-posts/clear")
-async def clear_stored_posts(group_name: str, authorization: Optional[str] = Header(default=None)):
+async def clear_stored_posts(group_name: str = Query(...), authorization: Optional[str] = Header(default=None)):
     payload = get_current_user_from_headers(authorization)
     
     db = await get_db()
@@ -2135,7 +2135,7 @@ async def reply_feedback(
 @app.patch("/management/feedbacks/{feedback_id}/status")
 async def update_feedback_status(
     feedback_id: int,
-    status: str,
+    status: str = Query(...),
     authorization: Optional[str] = Header(default=None)
 ):
     """更新反馈状态"""
