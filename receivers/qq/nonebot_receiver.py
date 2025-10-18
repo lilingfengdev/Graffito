@@ -65,6 +65,10 @@ class QQReceiver(BaseReceiver):
 
         self.pending_friend_map: Dict[str, float] = {}
 
+        # 好友列表缓存：key = self_id, value = (friend_ids_set, expire_ts)
+
+        self.friend_list_cache: Dict[str, Tuple[set, float]] = {}
+
         # 注入的服务
 
         self.audit_service = None
@@ -232,6 +236,13 @@ class QQReceiver(BaseReceiver):
 
                     if self._is_pending_friend(self_id, user_id):
                         self.logger.info(f"用户 {user_id} 尚未通过好友，忽略消息")
+
+                        return
+
+                    # 验证发送者是否在好友列表中
+
+                    if not await self._is_friend(bot, user_id):
+                        self.logger.info(f"用户 {user_id} 不在好友列表中，忽略消息")
 
                         return
 
@@ -504,6 +515,18 @@ class QQReceiver(BaseReceiver):
                         try:
 
                             self._unmark_pending_friend(self_id, user_id)
+
+
+
+                        except Exception:
+
+                            pass
+
+                        # 清除好友列表缓存，下次检查时会重新获取
+
+                        try:
+
+                            self.friend_list_cache.pop(self_id, None)
 
 
 
@@ -3163,3 +3186,77 @@ class QQReceiver(BaseReceiver):
         except Exception:
 
             pass
+
+    async def _is_friend(self, bot: Bot, user_id: str) -> bool:
+
+        """检查用户是否在好友列表中（使用缓存优化性能）"""
+
+        try:
+
+            self_id = str(getattr(bot, "self_id", ""))
+
+            if not self_id:
+                return False
+
+            now = time.time()
+
+            # 检查缓存是否有效（缓存 5 分钟）
+
+            cache_ttl = 300.0
+
+            cached = self.friend_list_cache.get(self_id)
+
+            if cached:
+
+                friend_ids, expire_ts = cached
+
+                if expire_ts > now:
+
+                    return user_id in friend_ids
+
+            # 缓存失效，重新获取好友列表
+
+            try:
+
+                resp = await bot.call_api("get_friend_list")
+
+                friend_ids = set()
+
+                for item in (resp or []):
+
+                    try:
+
+                        uid = str(item.get("user_id"))
+
+                        if uid:
+                            friend_ids.add(uid)
+
+
+
+                    except Exception:
+
+                        continue
+
+                # 更新缓存
+
+                self.friend_list_cache[self_id] = (friend_ids, now + cache_ttl)
+
+                return user_id in friend_ids
+
+
+
+            except Exception as e:
+
+                self.logger.error(f"获取好友列表失败: {e}")
+
+                # 获取失败时，默认允许通过（避免误拦截）
+
+                return True
+
+
+
+        except Exception as e:
+
+            self.logger.error(f"检查好友状态失败: {e}")
+
+            return True
