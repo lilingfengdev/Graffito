@@ -13,13 +13,20 @@ import axios from 'axios'
 async function createSecureImageUrl(url) {
   if (!url) return ''
   
-  // 外部链接或 data URI 直接返回
-  if (url.startsWith('http') || url.startsWith('data:')) {
+  // data URI 直接返回
+  if (url.startsWith('data:')) {
     return url
   }
   
-  // 仅处理 /data/ 路径的图片（需要认证的资源）
-  const isDataPath = /(^\/data\/)|(^.*\/data\/)/.test(url)
+  // 判断是否需要认证的资源（包含 /data/ 路径）
+  const isDataPath = url.includes('/data/')
+  
+  // 外部链接（不包含 /data/ 路径）直接返回
+  if (url.startsWith('http') && !isDataPath) {
+    return url
+  }
+  
+  // 不需要认证的资源直接返回
   if (!isDataPath) {
     return url
   }
