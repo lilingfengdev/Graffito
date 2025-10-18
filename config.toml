@@ -1,0 +1,81 @@
+# ========== 基础配置 ==========
+# 启动时是否检查更新（建议设为false避免不必要的网络请求）
+check-updates = false
+
+# GitHub Token（可选，用于检查更新，建议注释掉）
+# github-token = "gh_xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx"
+
+[service-config]
+# ========== TLS/SSL 证书配置 ==========
+# 使用Let's Encrypt证书文件
+# fullchain.pem: 包含服务器证书和中间证书的完整证书链
+# privkey.pem: 服务器私钥文件
+tls = { cert-path = "fullchain.pem", key-path = "privkey.pem" }
+
+# ========== 网络配置 ==========
+# 服务监听端口（可自定义）
+port = 3005
+
+# 服务监听IP地址配置
+# ipv4 = "0.0.0.0": 监听所有IPv4地址，允许外部客户端访问
+# ipv4 = "127.0.0.1": 仅监听本地回环地址，只允许本机访问
+# ipv6 = "::": 监听所有IPv6地址（IPv6版本的0.0.0.0）
+# ipv6 = "::1": 仅监听IPv6本地回环地址（IPv6版本的127.0.0.1）
+ip-addr = { ipv4 = "0.0.0.0", ipv6 = "::" }# 如果不用ipv6可以去除
+
+# DNS解析器选择
+# "hickory": 使用Rust实现的DNS解析器（推荐，性能更好）
+dns-resolver = "hickory"
+
+# ========== 更新控制 ==========
+# 锁定更新功能（设为true时始终返回无更新状态）
+lock-updates = false
+
+# ========== 虚假邮箱配置 ==========
+# 用于模拟用户登录状态的虚假邮箱信息
+fake-email = { email = "freetab@lilingfeng.dev", sign-up-type = "github", enable = true }
+
+# ========== 服务地址配置 ==========
+# 客户端访问服务的地址配置
+service-addr = { scheme = "https", suffix = ".lilingfeng.dev", port = 3005 }
+
+# ========== 代理配置 ==========
+[proxies]
+# 代理池配置，VPS服务器通常不需要代理
+# 如果服务器需要通过代理访问外网，取消注释并配置代理地址
+# example = "http://127.0.0.1:7890"     # HTTP代理示例
+# example = "socks5://user:pass@proxy.com:1080"  # SOCKS5代理示例
+_ = ""                                   # 默认不使用代理（VPS直连）
+
+[override-mapping]
+# Bearer Token前缀到配置名称的映射规则
+_ = "example"                            # 默认使用example配置
+
+# ========== 用户配置覆盖 ==========
+[overrides.example]
+# JWT令牌（从cursor-api项目导出获得，用于身份验证）
+token = "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJzdWIiOiJhdXRoMHx1c2VyXzAxSzNORFE1SFYyMVgxUVYyNVg3VkdCWFpYIiwidGltZSI6IjE3NjA2OTc0OTEiLCJyYW5kb21uZXNzIjoiODE3NTAyODgtMDMyMi00NGJhIiwiZXhwIjoxNzY1ODgxNDkxLCJpc3MiOiJodHRwczovL2F1dGhlbnRpY2F0aW9uLmN1cnNvci5zaCIsInNjb3BlIjoib3BlbmlkIHByb2ZpbGUgZW1haWwgb2ZmbGluZV9hY2Nlc3MiLCJhdWQiOiJodHRwczovL2N1cnNvci5jb20iLCJ0eXBlIjoic2Vzc2lvbiJ9.QOL_NRT7ckkk4MVgHsd_2gp6EYIRNvbVNzU71z2Y_rs"
+
+# 是否保留追踪标识（建议设为false）
+traceparent = false
+
+# 客户端密钥哈希（64位十六进制字符串，从cursor-api获得）
+client-key = "b062395e386dfa376d455ad299a6f3f72d4f7fe02442fb5b8af090a6a05c35a5"
+
+# 配置版本UUID（从cursor-api获得，用于配置同步）
+config-version = "3eff276b-95a8-4919-9853-59c56907d167"
+
+# IANA时区设置（服务器所在时区）
+timezone = "Asia/Shanghai"
+
+# 隐私模式（建议启用以保护用户隐私）
+privacy-mode = true
+
+# 会话ID（UUID格式，用于会话管理）
+session-id = "42418f74-9768-4adb-895c-3dfba00d808d"
+
+# ========== 校验和配置 ==========
+[overrides.example.checksum]
+# 组合校验和（用于验证配置完整性，从cursor-api获得）
+first = "1e027aa92b3b61cdef04d6bac1dc29373c0adc0270824ee863853fbe52a0c81c"   # 第一个校验和
+second = "c221ed736e5df98e561aa381781d3e31ec7a1862c4acc81d2f7a0202c4d998ae"    # 第二个校验和
