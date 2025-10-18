@@ -4,6 +4,7 @@ fastapi>=0.104.0
 uvicorn[standard]>=0.24.0
 slowapi>=0.1.9
 aiohttp>=3.9.0
+python-multipart
 
 # 数据库
 sqlalchemy>=2.0.0
