@@ -15,6 +15,12 @@ from linkify_it import LinkifyIt
 from humanfriendly import format_size
 import qrcode
 
+# 导入 AVIF 支持
+try:
+    import pillow_avif
+except ImportError:
+    pass
+
 from core.plugin import ProcessorPlugin
 from config.settings import get_settings
 
@@ -90,13 +96,13 @@ class SVGRenderer(ProcessorPlugin):
         footer_height = self._add_footer(svg_parts, data.get('wall_mark', 'Graffito'), current_y)
         current_y += footer_height
         
-        # 添加水印
-        if watermark_text:
-            watermark_svg = self._add_watermark(watermark_text, current_y)
-            svg_parts.extend(watermark_svg)
-        
         # 最终高度
         total_height = current_y + self.padding
+        
+        # 添加水印（使用总高度）
+        if watermark_text:
+            watermark_svg = self._add_watermark(watermark_text, total_height)
+            svg_parts.extend(watermark_svg)
         
         # 构建完整SVG
         svg = self._build_svg(svg_parts, total_height)
@@ -168,19 +174,23 @@ class SVGRenderer(ProcessorPlugin):
     def _add_watermark(self, text: str, content_height: float) -> List[str]:
         """添加水印"""
         watermarks = []
-        tile_spacing = 480
-        opacity = 0.12
-        angle = -24
-        font_size = 40
+        # 调整水印间距，适配画布宽度
+        tile_spacing_x = 250  # 横向间距
+        tile_spacing_y = 200  # 纵向间距
+        opacity = 0.08  # 降低透明度，避免遮挡内容
+        angle = -30
+        font_size = 32
         
-        # 计算需要多少行和列
-        rows = int((content_height + tile_spacing) / tile_spacing)
-        cols = int((self.width + tile_spacing) / tile_spacing)
+        # 计算需要多少行和列（至少1行1列）
+        total_height = content_height + self.padding * 2
+        rows = max(1, int((total_height + tile_spacing_y) / tile_spacing_y))
+        cols = max(1, int((self.width + tile_spacing_x) / tile_spacing_x))
         
         for row in range(rows):
             for col in range(cols):
-                x = col * tile_spacing + (tile_spacing / 2 if row % 2 else 0)
-                y = row * tile_spacing
+                # 错开布局，奇数行偏移半个间距
+                x = col * tile_spacing_x + (tile_spacing_x / 2 if row % 2 else tile_spacing_x / 4)
+                y = row * tile_spacing_y + tile_spacing_y / 2
                 
                 watermarks.append(f'''
                     <text x="{x}" y="{y}" 
@@ -214,6 +224,8 @@ class SVGRenderer(ProcessorPlugin):
             return self._render_text(msg, y)
         elif msg_type == 'image':
             return self._render_image(msg, y)
+        elif msg_type == 'video':
+            return self._render_video(msg, y)
         elif msg_type == 'file':
             return self._render_file(msg, y)
         elif msg_type == 'face':
@@ -237,7 +249,11 @@ class SVGRenderer(ProcessorPlugin):
         
         # 计算文本需要的行数
         lines = self._wrap_text(text, self.content_width - 24)
-        height = len(lines) * self.line_height + 16
+        # 上下内边距各8px，行高20px
+        padding_top = 8
+        padding_bottom = 8
+        line_spacing = 20
+        height = padding_top + len(lines) * line_spacing + padding_bottom
         
         svg_parts = []
         
@@ -249,16 +265,11 @@ class SVGRenderer(ProcessorPlugin):
                   stroke="#e2e8f0" stroke-width="1" />
         ''')
         
-        # 文本内容
-        text_y = y + 20
-        for line in lines:
-            svg_parts.append(f'''
-                <text x="{self.padding + 12}" y="{text_y}" 
-                      font-family="{self.font_family}" 
-                      font-size="{self.font_size}" 
-                      fill="#0f172a">{self._escape_xml(line)}</text>
-            ''')
-            text_y += self.line_height
+        # 文本内容 - 使用单独的 text 元素确保换行
+        text_y = y + padding_top + 16  # 基线位置
+        for i, line in enumerate(lines):
+            svg_parts.append(f'''<text x="{self.padding + 12}" y="{text_y}" font-family="{self.font_family}" font-size="{self.font_size}" fill="#0f172a">{self._escape_xml(line)}</text>''')
+            text_y += line_spacing
         
         return svg_parts, height
     
@@ -284,6 +295,43 @@ class SVGRenderer(ProcessorPlugin):
         ''')
         
         return svg_parts, img_height
+    
+    def _render_video(self, msg: Dict[str, Any], y: float) -> tuple[List[str], float]:
+        """渲染视频消息（显示占位符）"""
+        svg_parts = []
+        width = self.content_width * 0.6
+        height = 150
+        
+        # 视频占位框
+        svg_parts.append(f'''
+            <rect x="{self.padding}" y="{y}" 
+                  width="{width}" height="{height}" 
+                  rx="12" fill="#f1f5f9" 
+                  stroke="#cbd5e1" stroke-width="2" />
+        ''')
+        
+        # 播放图标（简化为三角形）
+        center_x = self.padding + width / 2
+        center_y = y + height / 2
+        play_size = 40
+        
+        svg_parts.append(f'''
+            <circle cx="{center_x}" cy="{center_y}" r="{play_size}" 
+                    fill="rgba(0,0,0,0.5)" />
+            <polygon points="{center_x - 12},{center_y - 15} {center_x - 12},{center_y + 15} {center_x + 15},{center_y}" 
+                     fill="white" />
+        ''')
+        
+        # 视频文本
+        svg_parts.append(f'''
+            <text x="{center_x}" y="{y + height - 15}" 
+                  text-anchor="middle"
+                  font-family="{self.font_family}" 
+                  font-size="14" 
+                  fill="#64748b">[视频]</text>
+        ''')
+        
+        return svg_parts, height
     
     def _render_file(self, msg: Dict[str, Any], y: float) -> tuple[List[str], float]:
         """渲染文件消息"""
@@ -336,16 +384,45 @@ class SVGRenderer(ProcessorPlugin):
         return svg_parts, height
     
     def _render_face(self, msg: Dict[str, Any], y: float) -> tuple[List[str], float]:
-        """渲染表情"""
-        # 简化处理：显示表情文本
+        """渲染QQ表情"""
+        data = msg.get('data', {})
+        face_id = str(data.get('id', '0'))
+        
+        # 判断是否为大表情/贴纸
+        is_sticker = False
+        try:
+            raw = data.get('raw') or {}
+            face_type_val = raw.get('faceType')
+            if face_type_val is not None and int(face_type_val) >= 2:
+                is_sticker = True
+        except Exception:
+            pass
+        
+        # 尝试加载表情图片
+        src = self._get_face_src(face_id)
+        
         svg_parts = []
-        svg_parts.append(f'''
+        if src:
+            # 使用图片
+            img_size = 120 if is_sticker else 28
+            height = img_size + 10
+            
+            svg_parts.append(f'''
+            <image href="{src}" 
+                   x="{self.padding}" y="{y}" 
+                   width="{img_size}" height="{img_size}" 
+                   preserveAspectRatio="xMidYMid meet" />
+        ''')
+            return svg_parts, height
+        else:
+            # 回退到文本显示
+            svg_parts.append(f'''
             <text x="{self.padding}" y="{y + 20}" 
                   font-family="{self.font_family}" 
                   font-size="28" 
                   fill="#0f172a">[表情]</text>
         ''')
-        return svg_parts, 30
+            return svg_parts, 30
     
     def _render_poke(self, msg: Dict[str, Any], y: float) -> tuple[List[str], float]:
         """渲染戳一戳"""
@@ -411,8 +488,67 @@ class SVGRenderer(ProcessorPlugin):
     
     def _render_card(self, msg: Dict[str, Any], y: float) -> tuple[List[str], float]:
         """渲染卡片消息"""
+        raw = msg.get('data', {}).get('data', '{}')
+        card_data: Optional[Dict[str, Any]] = None
+        try:
+            if isinstance(raw, dict):
+                card_data = raw
+            else:
+                s = str(raw)
+                # 兼容 HTML 实体/转义
+                s = s.replace('&#44;', ',').replace('\\/', '/')
+                try:
+                    import html as _html
+                    s = _html.unescape(s)
+                except Exception:
+                    pass
+                card_data = json.loads(s)
+        except Exception:
+            card_data = None
+
+        if not isinstance(card_data, dict):
+            svg_parts = []
+            height = 60
+            svg_parts.append(f'''
+                <rect x="{self.padding}" y="{y}" 
+                      width="{self.content_width}" height="{height}" 
+                      rx="12" fill="#ffffff" 
+                      stroke="#e2e8f0" stroke-width="1" />
+                <text x="{self.padding + 12}" y="{y + 35}" 
+                      font-family="{self.font_family}" 
+                      font-size="16" font-weight="600"
+                      fill="#0f172a">卡片消息</text>
+            ''')
+            return svg_parts, height
+
+        view = str(card_data.get('view') or '').lower()
+        meta = card_data.get('meta') or {}
+        
+        # 提取标题和描述
+        title = ''
+        desc = ''
+        
+        if view == 'contact' and isinstance(meta.get('contact'), dict):
+            c = meta.get('contact') or {}
+            title = c.get('nickname') or '联系人'
+            desc = c.get('contact') or ''
+        elif view == 'miniapp' and isinstance(meta.get('miniapp'), dict):
+            m = meta.get('miniapp') or {}
+            title = m.get('title') or '小程序卡片'
+            desc = m.get('source') or ''
+        elif view == 'news' and isinstance(meta.get('news'), dict):
+            n = meta.get('news') or {}
+            title = n.get('title') or '分享'
+            desc = n.get('desc') or ''
+        else:
+            # 通用卡片
+            g = self._first_entry_value(meta)
+            title = g.get('title') or card_data.get('prompt') or (card_data.get('view') or '卡片')
+            desc = g.get('desc') or ''
+
+        # 渲染卡片
         svg_parts = []
-        height = 80
+        height = 80 if desc else 60
         
         # 卡片背景
         svg_parts.append(f'''
@@ -420,11 +556,19 @@ class SVGRenderer(ProcessorPlugin):
                   width="{self.content_width}" height="{height}" 
                   rx="12" fill="#ffffff" 
                   stroke="#e2e8f0" stroke-width="1" />
-            <text x="{self.padding + 12}" y="{y + 30}" 
-                  font-family="{self.font_family}" 
-                  font-size="16" font-weight="600"
-                  fill="#0f172a">卡片消息</text>
         ''')
+        
+        # 标题
+        title_lines = self._wrap_text(title, self.content_width - 24)
+        text_y = y + 25
+        for line in title_lines[:2]:  # 最多显示2行标题
+            svg_parts.append(f'''<text x="{self.padding + 12}" y="{text_y}" font-family="{self.font_family}" font-size="16" font-weight="600" fill="#0f172a">{self._escape_xml(line)}</text>''')
+            text_y += 20
+        
+        # 描述
+        if desc:
+            desc_lines = self._wrap_text(desc, self.content_width - 24)
+            svg_parts.append(f'''<text x="{self.padding + 12}" y="{text_y + 5}" font-family="{self.font_family}" font-size="14" fill="#64748b">{self._escape_xml(desc_lines[0][:30])}</text>''')
         
         return svg_parts, height
     
@@ -459,26 +603,53 @@ class SVGRenderer(ProcessorPlugin):
         return text
     
     def _wrap_text(self, text: str, max_width: float) -> List[str]:
-        """文本换行"""
-        # 简化实现：按字符数估算
-        chars_per_line = int(max_width / (self.font_size * 0.6))
-        words = text.split()
-        lines = []
-        current_line = ""
+        """文本换行 - 支持中英文混排和自动换行"""
+        if not text:
+            return ['']
         
-        for word in words:
-            test_line = current_line + (" " if current_line else "") + word
-            if len(test_line) <= chars_per_line:
-                current_line = test_line
-            else:
-                if current_line:
-                    lines.append(current_line)
-                current_line = word
+        # 估算每行最大字符数（中文字符算1个，英文字符算0.5个）
+        # max_width 是像素宽度，font_size 是字体大小
+        # 中文字符宽度约等于 font_size，英文字符约为 font_size * 0.6
+        max_chars_estimate = int(max_width / self.font_size) * 1.5
         
-        if current_line:
-            lines.append(current_line)
+        all_lines = []
         
-        return lines if lines else [text[:chars_per_line]]
+        # 首先按原有的换行符分割
+        paragraphs = text.split('\n')
+        
+        for paragraph in paragraphs:
+            if not paragraph:
+                # 空行保留
+                all_lines.append('')
+                continue
+                
+            # 对每个段落进行宽度检查和自动换行
+            current_line = ""
+            current_width = 0
+            
+            for char in paragraph:
+                # 估算字符宽度
+                if ord(char) > 127:  # 非ASCII字符（包括中文）
+                    char_width = 1.0
+                elif char == ' ':
+                    char_width = 0.3
+                else:  # ASCII字符
+                    char_width = 0.5
+                
+                # 检查是否需要换行
+                if current_width + char_width > max_chars_estimate and current_line:
+                    all_lines.append(current_line)
+                    current_line = char
+                    current_width = char_width
+                else:
+                    current_line += char
+                    current_width += char_width
+            
+            # 添加段落的最后一行
+            if current_line:
+                all_lines.append(current_line)
+        
+        return all_lines if all_lines else ['']
     
     def _linkify_and_collect(self, text: str) -> tuple[str, List[str]]:
         """提取链接"""
@@ -551,4 +722,94 @@ class SVGRenderer(ProcessorPlugin):
             return f'data:{mime};base64,{b64}'
         except Exception:
             return path
+    
+    def _get_face_src(self, face_id: str) -> str:
+        """根据 face_id 返回表情图片 data-URI"""
+        # 缓存
+        if not hasattr(self, '_face_cache'):
+            self._face_cache: Dict[str, str] = {}
+        cached = self._face_cache.get(face_id)
+        if cached:
+            return cached
+
+        # 候选目录与文件名模式（优先 AVIF/WebP，避免 GIF 过大）
+        candidate_dirs = [
+            Path('static/qlottie'),
+            Path('qlottie'),
+        ]
+        name_patterns = [
+            f"{face_id}.avif",
+            f"{face_id}.webp",
+            f"{face_id}.png",
+            f"face_{face_id}.avif",
+            f"face_{face_id}.webp",
+            f"face_{face_id}.png",
+            f"sticker_{face_id}.avif",
+            f"sticker_{face_id}.png",
+            # GIF 放在最后（因为文件太大）
+            f"{face_id}.gif",
+        ]
+
+        for d in candidate_dirs:
+            try:
+                if not d.exists():
+                    continue
+                for name in name_patterns:
+                    p = d / name
+                    if p.exists():
+                        ext = p.suffix.lower()
+                        
+                        # AVIF/GIF 需要转换为 PNG（cairosvg 不支持 AVIF）
+                        if ext in ('.avif', '.gif'):
+                            try:
+                                from PIL import Image
+                                from io import BytesIO
+                                
+                                # 转换为 PNG
+                                with Image.open(p) as img:
+                                    # 如果是 GIF 动画，只取第一帧
+                                    if hasattr(img, 'n_frames') and img.n_frames > 1:
+                                        img.seek(0)
+                                    
+                                    # 转换为 RGBA
+                                    if img.mode not in ('RGB', 'RGBA'):
+                                        img = img.convert('RGBA')
+                                    
+                                    # 保存为 PNG
+                                    buf = BytesIO()
+                                    img.save(buf, format='PNG', optimize=True)
+                                    b64 = base64.b64encode(buf.getvalue()).decode('ascii')
+                                    data_uri = f"data:image/png;base64,{b64}"
+                                    self._face_cache[face_id] = data_uri
+                                    return data_uri
+                            except Exception:
+                                # 转换失败，继续查找其他格式
+                                continue
+                        else:
+                            # PNG/WebP 直接使用
+                            mime = 'image/png'
+                            if ext == '.webp':
+                                mime = 'image/webp'
+                            
+                            with open(p, 'rb') as f:
+                                b64 = base64.b64encode(f.read()).decode('ascii')
+                            data_uri = f"data:{mime};base64,{b64}"
+                            self._face_cache[face_id] = data_uri
+                            return data_uri
+            except Exception:
+                continue
+
+        # 找不到时返回空字符串
+        return ''
+    
+    def _first_entry_value(self, d: Any) -> Dict[str, Any]:
+        """获取字典的第一个值（用于通用卡片解析）"""
+        if isinstance(d, dict) and d:
+            try:
+                first_key = next(iter(d.keys()))
+                v = d.get(first_key)
+                return v if isinstance(v, dict) else {}
+            except Exception:
+                return {}
+        return {}
 

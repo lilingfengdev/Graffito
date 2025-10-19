@@ -1068,14 +1068,21 @@ class HTMLRenderer(ProcessorPlugin):
         if cached:
             return cached
 
-        # 候选目录与文件名模式
+        # 候选目录与文件名模式（优先 AVIF，其次 WebP，最后 PNG/GIF）
         candidate_dirs = [
             Path('static/qlottie'),
             Path('qlottie'),
         ]
         name_patterns = [
-            f"{face_id}.png", f"{face_id}.webp", f"{face_id}.gif",
-            f"face_{face_id}.png", f"sticker_{face_id}.png"
+            f"{face_id}.avif",
+            f"{face_id}.webp",
+            f"{face_id}.png",
+            f"{face_id}.gif",
+            f"face_{face_id}.avif",
+            f"face_{face_id}.webp",
+            f"face_{face_id}.png",
+            f"sticker_{face_id}.avif",
+            f"sticker_{face_id}.png",
         ]
 
         for d in candidate_dirs:
@@ -1085,11 +1092,16 @@ class HTMLRenderer(ProcessorPlugin):
                 for name in name_patterns:
                     p = d / name
                     if p.exists():
+                        # 确定 MIME 类型
                         mime = 'image/png'
-                        if p.suffix.lower() == '.gif':
+                        ext = p.suffix.lower()
+                        if ext == '.avif':
+                            mime = 'image/avif'
+                        elif ext == '.gif':
                             mime = 'image/gif'
-                        elif p.suffix.lower() == '.webp':
+                        elif ext == '.webp':
                             mime = 'image/webp'
+                        
                         with open(p, 'rb') as f:
                             b64 = base64.b64encode(f.read()).decode('ascii')
                         data_uri = f"data:{mime};base64,{b64}"
