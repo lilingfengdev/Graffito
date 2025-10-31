@@ -227,7 +227,9 @@ const handleLogin = async () => {
       headers: { 'Content-Type': 'application/x-www-form-urlencoded' }
     })
     
-    localStorage.setItem('token', data.access_token)
+    // 统一使用 access_token，兼容旧 key
+    localStorage.setItem('access_token', data.access_token)
+    try { localStorage.setItem('token', data.access_token) } catch(_) {}
     ElMessage.success('登录成功')
     const redirect = new URLSearchParams(window.location.search).get('redirect')
     router.push(redirect || '/')

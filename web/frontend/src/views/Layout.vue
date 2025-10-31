@@ -379,6 +379,7 @@ const handleUserCommand = (command) => {
 }
 
 const logout = () => {
+  localStorage.removeItem('access_token')
   localStorage.removeItem('token')
   localStorage.removeItem('user')
   router.push('/login')

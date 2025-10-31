@@ -7,7 +7,7 @@ const resolvedBaseURL = (typeof import.meta.env.VITE_API_BASE === 'string' && im
 const api = axios.create({ baseURL: resolvedBaseURL })
 
 api.interceptors.request.use((config) => {
-  const token = localStorage.getItem('token')
+  const token = localStorage.getItem('access_token') || localStorage.getItem('token')
   if (token) {
     config.headers['Authorization'] = `Bearer ${token}`
   }
@@ -21,7 +21,10 @@ api.interceptors.response.use(
     const status = error?.response?.status
     
     if (status === 401) {
-      try { localStorage.removeItem('token') } catch (_) {}
+      try {
+        localStorage.removeItem('access_token')
+        localStorage.removeItem('token')
+      } catch (_) {}
       const path = window.location.pathname + window.location.search
       const isAuthPage = window.location.pathname === '/login' || window.location.pathname === '/register'
       if (!isAuthPage) {
