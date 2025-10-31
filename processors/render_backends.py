@@ -265,8 +265,8 @@ class CloudflareRenderBackend(RenderBackend):
     async def initialize(self):
         """初始化 Cloudflare 客户端"""
         try:
-            from cloudflare import Cloudflare
-            self.client = Cloudflare(api_token=self.api_token)
+            from cloudflare import AsyncCloudflare
+            self.client = AsyncCloudflare(api_token=self.api_token)
             logger.info("Cloudflare Browser Rendering 后端初始化完成")
         except ImportError:
             logger.error("Cloudflare SDK 未安装，请运行: pip install cloudflare")
@@ -285,7 +285,6 @@ class CloudflareRenderBackend(RenderBackend):
     ) -> List[str]:
         """通过 Cloudflare 渲染 HTML（完整截图后分页）"""
         import base64
-        import asyncio
         from PIL import Image
         from io import BytesIO
         
@@ -300,24 +299,19 @@ class CloudflareRenderBackend(RenderBackend):
             html_base64 = base64.b64encode(html.encode('utf-8')).decode('ascii')
             data_url = f"data:text/html;base64,{html_base64}"
             
-            # 使用 Cloudflare SDK 获取原始响应 (同步方法，在 asyncio 中运行)
-            loop = asyncio.get_event_loop()
-            
-            response = await loop.run_in_executor(
-                None,
-                lambda: self.client.browser_rendering.screenshot.with_raw_response.create(
-                    account_id=self.account_id,
-                    url=data_url,
-                    viewport={
-                        "width": 384,
-                        "height": 768, 
-                        "device_scale_factor": 2
-                    },
-                    screenshot_options={
-                        "full_page": True,
-                        "type": "png"
-                    }
-                )
+            # 使用 AsyncCloudflare 直接调用 API
+            response = await self.client.browser_rendering.screenshot.with_raw_response.create(
+                account_id=self.account_id,
+                url=data_url,
+                viewport={
+                    "width": 384,
+                    "height": 768, 
+                    "device_scale_factor": 2
+                },
+                screenshot_options={
+                    "full_page": True,
+                    "type": "png"
+                }
             )
             
             # 从原始响应读取二进制数据

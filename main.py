@@ -24,7 +24,8 @@ console_handler_id = logger.add(
 file_handler_id = logger.add(
     "data/logs/graffito_{time:YYYY-MM-DD}.log",
     rotation="00:00",
-    retention="30 days",
+    retention="7 days",  # 减少保留时间
+    compression="zip",   # 压缩旧日志
     level="DEBUG",
     format="{time:YYYY-MM-DD HH:mm:ss.SSS} | {level: <8} | {name}:{function}:{line} - {message}"
 )
@@ -54,6 +55,10 @@ class GraffitoApp:
         # Web 服务
         self.web_server = None
         self.web_task: Optional[asyncio.Task] = None
+        
+        # 任务管理器
+        from utils.async_helpers import get_task_manager
+        self.task_manager = get_task_manager("graffito_main")
         
     async def initialize(self):
         """初始化应用"""
@@ -141,15 +146,11 @@ class GraffitoApp:
         
         # 注册QQ接收器
         if self.settings.receivers.get('qq'):
+            from utils.common import to_dict
+            
             qq_config = self.settings.receivers['qq']
-            if hasattr(qq_config, 'model_dump'):
-                qq_config = qq_config.model_dump()
-            elif hasattr(qq_config, 'dict'):
-                qq_config = qq_config.dict()
-            elif hasattr(qq_config, '__dict__'):
-                qq_config = qq_config.__dict__
-                
-            qq_receiver = QQReceiver(qq_config)
+            qq_config_dict = to_dict(qq_config)
+            qq_receiver = QQReceiver(qq_config_dict)
             plugin_manager.register(qq_receiver)
             logger.info("已注册 QQ 接收器")
             
@@ -183,7 +184,10 @@ class GraffitoApp:
         """处理收到的消息（投稿）"""
         try:
             # 通过投稿服务处理（后台任务，避免阻塞接收器与停机流程）
-            asyncio.create_task(self.submission_service.process_submission(submission.id))
+            self.task_manager.create_task(
+                self.submission_service.process_submission(submission.id),
+                name=f"process_submission_{submission.id}"
+            )
         except Exception as e:
             logger.error(f"处理消息失败: {e}", exc_info=True)
             
@@ -247,6 +251,10 @@ class GraffitoApp:
         logger.info("正在停止 Graffito...")
         self.is_running = False
 
+        # 取消所有后台任务
+        logger.info(f"取消 {len(self.task_manager)} 个后台任务...")
+        await self.task_manager.cancel_all()
+
         # 停止 Web 后端
         if self.web_server is not None:
             try:
@@ -265,8 +273,10 @@ class GraffitoApp:
         await plugin_manager.shutdown_all()
 
         # 关闭服务
-        await self.audit_service.shutdown()
-        await self.submission_service.shutdown()
+        if self.audit_service:
+            await self.audit_service.shutdown()
+        if self.submission_service:
+            await self.submission_service.shutdown()
 
         # 关闭缓存
         await close_cache()
@@ -339,6 +349,4 @@ if __name__ == "__main__":
         asyncio.run(main())
     except KeyboardInterrupt:
         logger.info("程序被用户中断")
-    except Exception as e:
-        logger.error(f"程序异常退出: {e}", exc_info=True)
-        sys.exit(1)
+

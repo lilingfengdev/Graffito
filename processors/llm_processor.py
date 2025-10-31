@@ -15,6 +15,7 @@ from openai import AsyncOpenAI
 
 from config import get_settings
 from core.plugin import ProcessorPlugin
+from utils.common import to_dict
 
 ImageFile.LOAD_TRUNCATED_IMAGES = True
 
@@ -24,7 +25,7 @@ class LLMProcessor(ProcessorPlugin):
 
     def __init__(self):
         settings = get_settings()
-        config = settings.llm.dict() if hasattr(settings.llm, 'dict') else settings.llm.__dict__
+        config = to_dict(settings.llm)
         super().__init__("llm_processor", config)
 
         # 初始化异步LLM客户端

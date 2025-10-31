@@ -302,10 +302,12 @@ def get_shared_pipeline() -> ProcessingPipeline:
     if _shared_pipeline is None:
         # 从配置读取渲染后端设置
         from config.settings import get_settings
+        from utils.common import to_dict
         settings = get_settings()
         
-        render_backend = settings.rendering.backend if hasattr(settings.rendering, 'backend') else "local"
-        render_config = settings.rendering.backend_config if hasattr(settings.rendering, 'backend_config') else {}
+        render_backend = getattr(settings.rendering, 'backend', 'local')
+        render_config_raw = getattr(settings.rendering, 'backend_config', {})
+        render_config = to_dict(render_config_raw)
         
         _shared_pipeline = ProcessingPipeline(
             render_backend=render_backend,

@@ -18,6 +18,7 @@ from sqlalchemy import select, and_, delete, update, func
 from services.notification_service import NotificationService
 from utils.common import deduplicate_preserve_order, get_platform_config
 from core.task_queue import build_queue_backend, TaskQueueBackend
+from utils.async_helpers import get_task_manager
 
 
 class SubmissionService:
@@ -37,6 +38,8 @@ class SubmissionService:
         # 跟踪投稿处理任务，用于优雅停机时取消
         self._proc_tasks: Dict[int, asyncio.Task] = {}
         self._stopping: bool = False
+        # 任务管理器
+        self.task_manager = get_task_manager("submission_service")
         
     async def initialize(self):
         """初始化服务"""
@@ -68,6 +71,10 @@ class SubmissionService:
         """关闭服务"""
         # 标记停机，通知处理循环尽快退出
         self._stopping = True
+        
+        # 取消所有后台任务
+        await self.task_manager.cancel_all(timeout=5.0)
+        
         await self.pipeline.shutdown()
         # 停止调度器与工作协程
         try:
@@ -161,14 +168,18 @@ class SubmissionService:
                         f"⏰ 投稿编号: #{submission.id}\n\n"
                         f"我们的 AI 正在审核中，请耐心等待..."
                     )
-                    asyncio.create_task(
-                        notifier.send_to_user(sender_id, confirm_message, group_name)
+                    self.task_manager.create_task(
+                        notifier.send_to_user(sender_id, confirm_message, group_name),
+                        name=f"send_confirm_{submission.id}"
                     )
                 except Exception as e:
                     self.logger.error(f"发送投稿确认消息失败: {e}")
                 
                 # 异步处理投稿
-                asyncio.create_task(self.process_submission(submission.id))
+                self.task_manager.create_task(
+                    self.process_submission(submission.id),
+                    name=f"process_submission_{submission.id}"
+                )
                 
                 return submission.id
                 
@@ -363,7 +374,10 @@ class SubmissionService:
                 except Exception:
                     pass
                 # 交由 process_submission 动态等待与处理（含 in-flight 去重）
-                asyncio.create_task(self.process_submission(int(sub.id)))
+                self.task_manager.create_task(
+                    self.process_submission(int(sub.id)),
+                    name=f"resume_submission_{sub.id}"
+                )
             except Exception as e:
                 self.logger.error(f"恢复投稿 {getattr(sub, 'id', None)} 失败: {e}")
             
@@ -770,7 +784,10 @@ class SubmissionService:
 
     def _ensure_publisher_worker(self, pub_name: str):
         if pub_name not in self._pub_workers or self._pub_workers[pub_name].done():
-            self._pub_workers[pub_name] = asyncio.create_task(self._publisher_worker(pub_name))
+            self._pub_workers[pub_name] = self.task_manager.create_task(
+                self._publisher_worker(pub_name),
+                name=f"publisher_worker_{pub_name}"
+            )
 
     async def _enqueue_scheduled_group_jobs(self, pub_name: str):
         """按组入队执行 flush（避免一次处理过大批量）。"""

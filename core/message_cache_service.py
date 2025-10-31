@@ -17,6 +17,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from core.models import MessageCache as DBMessageCache
 from core.cache_client import get_cache
+from utils.common import make_cache_key
 
 
 class MessageCacheService:
@@ -74,7 +75,7 @@ class MessageCacheService:
             settings = get_settings()
             ttl = settings.cache.message_cache_ttl
             
-            cache_key = f"msg_cache:{sender_id}:{receiver_id}"
+            cache_key = make_cache_key("msg_cache", sender_id, receiver_id)
             
             msg_data = {
                 "message_id": message_id,
@@ -156,7 +157,7 @@ class MessageCacheService:
     ) -> Optional[List[Dict[str, Any]]]:
         """从缓存获取消息（使用 aiocache）"""
         try:
-            cache_key = f"msg_cache:{sender_id}:{receiver_id}"
+            cache_key = make_cache_key("msg_cache", sender_id, receiver_id)
             
             raw_messages = await cache.zrange(cache_key, 0, -1)
             
@@ -242,7 +243,7 @@ class MessageCacheService:
     ) -> bool:
         """从缓存清空消息（使用 aiocache）"""
         try:
-            cache_key = f"msg_cache:{sender_id}:{receiver_id}"
+            cache_key = make_cache_key("msg_cache", sender_id, receiver_id)
             await cache.delete(cache_key)
             logger.debug(f"已清空缓存: {sender_id} -> {receiver_id}")
             return True
@@ -339,7 +340,7 @@ class MessageCacheService:
         
         if cache.backend == "redis":
             try:
-                cache_key = f"msg_cache:{sender_id}:{receiver_id}"
+                cache_key = make_cache_key("msg_cache", sender_id, receiver_id)
                 count = await cache.zcard(cache_key)
                 return count
             except Exception as e:

@@ -2,6 +2,20 @@ from typing import Iterable, List, TypeVar, Dict, Any
 from pathlib import Path
 import yaml
 
+try:
+    from nonebot.utils import deep_update
+except ImportError:
+    # 如果 NoneBot 不可用，使用自定义实现
+    def deep_update(base: dict, *updates: dict) -> dict:
+        """Fallback implementation of deep_update"""
+        for update in updates:
+            for k, v in update.items():
+                if k in base and isinstance(base[k], dict) and isinstance(v, dict):
+                    base[k] = deep_update(base[k], v)
+                else:
+                    base[k] = v
+        return base
+
 T = TypeVar("T")
 
 def deduplicate_preserve_order(items: Iterable[T]) -> List[T]:
@@ -42,14 +56,6 @@ def get_platform_config(platform_key: str) -> Dict[str, Any]:
       1) settings.publishers[platform_key] from main config
       2) config/publishers/{platform_key}.yml if exists
     """
-    def deep_merge_dict(base: Dict[str, Any], override: Dict[str, Any]) -> Dict[str, Any]:
-        for k, v in (override or {}).items():
-            if k in base and isinstance(base[k], dict) and isinstance(v, dict):
-                base[k] = deep_merge_dict(dict(base[k]), dict(v))
-            else:
-                base[k] = v
-        return base
-
     if get_settings is None:
         base: Dict[str, Any] = {}
     else:
@@ -68,9 +74,25 @@ def get_platform_config(platform_key: str) -> Dict[str, Any]:
         if override_path.exists():
             with open(override_path, 'r', encoding='utf-8') as f:
                 override_data = yaml.safe_load(f) or {}
-            base = deep_merge_dict(base, override_data if isinstance(override_data, dict) else {})
+            if isinstance(override_data, dict):
+                base = deep_update(base, override_data)
     except Exception:
         # best-effort merge; ignore malformed override files
         pass
 
     return base
+
+
+# ---------- Cache key helpers ----------
+def make_cache_key(prefix: str, *parts: Any) -> str:
+    """生成标准格式的缓存键
+    
+    Args:
+        prefix: 缓存键前缀（如 'submission', 'blacklist' 等）
+        *parts: 缓存键的组成部分
+        
+    Returns:
+        格式化的缓存键，如 'submission:123' 或 'blacklist:user123:group1'
+    """
+    key_parts = [prefix] + [str(part) for part in parts if part is not None]
+    return ':'.join(key_parts)

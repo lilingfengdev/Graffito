@@ -17,6 +17,7 @@ from sqlalchemy import select, and_
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from core.cache_client import get_cache
+from utils.common import make_cache_key
 
 
 class DataCacheService:
@@ -46,7 +47,7 @@ class DataCacheService:
         """
         from core.models import Submission
         
-        cache_key = f"submission:{submission_id}"
+        cache_key = make_cache_key("submission", submission_id)
         
         # 尝试从缓存获取
         if use_cache:
@@ -110,7 +111,7 @@ class DataCacheService:
         """使投稿缓存失效（当投稿状态更新时调用）"""
         try:
             cache = await get_cache()
-            cache_key = f"submission:{submission_id}"
+            cache_key = make_cache_key("submission", submission_id)
             await cache.delete(cache_key)
             logger.debug(f"清除投稿缓存: {submission_id}")
         except Exception as e:
@@ -136,7 +137,7 @@ class DataCacheService:
         """
         from core.models import BlackList
         
-        cache_key = f"blacklist:{user_id}:{group_name}"
+        cache_key = make_cache_key("blacklist", user_id, group_name)
         
         # 尝试从缓存获取
         if use_cache:
@@ -183,7 +184,7 @@ class DataCacheService:
         """使黑名单缓存失效（当黑名单状态更新时调用）"""
         try:
             cache = await get_cache()
-            cache_key = f"blacklist:{user_id}:{group_name}"
+            cache_key = make_cache_key("blacklist", user_id, group_name)
             await cache.delete(cache_key)
             logger.debug(f"清除黑名单缓存: {user_id} in {group_name}")
         except Exception as e:
@@ -207,7 +208,7 @@ class DataCacheService:
         """
         from core.models import User
         
-        cache_key = f"user:{user_id}"
+        cache_key = make_cache_key("user", user_id)
         
         # 尝试从缓存获取
         if use_cache:
@@ -254,7 +255,7 @@ class DataCacheService:
         """使用户缓存失效（当用户信息更新时调用）"""
         try:
             cache = await get_cache()
-            cache_key = f"user:{user_id}"
+            cache_key = make_cache_key("user", user_id)
             await cache.delete(cache_key)
             logger.debug(f"清除用户缓存: {user_id}")
         except Exception as e:
@@ -294,7 +295,7 @@ class DataCacheService:
         Returns:
             评论数据字典或 None
         """
-        cache_key = f"comments:{record_id}:{page}:{page_size}"
+        cache_key = make_cache_key("comments", record_id, page, page_size)
         
         # 尝试从缓存获取
         if use_cache:
@@ -328,7 +329,7 @@ class DataCacheService:
         Returns:
             是否成功
         """
-        cache_key = f"comments:{record_id}:{page}:{page_size}"
+        cache_key = make_cache_key("comments", record_id, page, page_size)
         
         try:
             cache = await get_cache()

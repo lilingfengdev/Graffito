@@ -18,6 +18,22 @@ from services.decorators import with_submission, invalidate_cache_after, log_aud
 from utils.common import get_platform_config
 
 
+# 命令注册装饰器
+_command_registry = {}
+
+
+def audit_command(cmd: str, description: str = ""):
+    """注册审核命令的装饰器"""
+    def decorator(func):
+        _command_registry[cmd] = {
+            'handler': func,
+            'description': description,
+            'name': func.__name__
+        }
+        return func
+    return decorator
+
+
 class AuditService:
     """审核服务，处理投稿审核相关操作"""
     
@@ -25,22 +41,12 @@ class AuditService:
         self.logger = logger.bind(module="audit")
         # 共享全局管道，避免重复初始化
         self.pipeline = get_shared_pipeline()
-        self.commands = {
-            '是': self.approve,
-            '否': self.reject,
-            '匿': self.toggle_anonymous,
-            '等': self.hold,
-            '删': self.delete,
-            '拒': self.reject_with_message,
-            '立即': self.approve_immediate,
-            '刷新': self.refresh,
-            '重渲染': self.rerender,
-            '扩列审查': self.expand_review,
-            '评论': self.add_comment,
-            '回复': self.reply_to_sender,
-            '展示': self.show_content,
-            '拉黑': self.blacklist,
-        }
+        # 绑定命令处理器
+        self.commands = {}
+        for cmd, info in _command_registry.items():
+            # 绑定方法到实例
+            handler = info['handler']
+            self.commands[cmd] = handler.__get__(self, self.__class__)
         
     async def initialize(self):
         """初始化服务"""
@@ -50,6 +56,11 @@ class AuditService:
     async def shutdown(self):
         """关闭服务"""
         await self.pipeline.shutdown()
+    
+    def get_available_commands(self) -> Dict[str, Dict[str, str]]:
+        """获取所有可用的命令及描述"""
+        return {cmd: {'description': info['description'], 'name': info['name']} 
+                for cmd, info in _command_registry.items()}
         
     async def handle_command(self, submission_id: int, command: str, 
                            operator_id: str, extra: Optional[str] = None) -> Dict[str, Any]:
@@ -86,6 +97,7 @@ class AuditService:
                 'message': f'指令执行失败: {str(e)}'
             }
             
+    @audit_command('是', '通过投稿')
     async def approve(self, submission_id: int, operator_id: str, extra: Optional[str] = None) -> Dict[str, Any]:
         """通过投稿"""
         db = await get_db()
@@ -196,6 +208,7 @@ class AuditService:
                 'publish_id': submission.publish_id
             }
             
+    @audit_command('立即', '立即发送投稿')
     async def approve_immediate(self, submission_id: int, operator_id: str, extra: Optional[str] = None) -> Dict[str, Any]:
         """立即发送投稿"""
         db = await get_db()
@@ -245,6 +258,7 @@ class AuditService:
             }
         
     @invalidate_cache_after
+    @audit_command('否', '拒绝投稿')
     async def reject(self, submission_id: int, operator_id: str, extra: Optional[str] = None) -> Dict[str, Any]:
         """拒绝投稿（跳过）"""
         result = await SubmissionOperations.update_submission_status(
@@ -261,6 +275,7 @@ class AuditService:
         return result
             
     @invalidate_cache_after
+    @audit_command('拒', '拒绝投稿并通知原因')
     async def reject_with_message(self, submission_id: int, operator_id: str, extra: Optional[str] = None) -> Dict[str, Any]:
         """拒绝投稿并通知"""
         reason = extra or "投稿未通过审核"
@@ -291,6 +306,7 @@ class AuditService:
             'message': '投稿已拒绝，已通知投稿者'
         }
             
+    @audit_command('删', '删除投稿')
     async def delete(self, submission_id: int, operator_id: str, extra: Optional[str] = None) -> Dict[str, Any]:
         """删除投稿（包括已发布到平台的内容）"""
         # 调用 SubmissionService 的完整删除逻辑，包括删除平台内容
@@ -317,6 +333,8 @@ class AuditService:
             
     @invalidate_cache_after
     @with_submission("切换匿名状态失败")
+    @audit_command('匿', '切换匿名状态')
+    @log_audit_action(AuditAction.TOGGLE_ANONYMOUS)
     async def toggle_anonymous(self, submission: Submission, session, submission_id: int, operator_id: str, extra: Optional[str] = None) -> Dict[str, Any]:
         """切换匿名状态"""
         # 切换匿名状态
@@ -338,6 +356,7 @@ class AuditService:
             'need_reaudit': True
         }
             
+    @audit_command('等', '暂时保留')
     async def hold(self, submission_id: int, operator_id: str, extra: Optional[str] = None) -> Dict[str, Any]:
         """暂缓处理"""
         # 等待一段时间后重新处理
@@ -352,6 +371,7 @@ class AuditService:
             'need_reaudit': True
         }
         
+    @audit_command('刷新', '刷新投稿信息')
     async def refresh(self, submission_id: int, operator_id: str, extra: Optional[str] = None) -> Dict[str, Any]:
         """刷新处理"""
         success = await self.pipeline.process_submission(submission_id)
@@ -362,6 +382,7 @@ class AuditService:
             'need_reaudit': True
         }
         
+    @audit_command('重渲染', '重新渲染图片')
     async def rerender(self, submission_id: int, operator_id: str, extra: Optional[str] = None) -> Dict[str, Any]:
         """重新渲染"""
         success = await self.pipeline.reprocess_submission(submission_id, skip_llm=True)
@@ -372,6 +393,7 @@ class AuditService:
             'need_reaudit': True
         }
         
+    @audit_command('扩列审查', '检查扩列内容')
     async def expand_review(self, submission_id: int, operator_id: str, extra: Optional[str] = None) -> Dict[str, Any]:
         """扩展审查 - 通过 NapCat API 获取用户详细信息"""
         db = await get_db()
@@ -482,6 +504,9 @@ class AuditService:
             
     @invalidate_cache_after
     @with_submission("添加评论失败")
+    @audit_command('评论', '添加内部评论')
+    @with_submission()
+    @log_audit_action(AuditAction.COMMENT)
     async def add_comment(self, submission: Submission, session, submission_id: int, operator_id: str, comment: Optional[str] = None) -> Dict[str, Any]:
         """添加评论"""
         if not comment:
@@ -504,6 +529,8 @@ class AuditService:
         }
             
     @with_submission("回复投稿者失败")
+    @audit_command('回复', '回复投稿者')
+    @with_submission()
     async def reply_to_sender(self, submission: Submission, session, submission_id: int, operator_id: str, message: Optional[str] = None) -> Dict[str, Any]:
         """回复投稿者"""
         if not message:
@@ -521,6 +548,8 @@ class AuditService:
         }
             
     @with_submission("展示内容失败")
+    @audit_command('展示', '展示投稿内容')
+    @with_submission()
     async def show_content(self, submission: Submission, session, submission_id: int, operator_id: str, extra: Optional[str] = None) -> Dict[str, Any]:
         """展示内容"""
         # 返回渲染的图片
@@ -533,6 +562,10 @@ class AuditService:
     
     @invalidate_cache_after
     @with_submission("拉黑用户失败")
+    @audit_command('拉黑', '拉黑投稿者')
+    @with_submission()
+    @invalidate_cache_after()
+    @log_audit_action(AuditAction.BLACKLIST)
     async def blacklist(self, submission: Submission, session, submission_id: int, operator_id: str, reason: Optional[str] = None) -> Dict[str, Any]:
         """拉黑用户"""
         # 添加到黑名单
@@ -579,7 +612,13 @@ class AuditService:
                 
             reply_content = group.quick_replies.get(command)
             if not reply_content:
-                return {'success': False, 'message': f'未知的指令: {command}'}
+                # 显示可用命令
+                available_cmds = self.get_available_commands()
+                cmd_list = '\n'.join([f"{cmd}: {info['description']}" for cmd, info in available_cmds.items()])
+                return {
+                    'success': False, 
+                    'message': f'未知的指令: {command}\n\n可用指令:\n{cmd_list}'
+                }
                 
             # 发送快捷回复给投稿者
             try:
