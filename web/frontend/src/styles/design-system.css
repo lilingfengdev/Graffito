@@ -47,7 +47,12 @@
     --xw-slate-700: #334155;
     --xw-slate-800: #1e293b;
     --xw-slate-900: #0f172a;
-  }
+    /* 额外语义色阶与别名（供历史样式兼容） */
+    --xw-primary-200: #c7d2fe;
+    --xw-focus-ring: rgba(99, 102, 241, 0.25);
+    --xw-shadow-hover: 0 10px 20px rgba(0, 0, 0, 0.12);
+    --xw-gradient-highlight: linear-gradient(135deg, rgba(99, 102, 241, 0.06), rgba(139, 92, 246, 0.04));
+}
   
   /* ===== 浅色主题变量 ===== */
   :root,
@@ -86,6 +91,9 @@
     --xw-shadow-lg: 0 10px 15px rgba(0, 0, 0, 0.1), 0 4px 6px rgba(0, 0, 0, 0.05);
     --xw-shadow-xl: 0 20px 25px rgba(0, 0, 0, 0.1), 0 10px 10px rgba(0, 0, 0, 0.04);
     --xw-shadow-2xl: 0 25px 50px rgba(0, 0, 0, 0.15);
+    /* 历史变量别名（兼容旧样式） */
+    --card-bg: var(--xw-card-bg);
+    --sidebar-bg: var(--xw-backdrop-blur);
   }
   
   /* ===== 深色主题变量 ===== */
@@ -124,6 +132,10 @@
     --xw-shadow-lg: 0 10px 15px rgba(0, 0, 0, 0.3), 0 4px 6px rgba(0, 0, 0, 0.2);
     --xw-shadow-xl: 0 20px 25px rgba(0, 0, 0, 0.4), 0 10px 10px rgba(0, 0, 0, 0.2);
     --xw-shadow-2xl: 0 25px 50px rgba(0, 0, 0, 0.5);
+    /* 深色模式下的微调与别名 */
+    --xw-gradient-highlight: linear-gradient(135deg, rgba(99, 102, 241, 0.12), rgba(129, 140, 248, 0.08));
+    --card-bg: var(--xw-card-bg);
+    --sidebar-bg: var(--xw-backdrop-blur);
   }
   
   /* ===== 字体系统 ===== */
