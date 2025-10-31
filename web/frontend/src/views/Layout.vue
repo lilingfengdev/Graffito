@@ -161,7 +161,7 @@
     </el-container>
 
     <!-- 移动端底部导航栏 -->
-    <nav v-if="isMobile" class="mobile-bottom-nav">
+    <nav v-if="isMobile" class="mobile-bottom-nav xw-glass">
       <div 
         v-for="route in menuRoutes" 
         :key="route.path" 

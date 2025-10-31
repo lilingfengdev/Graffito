@@ -1638,6 +1638,51 @@ html.light .el-table--striped .el-table__body tr.el-table__row--striped td { bac
   .el-link:active { transform: scale(0.96) !important; transition: transform 0.1s ease !important; }
 }
 
+/* 可访问性：键盘导航可见焦点 */
+button:focus-visible,
+ .el-button:focus-visible,
+ a:focus-visible,
+ [role="button"]:focus-visible {
+  outline: 3px solid var(--xw-focus-ring);
+  outline-offset: 2px;
+}
+
+/* 输入聚焦环（兼容多组件） */
+.el-input__wrapper:focus-within,
+.el-select .el-input__wrapper:focus-within,
+.el-textarea__inner:focus {
+  box-shadow: 0 0 0 1px var(--xw-primary) inset, 0 0 0 3px var(--xw-primary-lightest) !important;
+}
+
+/* Tooltip 皮肤统一 */
+.el-tooltip__popper.is-dark,
+.el-tooltip__popper {
+  background: var(--xw-card-bg) !important;
+  color: var(--xw-text-primary) !important;
+  border: 1px solid var(--xw-card-border) !important;
+  box-shadow: var(--xw-shadow-lg) !important;
+  backdrop-filter: blur(12px);
+}
+
+/* Message 与 MessageBox 统一圆角与背景 */
+.el-message {
+  border-radius: var(--xw-radius-lg) !important;
+  box-shadow: var(--xw-shadow-md) !important;
+}
+
+.el-message-box {
+  border-radius: var(--xw-radius-2xl) !important;
+  background: var(--xw-card-bg) !important;
+  border: 1px solid var(--xw-card-border) !important;
+  box-shadow: var(--xw-shadow-2xl) !important;
+}
+
+/* Popconfirm 统一 */
+.el-popconfirm__main {
+  color: var(--xw-text-primary) !important;
+}
+.el-popconfirm__action .el-button.is-text { color: var(--xw-primary) !important; }
+
 /* ===== Element Plus 深色模式组件样式覆盖 ===== */
 
 /* 深色模式下的输入组件样式 */
