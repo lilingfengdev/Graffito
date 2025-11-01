@@ -38,7 +38,7 @@ class SSEService {
       this.error.value = null
 
       // 获取认证 token
-      const token = localStorage.getItem('token') || localStorage.getItem('access_token')
+      const token = localStorage.getItem('access_token') || localStorage.getItem('token')
       if (!token) {
         throw new Error('No authentication token found')
       }

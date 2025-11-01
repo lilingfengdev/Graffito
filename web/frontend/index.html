@@ -4,6 +4,19 @@
     <meta charset="UTF-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=5.0, user-scalable=yes" />
     <title>Graffito 审核后台</title>
+    <script>
+      (function() {
+        try {
+          var theme = localStorage.getItem('theme');
+          if (!theme) {
+            theme = window.matchMedia && window.matchMedia('(prefers-color-scheme: dark)').matches ? 'dark' : 'light';
+          }
+          var html = document.documentElement;
+          html.classList.remove('dark','light');
+          html.classList.add(theme);
+        } catch (e) { /* noop */ }
+      })();
+    </script>
     
     <!-- PWA Meta Tags -->
     <meta name="description" content="Graffito 校园墙审核管理系统" />
