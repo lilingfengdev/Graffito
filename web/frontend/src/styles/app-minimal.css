@@ -1,0 +1,61 @@
+/* ===== App.vue 极简样式 ===== */
+/* 这个文件替代 App.vue 中的庞大样式块 */
+
+/* NProgress 极简样式 */
+#nprogress .bar {
+  background: var(--xw-primary) !important;
+  height: 2px !important;
+}
+
+#nprogress .peg {
+  display: none !important;
+}
+
+/* 页面过渡动画 - 保持简洁 */
+.page-fade-enter-active,
+.page-fade-leave-active {
+  transition: opacity var(--xw-duration-normal) var(--xw-ease-out);
+}
+
+.page-fade-enter-from,
+.page-fade-leave-to {
+  opacity: 0;
+}
+
+/* 自定义滚动条 - 极简风格 */
+::-webkit-scrollbar {
+  width: 6px;
+  height: 6px;
+}
+
+::-webkit-scrollbar-track {
+  background: transparent;
+}
+
+::-webkit-scrollbar-thumb {
+  background: var(--xw-gray-400);
+  border-radius: var(--xw-radius-full);
+}
+
+::-webkit-scrollbar-thumb:hover {
+  background: var(--xw-gray-600);
+}
+
+/* 打印样式优化 */
+@media print {
+  .el-button,
+  .el-pagination,
+  .el-dialog__close,
+  .el-dropdown,
+  .el-backtop {
+    display: none !important;
+  }
+  
+  .el-table {
+    border: 1px solid var(--xw-gray-800);
+  }
+  
+  .el-table__cell {
+    border: 1px solid var(--xw-gray-800);
+  }
+}

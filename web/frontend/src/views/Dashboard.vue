@@ -1,30 +1,31 @@
 <template>
   <div class="dashboard">
-    <!-- 统计卡片 -->
-    <el-row :gutter="20" class="stats-row">
-      <el-col :xs="12" :sm="8" :md="6" :lg="4" v-for="stat in stats" :key="stat.key">
-        <el-card class="stat-card" shadow="hover">
-          <div class="stat-content">
-            <div class="stat-icon" :style="{ color: stat.color }">
-              <el-icon :size="32"><component :is="stat.icon" /></el-icon>
-            </div>
-            <div class="stat-info">
-              <div class="stat-value">{{ stat.value }}</div>
-              <div class="stat-label">{{ stat.label }}</div>
-            </div>
-          </div>
-        </el-card>
-      </el-col>
-    </el-row>
+    <!-- 统计卡片网格 -->
+    <div class="stats-grid">
+      <div 
+        v-for="stat in stats" 
+        :key="stat.key"
+        class="stat-card xw-glass xw-scale-in"
+        :style="{ animationDelay: `${stat.key * 0.05}s` }"
+      >
+        <div class="stat-icon" :style="{ background: `linear-gradient(135deg, ${stat.color}, ${stat.colorDark || stat.color})` }">
+          <el-icon :size="28"><component :is="stat.icon" /></el-icon>
+        </div>
+        <div class="stat-content">
+          <div class="stat-value">{{ stat.value }}</div>
+          <div class="stat-label">{{ stat.label }}</div>
+        </div>
+      </div>
+    </div>
 
     <!-- 图表区域 -->
-    <el-row :gutter="20" class="charts-row">
+    <div class="charts-grid">
       <!-- 最近投稿趋势 -->
-      <el-col :xs="24" :lg="16">
-        <el-card class="chart-card" shadow="hover">
-          <template #header>
-            <div class="card-header">
-              <span class="card-title">最近投稿趋势</span>
+      <el-card class="chart-card trend-chart xw-glass" shadow="never">
+        <template #header>
+          <div class="card-header">
+            <span class="card-title">最近投稿趋势</span>
+            <div class="header-actions">
               <el-radio-group v-model="trendRange" size="small">
                 <el-radio-button label="7">7天</el-radio-button>
                 <el-radio-button label="30">30天</el-radio-button>
@@ -37,100 +38,108 @@
                 @click="loadStats"
               />
             </div>
-          </template>
-          <div class="chart-container">
-            <canvas ref="chartCanvas" width="400" height="200"></canvas>
           </div>
-        </el-card>
-      </el-col>
+        </template>
+        <div class="chart-container">
+          <canvas ref="chartCanvas"></canvas>
+        </div>
+      </el-card>
 
       <!-- 状态分布 -->
-      <el-col :xs="24" :lg="8">
-        <el-card class="chart-card" shadow="hover">
-          <template #header>
-            <span class="card-title">投稿状态分布</span>
-          </template>
-          <div class="status-distribution">
-            <div 
-              v-for="item in statusDistribution" 
-              :key="item.status"
-              class="status-item"
-            >
+      <el-card class="chart-card status-card xw-glass" shadow="never">
+        <template #header>
+          <span class="card-title">投稿状态分布</span>
+        </template>
+        <div class="status-distribution">
+          <div 
+            v-for="item in statusDistribution" 
+            :key="item.status"
+            class="status-item"
+          >
+            <div class="status-bar">
+              <div 
+                class="status-bar-fill" 
+                :style="{ 
+                  width: `${(item.count / totalSubmissions * 100)}%`,
+                  background: `linear-gradient(90deg, ${item.color}, ${item.colorLight || item.color})`
+                }"
+              ></div>
+            </div>
+            <div class="status-info">
               <div class="status-indicator" :style="{ backgroundColor: item.color }"></div>
               <span class="status-label">{{ item.label }}</span>
               <span class="status-count">{{ item.count }}</span>
             </div>
           </div>
-        </el-card>
-      </el-col>
-    </el-row>
+        </div>
+      </el-card>
+    </div>
 
     <!-- 活跃群组和快速操作 -->
-    <el-row :gutter="20" class="bottom-row">
+    <div class="bottom-grid">
       <!-- 活跃群组 -->
-      <el-col :xs="24" :lg="12">
-        <el-card class="info-card" shadow="hover">
-          <template #header>
-            <span class="card-title">活跃群组</span>
-          </template>
-          <div class="groups-list">
-            <el-tag 
-              v-for="group in activeGroups" 
-              :key="group"
-              type="info"
-              class="group-tag"
-            >
-              {{ group }}
-            </el-tag>
-            <el-tag v-if="activeGroups.length === 0" type="info">
-              暂无活跃群组
-            </el-tag>
-          </div>
-        </el-card>
-      </el-col>
+      <el-card class="info-card xw-glass" shadow="never">
+        <template #header>
+          <span class="card-title">活跃群组</span>
+        </template>
+        <div class="groups-list">
+          <el-tag 
+            v-for="group in activeGroups" 
+            :key="group"
+            type="info"
+            size="large"
+            class="group-tag"
+          >
+            {{ group }}
+          </el-tag>
+          <el-empty 
+            v-if="activeGroups.length === 0" 
+            description="暂无活跃群组"
+            :image-size="80"
+          />
+        </div>
+      </el-card>
 
       <!-- 快速操作 -->
-      <el-col :xs="24" :lg="12" class="quick-actions-col">
-        <el-card class="info-card" shadow="hover">
-          <template #header>
-            <span class="card-title">快速操作</span>
-          </template>
-          <div class="quick-actions">
-            <el-button 
-              type="primary" 
-              :icon="Document"
-              @click="$router.push('/audit')"
-            >
-              审核管理
-            </el-button>
-            <el-button 
-              type="success" 
-              :icon="Box"
-              @click="$router.push('/stored')"
-            >
-              暂存区
-            </el-button>
-            <el-button 
-              type="warning" 
-              :icon="User"
-              @click="$router.push('/users')"
-            >
-              用户管理
-            </el-button>
-            <el-button 
-              type="danger" 
-              :icon="ChatDotRound"
-              @click="$router.push('/feedbacks')"
-            >
-              反馈管理
-            </el-button>
-          </div>
-        </el-card>
-      </el-col>
-    </el-row>
+      <el-card class="info-card quick-actions-card xw-glass" shadow="never">
+        <template #header>
+          <span class="card-title">快速操作</span>
+        </template>
+        <div class="quick-actions">
+          <button 
+            class="action-btn primary"
+            @click="$router.push('/audit')"
+          >
+            <el-icon :size="24"><Document /></el-icon>
+            <span>审核管理</span>
+          </button>
+          <button 
+            class="action-btn success"
+            @click="$router.push('/stored')"
+          >
+            <el-icon :size="24"><Box /></el-icon>
+            <span>暂存区</span>
+          </button>
+          <button 
+            class="action-btn warning"
+            @click="$router.push('/users')"
+          >
+            <el-icon :size="24"><User /></el-icon>
+            <span>用户管理</span>
+          </button>
+          <button 
+            class="action-btn danger"
+            @click="$router.push('/feedbacks')"
+          >
+            <el-icon :size="24"><ChatDotRound /></el-icon>
+            <span>反馈管理</span>
+          </button>
+        </div>
+      </el-card>
+    </div>
 
     <!-- 最新投稿 -->
-    <el-card class="recent-submissions" shadow="hover">
+    <el-card class="recent-submissions xw-glass" shadow="never">
       <template #header>
         <div class="card-header">
           <span class="card-title">最新投稿</span>
@@ -198,7 +207,6 @@ import { Chart, registerables } from 'chart.js'
 import moment from 'moment'
 import api from '../api'
 
-// 注册Chart.js组件
 Chart.register(...registerables)
 
 const loading = ref(false)
@@ -211,72 +219,83 @@ const trendRange = ref('30')
 // 计算属性
 const stats = computed(() => [
   {
-    key: 'total',
+    key: 0,
     label: '总投稿数',
     value: statsData.value.total_submissions || 0,
     icon: Document,
-    color: '#6366f1'
+    color: '#6366f1',
+    colorDark: '#4f46e5'
   },
   {
-    key: 'pending',
+    key: 1,
     label: '待审核',
     value: statsData.value.pending_submissions || 0,
     icon: Warning,
-    color: '#f59e0b'
+    color: '#f59e0b',
+    colorDark: '#d97706'
   },
   {
-    key: 'published',
+    key: 2,
     label: '已发布',
     value: statsData.value.published_submissions || 0,
     icon: TrendCharts,
-    color: '#10b981'
+    color: '#10b981',
+    colorDark: '#059669'
   },
   {
-    key: 'stored',
+    key: 3,
     label: '暂存区',
     value: statsData.value.stored_posts_count || 0,
     icon: Box,
-    color: '#8b5cf6'
+    color: '#8b5cf6',
+    colorDark: '#7c3aed'
   },
   {
-    key: 'feedbacks',
+    key: 4,
     label: '待处理反馈',
     value: statsData.value.pending_feedbacks || 0,
     icon: ChatDotRound,
-    color: '#ef4444'
+    color: '#ef4444',
+    colorDark: '#dc2626'
   }
 ])
+
+const totalSubmissions = computed(() => {
+  return statusDistribution.value.reduce((sum, item) => sum + item.count, 0) || 1
+})
 
 const statusDistribution = computed(() => [
   {
     status: 'pending',
     label: '待审核',
     count: statsData.value.pending_submissions || 0,
-    color: '#f59e0b'
+    color: '#f59e0b',
+    colorLight: '#fbbf24'
   },
   {
     status: 'approved',
     label: '已通过',
     count: statsData.value.approved_submissions || 0,
-    color: '#10b981'
+    color: '#10b981',
+    colorLight: '#34d399'
   },
   {
     status: 'published',
     label: '已发布',
     count: statsData.value.published_submissions || 0,
-    color: '#6366f1'
+    color: '#6366f1',
+    colorLight: '#818cf8'
   },
   {
     status: 'rejected',
     label: '已拒绝',
     count: statsData.value.rejected_submissions || 0,
-    color: '#ef4444'
+    color: '#ef4444',
+    colorLight: '#f87171'
   }
 ])
 
-const activeGroups = computed(() => {
-  return statsData.value.active_groups || []
-})
+const activeGroups = computed(() => statsData.value.active_groups || [])
 
 // 方法
 const loadStats = async () => {
@@ -328,7 +347,12 @@ const updateChart = () => {
         borderColor: '#6366f1',
         backgroundColor: 'rgba(99, 102, 241, 0.1)',
         tension: 0.4,
-        fill: true
+        fill: true,
+        pointRadius: 4,
+        pointHoverRadius: 6,
+        pointBackgroundColor: '#6366f1',
+        pointBorderColor: '#fff',
+        pointBorderWidth: 2
       }]
     },
     options: {
@@ -337,25 +361,40 @@ const updateChart = () => {
       plugins: {
         legend: {
           display: false
+        },
+        tooltip: {
+          backgroundColor: 'rgba(30, 41, 59, 0.95)',
+          titleColor: '#f8fafc',
+          bodyColor: '#e2e8f0',
+          borderColor: '#6366f1',
+          borderWidth: 1,
+          cornerRadius: 8,
+          padding: 12
         }
       },
       scales: {
         y: {
           beginAtZero: true,
           grid: {
-            color: 'rgba(71, 85, 105, 0.3)'
+            color: 'rgba(148, 163, 184, 0.1)'
           },
           ticks: {
             color: '#94a3b8',
-            stepSize: 1
+            stepSize: 1,
+            font: {
+              size: 12
+            }
           }
         },
         x: {
           grid: {
-            color: 'rgba(71, 85, 105, 0.3)'
+            display: false
           },
           ticks: {
-            color: '#94a3b8'
+            color: '#94a3b8',
+            font: {
+              size: 12
+            }
           }
         }
       }
@@ -398,11 +437,10 @@ const formatTime = (timeStr) => {
 onMounted(async () => {
   await loadStats()
   await loadRecentSubmissions()
-  // 定时刷新统计与列表
   setInterval(() => {
     loadStats()
     loadRecentSubmissions()
-  }, 30000)
+  }, 60000) // 60秒刷新一次
 })
 </script>
 
@@ -410,244 +448,297 @@ onMounted(async () => {
 .dashboard {
   max-width: 1400px;
   margin: 0 auto;
+  display: flex;
+  flex-direction: column;
+  gap: var(--xw-space-6);
 }
 
-.stats-row {
-  margin-bottom: 20px;
+/* 统计卡片网格 */
+.stats-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(200px, 1fr));
+  gap: var(--xw-space-4);
 }
 
 .stat-card {
-  margin-bottom: 20px;
-}
-
-.stat-content {
+  padding: var(--xw-space-5);
   display: flex;
   align-items: center;
-  gap: 16px;
+  gap: var(--xw-space-4);
+  border-radius: var(--xw-radius-xl);
+  transition: var(--xw-transition);
+  cursor: pointer;
+}
+
+.stat-card:hover {
+  transform: translateY(-4px) scale(1.02);
+  box-shadow: var(--xw-shadow-lg);
 }
 
 .stat-icon {
-  padding: 12px;
-  border-radius: 12px;
-  background: rgba(99, 102, 241, 0.1);
+  width: 56px;
+  height: 56px;
+  border-radius: var(--xw-radius-xl);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  color: white;
+  flex-shrink: 0;
+  box-shadow: var(--xw-shadow-md);
 }
 
-.stat-info {
+.stat-content {
   flex: 1;
+  min-width: 0;
 }
 
 .stat-value {
-  font-size: 24px;
-  font-weight: 600;
-  color: var(--el-text-color-primary);
+  font-size: var(--xw-text-3xl);
+  font-weight: var(--xw-font-bold);
+  color: var(--xw-text-primary);
   line-height: 1;
+  margin-bottom: var(--xw-space-1);
 }
 
 .stat-label {
-  font-size: 14px;
-  color: var(--el-text-color-secondary);
-  margin-top: 4px;
+  font-size: var(--xw-text-sm);
+  color: var(--xw-text-secondary);
+  font-weight: var(--xw-font-medium);
 }
 
-.charts-row {
-  margin-bottom: 20px;
+/* 图表网格 */
+.charts-grid {
+  display: grid;
+  grid-template-columns: 2fr 1fr;
+  gap: var(--xw-space-6);
 }
 
 .chart-card {
-  margin-bottom: 20px;
+  border-radius: var(--xw-radius-xl);
 }
 
 .card-header {
   display: flex;
   justify-content: space-between;
   align-items: center;
-  min-height: 32px;
-  gap: 16px;
+  flex-wrap: wrap;
+  gap: var(--xw-space-3);
 }
 
 .card-title {
-  font-size: 16px;
-  font-weight: 600;
-  color: var(--el-text-color-primary);
+  font-size: var(--xw-text-lg);
+  font-weight: var(--xw-font-semibold);
+  color: var(--xw-text-primary);
+}
+
+.header-actions {
+  display: flex;
+  align-items: center;
+  gap: var(--xw-space-2);
 }
 
 .chart-container {
   height: 300px;
   position: relative;
+  padding: var(--xw-space-4) 0;
 }
 
+/* 状态分布 */
 .status-distribution {
-  padding: 20px 0;
+  padding: var(--xw-space-4) 0;
+  display: flex;
+  flex-direction: column;
+  gap: var(--xw-space-4);
 }
 
 .status-item {
   display: flex;
+  flex-direction: column;
+  gap: var(--xw-space-2);
+}
+
+.status-bar {
+  height: 8px;
+  background: var(--xw-bg-tertiary);
+  border-radius: var(--xw-radius-full);
+  overflow: hidden;
+}
+
+.status-bar-fill {
+  height: 100%;
+  transition: width 0.6s cubic-bezier(0.4, 0, 0.2, 1);
+  border-radius: var(--xw-radius-full);
+}
+
+.status-info {
+  display: flex;
   align-items: center;
-  margin-bottom: 16px;
-  gap: 12px;
+  gap: var(--xw-space-2);
 }
 
 .status-indicator {
   width: 12px;
   height: 12px;
   border-radius: 50%;
+  flex-shrink: 0;
 }
 
 .status-label {
   flex: 1;
-  color: var(--el-text-color-regular);
+  color: var(--xw-text-secondary);
+  font-size: var(--xw-text-sm);
+  font-weight: var(--xw-font-medium);
 }
 
 .status-count {
-  font-weight: 600;
-  color: var(--el-text-color-primary);
+  font-weight: var(--xw-font-bold);
+  color: var(--xw-text-primary);
+  font-size: var(--xw-text-base);
 }
 
-.bottom-row {
-  margin-bottom: 20px;
+/* 底部网格 */
+.bottom-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(300px, 1fr));
+  gap: var(--xw-space-6);
 }
 
 .info-card {
-  margin-bottom: 20px;
+  border-radius: var(--xw-radius-xl);
 }
 
 .groups-list {
   display: flex;
   flex-wrap: wrap;
-  gap: 8px;
-  padding: 10px 0;
+  gap: var(--xw-space-2);
+  padding: var(--xw-space-2) 0;
+  min-height: 80px;
 }
 
 .group-tag {
-  margin: 0;
+  font-weight: var(--xw-font-medium);
 }
 
+/* 快速操作 */
 .quick-actions {
+  display: grid;
+  grid-template-columns: repeat(2, 1fr);
+  gap: var(--xw-space-3);
+  padding: var(--xw-space-2) 0;
+}
+
+.action-btn {
   display: flex;
-  flex-wrap: wrap;
-  gap: 12px;
-  padding: 10px 0;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  gap: var(--xw-space-2);
+  padding: var(--xw-space-5);
+  border: none;
+  border-radius: var(--xw-radius-xl);
+  color: white;
+  font-size: var(--xw-text-sm);
+  font-weight: var(--xw-font-semibold);
+  cursor: pointer;
+  transition: var(--xw-transition);
+  box-shadow: var(--xw-shadow-sm);
 }
 
+.action-btn:hover {
+  transform: translateY(-2px) scale(1.02);
+  box-shadow: var(--xw-shadow-md);
+}
+
+.action-btn:active {
+  transform: translateY(0) scale(0.98);
+}
+
+.action-btn.primary {
+  background: linear-gradient(135deg, #6366f1, #4f46e5);
+}
+
+.action-btn.success {
+  background: linear-gradient(135deg, #10b981, #059669);
+}
+
+.action-btn.warning {
+  background: linear-gradient(135deg, #f59e0b, #d97706);
+}
+
+.action-btn.danger {
+  background: linear-gradient(135deg, #ef4444, #dc2626);
+}
+
+/* 最新投稿 */
 .recent-submissions {
-  margin-bottom: 20px;
-}
-
-/* 默认隐藏快速操作（移动端） */
-.quick-actions-col {
-  display: none !important;
-}
-
-/* 桌面端显示快速操作 */
-@media (min-width: 769px) {
-  .quick-actions-col {
-    display: block !important;
-  }
+  border-radius: var(--xw-radius-xl);
 }
 
 /* 响应式设计 */
+@media (max-width: 1024px) {
+  .charts-grid {
+    grid-template-columns: 1fr;
+  }
+}
+
 @media (max-width: 768px) {
   .dashboard {
-    padding: 0;
+    gap: var(--xw-space-4);
   }
   
-  .stats-row,
-  .charts-row,
-  .bottom-row {
-    margin: 0 0 16px 0;
+  .stats-grid {
+    grid-template-columns: repeat(2, 1fr);
+    gap: var(--xw-space-3);
   }
   
   .stat-card {
-    margin-bottom: 12px;
-  }
-  
-  .stat-content {
     flex-direction: column;
     text-align: center;
-    gap: 8px;
-    padding: 16px 12px;
+    padding: var(--xw-space-4);
+  }
+  
+  .stat-icon {
+    width: 48px;
+    height: 48px;
   }
   
   .stat-value {
-    font-size: 20px;
-  }
-  
-  .stat-label {
-    font-size: 12px;
+    font-size: var(--xw-text-2xl);
   }
   
   .chart-container {
     height: 250px;
-    padding: 10px;
+    padding: var(--xw-space-2) 0;
   }
   
-  .card-header {
-    flex-wrap: wrap;
-    gap: 12px;
+  .bottom-grid {
+    grid-template-columns: 1fr;
+    gap: var(--xw-space-4);
   }
   
-  .card-title {
-    font-size: 14px;
+  .quick-actions {
+    grid-template-columns: repeat(2, 1fr);
+    gap: var(--xw-space-2);
   }
   
-  .status-item {
-    margin-bottom: 12px;
-    padding: 8px 0;
-  }
-  
-  .status-label {
-    font-size: 13px;
-  }
-  
-  .groups-list {
-    gap: 6px;
-  }
-  
-  .group-tag {
-    font-size: 12px;
-    padding: 4px 8px;
-  }
-  
-  /* 表格适配 */
-  :deep(.el-table) {
-    font-size: 13px;
-  }
-  
-  :deep(.el-table .el-button) {
-    padding: 4px 8px;
-    font-size: 12px;
+  .action-btn {
+    padding: var(--xw-space-4);
+    gap: var(--xw-space-1);
   }
 }
 
-/* 超小屏幕适配 */
 @media (max-width: 480px) {
-  .stat-content {
-    padding: 12px 8px;
+  .stats-grid {
+    grid-template-columns: 1fr;
   }
   
-  .stat-value {
-    font-size: 18px;
+  .stat-card {
+    flex-direction: row;
+    text-align: left;
   }
   
-  .stat-icon :deep(.el-icon) {
-    font-size: 24px !important;
-  }
-  
-  .card-title {
-    font-size: 13px;
-  }
-  
-  .chart-container {
-    height: 200px;
-    padding: 8px;
-  }
-  
-  .status-distribution {
-    padding: 10px;
-  }
-  
-  .groups-list {
-    padding: 8px 0;
+  .quick-actions {
+    grid-template-columns: 1fr;
   }
 }
 </style>

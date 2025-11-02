@@ -12,10 +12,13 @@ import * as ElementPlusIconsVue from '@element-plus/icons-vue'
 import NProgress from 'nprogress'
 import 'nprogress/nprogress.css'
 
-// 引入统一设计系统样式
+// 样式系统
 import './styles/design-system.css'
+import './styles/common.css'
+import './styles/layout.css'
+import './styles/pages.css'
 
-// 引入统一组件系统
+// 组件系统
 import XwComponents from './components/index.js'
 
 const app = createApp(App)

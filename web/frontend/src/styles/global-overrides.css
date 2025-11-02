@@ -1,0 +1,474 @@
+/* ===== Element Plus 极简主题覆盖 ===== */
+/* 基于极简设计原则重构 */
+
+/* ===== CSS 变量映射 ===== */
+/* 将 Element Plus 变量映射到我们的设计系统 */
+:root {
+  /* 品牌色映射 */
+  --el-color-primary: var(--xw-primary);
+  --el-color-primary-dark-2: var(--xw-primary-dark);
+  --el-color-primary-light-3: var(--xw-primary-light);
+  --el-color-primary-light-5: var(--xw-primary-lighter);
+  --el-color-primary-light-7: var(--xw-primary-lighter);
+  --el-color-primary-light-8: var(--xw-primary-lightest);
+  --el-color-primary-light-9: var(--xw-primary-lightest);
+  
+  /* 功能色映射 */
+  --el-color-success: var(--xw-success);
+  --el-color-warning: var(--xw-warning);
+  --el-color-danger: var(--xw-danger);
+  --el-color-info: var(--xw-info);
+  
+  --el-color-success-light-8: var(--xw-success-light);
+  --el-color-warning-light-8: var(--xw-warning-light);
+  --el-color-danger-light-8: var(--xw-danger-light);
+  --el-color-info-light-8: var(--xw-info-light);
+  
+  /* 文字色映射 */
+  --el-text-color-primary: var(--xw-text-primary);
+  --el-text-color-regular: var(--xw-text-primary);
+  --el-text-color-secondary: var(--xw-text-secondary);
+  --el-text-color-placeholder: var(--xw-text-tertiary);
+  --el-text-color-disabled: var(--xw-text-tertiary);
+  
+  /* 背景色映射 */
+  --el-bg-color: var(--xw-bg-primary);
+  --el-bg-color-page: var(--xw-bg-secondary);
+  --el-fill-color-light: var(--xw-bg-tertiary);
+  --el-fill-color-lighter: var(--xw-bg-secondary);
+  --el-fill-color-extra-light: var(--xw-bg-secondary);
+  --el-fill-color-blank: var(--xw-bg-primary);
+  
+  /* 边框色映射 */
+  --el-border-color: var(--xw-border-primary);
+  --el-border-color-light: var(--xw-border-secondary);
+  --el-border-color-lighter: var(--xw-border-secondary);
+  --el-border-color-extra-light: var(--xw-border-secondary);
+  
+  /* 阴影映射 - 极简化 */
+  --el-box-shadow: var(--xw-shadow-md);
+  --el-box-shadow-light: var(--xw-shadow-sm);
+  --el-box-shadow-lighter: var(--xw-shadow-sm);
+  --el-box-shadow-dark: var(--xw-shadow-lg);
+  
+  /* 圆角映射 */
+  --el-border-radius-base: var(--xw-radius);
+  --el-border-radius-small: var(--xw-radius-sm);
+  --el-border-radius-round: var(--xw-radius-lg);
+  --el-border-radius-circle: var(--xw-radius-full);
+  
+  /* 过渡映射 */
+  --el-transition-duration: var(--xw-duration-normal);
+  --el-transition-duration-fast: var(--xw-duration-fast);
+  --el-transition-function-ease-in-out-bezier: var(--xw-ease-in-out);
+  --el-transition-function-fast-bezier: var(--xw-ease-out);
+  
+  /* 字体映射 */
+  --el-font-family: var(--xw-font-sans);
+  --el-font-size-base: 14px;
+  --el-font-size-small: 13px;
+  --el-font-size-large: 16px;
+  
+  /* 组件特定 */
+  --el-component-size: 40px;
+  --el-component-size-small: 32px;
+  --el-component-size-large: 48px;
+}
+
+/* ===== 全局样式重置 ===== */
+/* 移除 Element Plus 的过度装饰 */
+.el-button,
+.el-input__wrapper,
+.el-textarea__inner,
+.el-select__wrapper,
+.el-card,
+.el-dialog,
+.el-dropdown-menu,
+.el-select-dropdown,
+.el-table {
+  transition: var(--xw-transition-colors) !important;
+}
+
+/* ===== 按钮 - 极简扁平 ===== */
+.el-button {
+  border-radius: var(--xw-radius) !important;
+  font-weight: var(--xw-font-medium) !important;
+  border: 1px solid transparent !important;
+  padding: 0 var(--xw-space-3) !important;
+  height: var(--el-component-size) !important;
+  line-height: 1 !important;
+}
+
+/* 主按钮 - 纯色填充 */
+.el-button--primary {
+  background: var(--xw-primary) !important;
+  color: var(--xw-white) !important;
+}
+
+.el-button--primary:hover:not(:disabled) {
+  background: var(--xw-primary-dark) !important;
+}
+
+.el-button--primary:active:not(:disabled) {
+  transform: scale(0.98);
+}
+
+/* 次要按钮 - 线框 */
+.el-button--default {
+  background: transparent !important;
+  border-color: var(--xw-border-primary) !important;
+  color: var(--xw-text-primary) !important;
+}
+
+.el-button--default:hover:not(:disabled) {
+  background: var(--xw-bg-tertiary) !important;
+  border-color: var(--xw-text-secondary) !important;
+}
+
+/* 文字按钮 - 最简 */
+.el-button--text {
+  background: transparent !important;
+  border: none !important;
+  color: var(--xw-primary) !important;
+  padding: 0 var(--xw-space-1) !important;
+}
+
+.el-button--text:hover:not(:disabled) {
+  color: var(--xw-primary-dark) !important;
+  background: var(--xw-primary-lightest) !important;
+}
+
+/* 危险按钮 */
+.el-button--danger {
+  background: transparent !important;
+  border-color: var(--xw-danger) !important;
+  color: var(--xw-danger) !important;
+}
+
+.el-button--danger:hover:not(:disabled) {
+  background: var(--xw-danger) !important;
+  color: var(--xw-white) !important;
+}
+
+/* 按钮尺寸 */
+.el-button--small {
+  height: 32px !important;
+  padding: 0 var(--xw-space-2) !important;
+  font-size: var(--xw-text-sm) !important;
+}
+
+.el-button--large {
+  height: 48px !important;
+  padding: 0 var(--xw-space-4) !important;
+  font-size: var(--xw-text-base) !important;
+}
+
+/* ===== 输入框 - Material 风格 ===== */
+.el-input__wrapper {
+  background: transparent !important;
+  border: none !important;
+  border-bottom: 1px solid var(--xw-border-primary) !important;
+  border-radius: 0 !important;
+  box-shadow: none !important;
+  padding: var(--xw-space-1) 0 !important;
+}
+
+.el-input__inner {
+  padding: 0 !important;
+  height: 32px !important;
+  line-height: 32px !important;
+}
+
+.el-input__wrapper:hover:not(.is-disabled) {
+  border-bottom-color: var(--xw-text-secondary) !important;
+}
+
+.el-input__wrapper.is-focus {
+  border-bottom-color: var(--xw-primary) !important;
+  border-bottom-width: 2px !important;
+  padding-bottom: calc(var(--xw-space-1) - 1px) !important;
+}
+
+/* 文本域 */
+.el-textarea__inner {
+  background: transparent !important;
+  border: none !important;
+  border-bottom: 1px solid var(--xw-border-primary) !important;
+  border-radius: 0 !important;
+  padding: var(--xw-space-1) 0 !important;
+  resize: vertical !important;
+}
+
+.el-textarea__inner:hover:not(:disabled) {
+  border-bottom-color: var(--xw-text-secondary) !important;
+}
+
+.el-textarea__inner:focus {
+  border-bottom-color: var(--xw-primary) !important;
+  border-bottom-width: 2px !important;
+}
+
+/* ===== 卡片 - 极简边框 ===== */
+.el-card {
+  background: var(--xw-card-bg) !important;
+  border: 1px solid var(--xw-card-border) !important;
+  border-radius: var(--xw-radius) !important;
+  box-shadow: none !important;
+}
+
+.el-card:hover {
+  box-shadow: var(--xw-shadow-sm) !important;
+}
+
+.el-card__header {
+  border-bottom: 1px solid var(--xw-border-primary) !important;
+  padding: var(--xw-space-3) !important;
+}
+
+.el-card__body {
+  padding: var(--xw-space-3) !important;
+}
+
+/* ===== 表格 - 简洁行距 ===== */
+.el-table {
+  background: transparent !important;
+  font-size: var(--xw-text-sm) !important;
+}
+
+.el-table::before,
+.el-table--group::after {
+  display: none !important;
+}
+
+.el-table__header-wrapper {
+  border-bottom: 1px solid var(--xw-border-primary) !important;
+}
+
+.el-table th.el-table__cell {
+  background: transparent !important;
+  color: var(--xw-text-secondary) !important;
+  font-weight: var(--xw-font-medium) !important;
+  border-bottom: none !important;
+  padding: var(--xw-space-2) !important;
+}
+
+.el-table tr {
+  background: transparent !important;
+}
+
+.el-table td.el-table__cell {
+  border-bottom: 1px solid var(--xw-border-secondary) !important;
+  padding: var(--xw-space-2) !important;
+}
+
+.el-table__row:hover > td.el-table__cell {
+  background: var(--xw-bg-tertiary) !important;
+}
+
+/* 移除斑马纹 */
+.el-table--striped .el-table__body tr.el-table__row--striped td.el-table__cell {
+  background: transparent !important;
+}
+
+/* ===== 对话框 - 干净简约 ===== */
+.el-dialog {
+  background: var(--xw-bg-primary) !important;
+  border: 1px solid var(--xw-border-primary) !important;
+  border-radius: var(--xw-radius-md) !important;
+  box-shadow: var(--xw-shadow-lg) !important;
+}
+
+.el-dialog__header {
+  border-bottom: 1px solid var(--xw-border-primary) !important;
+  padding: var(--xw-space-3) !important;
+}
+
+.el-dialog__title {
+  font-size: var(--xw-text-lg) !important;
+  font-weight: var(--xw-font-semibold) !important;
+  color: var(--xw-text-primary) !important;
+}
+
+.el-dialog__body {
+  padding: var(--xw-space-4) !important;
+}
+
+.el-dialog__footer {
+  border-top: 1px solid var(--xw-border-primary) !important;
+  padding: var(--xw-space-3) !important;
+}
+
+/* ===== 下拉菜单 - 轻盈 ===== */
+.el-dropdown-menu,
+.el-select-dropdown {
+  background: var(--xw-bg-primary) !important;
+  border: 1px solid var(--xw-border-primary) !important;
+  border-radius: var(--xw-radius) !important;
+  box-shadow: var(--xw-shadow-md) !important;
+  padding: var(--xw-space-1) !important;
+}
+
+.el-dropdown-menu__item,
+.el-select-dropdown__item {
+  padding: var(--xw-space-1) var(--xw-space-2) !important;
+  color: var(--xw-text-primary) !important;
+  border-radius: var(--xw-radius-sm) !important;
+  margin: 2px 0 !important;
+}
+
+.el-dropdown-menu__item:hover,
+.el-select-dropdown__item:hover {
+  background: var(--xw-bg-tertiary) !important;
+  color: var(--xw-text-primary) !important;
+}
+
+/* ===== 标签 - 扁平化 ===== */
+.el-tag {
+  border: 1px solid currentColor !important;
+  background: transparent !important;
+  color: var(--xw-text-secondary) !important;
+  border-radius: var(--xw-radius-sm) !important;
+  padding: 0 var(--xw-space-1) !important;
+  height: 24px !important;
+  line-height: 22px !important;
+  font-size: var(--xw-text-xs) !important;
+}
+
+.el-tag--primary {
+  color: var(--xw-primary) !important;
+}
+
+.el-tag--success {
+  color: var(--xw-success) !important;
+}
+
+.el-tag--warning {
+  color: var(--xw-warning) !important;
+}
+
+.el-tag--danger {
+  color: var(--xw-danger) !important;
+}
+
+.el-tag--info {
+  color: var(--xw-info) !important;
+}
+
+/* ===== 分页 - 极简 ===== */
+.el-pagination {
+  font-weight: var(--xw-font-normal) !important;
+}
+
+.el-pagination button,
+.el-pager li {
+  background: transparent !important;
+  border: 1px solid var(--xw-border-primary) !important;
+  color: var(--xw-text-primary) !important;
+  border-radius: var(--xw-radius-sm) !important;
+  margin: 0 2px !important;
+  min-width: 32px !important;
+  height: 32px !important;
+  line-height: 30px !important;
+}
+
+.el-pagination button:hover,
+.el-pager li:hover {
+  border-color: var(--xw-primary) !important;
+  color: var(--xw-primary) !important;
+}
+
+.el-pager li.is-active {
+  background: var(--xw-primary) !important;
+  border-color: var(--xw-primary) !important;
+  color: var(--xw-white) !important;
+}
+
+/* ===== 标签页 - 简洁 ===== */
+.el-tabs__nav-wrap::after {
+  display: none !important;
+}
+
+.el-tabs__item {
+  color: var(--xw-text-secondary) !important;
+  font-weight: var(--xw-font-normal) !important;
+  padding: 0 var(--xw-space-3) !important;
+}
+
+.el-tabs__item:hover {
+  color: var(--xw-text-primary) !important;
+}
+
+.el-tabs__item.is-active {
+  color: var(--xw-primary) !important;
+  font-weight: var(--xw-font-medium) !important;
+}
+
+.el-tabs__active-bar {
+  background: var(--xw-primary) !important;
+  height: 2px !important;
+}
+
+/* ===== Loading - 轻量 ===== */
+.el-loading-mask {
+  background-color: rgba(255, 255, 255, 0.8) !important;
+}
+
+html.dark .el-loading-mask {
+  background-color: rgba(0, 0, 0, 0.8) !important;
+}
+
+.el-loading-spinner .circular circle {
+  stroke: var(--xw-primary) !important;
+}
+
+/* ===== Message & Notification - 简约 ===== */
+.el-message,
+.el-notification {
+  background: var(--xw-bg-primary) !important;
+  border: 1px solid var(--xw-border-primary) !important;
+  border-radius: var(--xw-radius) !important;
+  box-shadow: var(--xw-shadow-lg) !important;
+  padding: var(--xw-space-2) var(--xw-space-3) !important;
+}
+
+/* ===== 焦点样式 - 一致性 ===== */
+.el-button:focus-visible,
+.el-input__wrapper:focus-within,
+.el-textarea__inner:focus-visible,
+a:focus-visible,
+[tabindex]:focus-visible {
+  outline: 2px solid var(--xw-primary) !important;
+  outline-offset: 2px !important;
+}
+
+/* ===== 禁用状态 - 统一 ===== */
+.el-button.is-disabled,
+.el-input.is-disabled .el-input__wrapper,
+.el-textarea.is-disabled .el-textarea__inner,
+.el-select.is-disabled .el-select__wrapper,
+[disabled] {
+  opacity: 0.5 !important;
+  cursor: not-allowed !important;
+}
+
+/* ===== 移动端优化 ===== */
+@media (max-width: 768px) {
+  /* 增大点击区域 */
+  .el-button {
+    min-height: 44px !important;
+  }
+  
+  .el-input__inner {
+    height: 44px !important;
+    line-height: 44px !important;
+  }
+  
+  .el-table__cell {
+    padding: var(--xw-space-1) !important;
+  }
+  
+  .el-dialog {
+    margin: var(--xw-space-2) !important;
+    width: calc(100% - var(--xw-space-4)) !important;
+  }
+}

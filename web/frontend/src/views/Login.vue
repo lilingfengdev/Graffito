@@ -1,15 +1,35 @@
 <template>
   <div class="login-page">
+    <!-- 主题切换按钮 -->
+    <div class="theme-toggle">
+      <el-tooltip :content="themeText" placement="left">
+        <el-button 
+          :icon="themeIconComponent" 
+          circle 
+          size="large"
+          @click="toggleTheme"
+          class="theme-btn xw-glass"
+        />
+      </el-tooltip>
+    </div>
+    
+    <!-- 登录容器 -->
     <div class="login-container">
-      <!-- 登录表单 -->
-      <el-card class="login-card xw-card" shadow="always">
+      <!-- 品牌标题 -->
+      <div class="brand-header xw-slide-up">
+        <el-icon :size="48" color="#6366f1" class="brand-icon">
+          <Document />
+        </el-icon>
+        <h1 class="brand-title">Graffito</h1>
+        <p class="brand-subtitle">校园墙审核管理系统</p>
+      </div>
+      
+      <!-- 登录卡片 -->
+      <el-card class="login-card xw-glass xw-scale-in" shadow="never">
         <template #header>
-          <div class="login-header">
-            <div class="logo">
-              <el-icon size="32" color="#6366f1"><Document /></el-icon>
-              <span class="logo-text">Graffito 审核后台</span>
-            </div>
-            <p class="subtitle">管理员登录</p>
+          <div class="card-header">
+            <h2>管理员登录</h2>
+            <p>欢迎回来，请登录您的账号</p>
           </div>
         </template>
         
@@ -26,7 +46,12 @@
               placeholder="请输入用户名"
               :prefix-icon="User"
               clearable
-            />
+              @keyup.enter="handleLogin"
+            >
+              <template #prefix>
+                <el-icon><User /></el-icon>
+              </template>
+            </el-input>
           </el-form-item>
           
           <el-form-item prop="password">
@@ -34,44 +59,48 @@
               v-model="loginForm.password"
               type="password"
               placeholder="请输入密码"
-              :prefix-icon="Lock"
               show-password
               clearable
               @keyup.enter="handleLogin"
-            />
+            >
+              <template #prefix>
+                <el-icon><Lock /></el-icon>
+              </template>
+            </el-input>
           </el-form-item>
           
           <el-form-item>
             <el-button 
               type="primary" 
               size="large"
+              native-type="submit"
               style="width: 100%"
               :loading="logging"
               @click="handleLogin"
             >
-              登录
+              <span v-if="!logging">登录</span>
+              <span v-else>登录中...</span>
             </el-button>
           </el-form-item>
           
-          <el-form-item>
-            <div class="login-footer">
-              <router-link to="/register" class="register-link">
-                使用邀请注册
-              </router-link>
-            </div>
-          </el-form-item>
+          <div class="login-footer">
+            <router-link to="/register" class="register-link">
+              <el-icon><Plus /></el-icon>
+              <span>使用邀请注册</span>
+            </router-link>
+          </div>
         </el-form>
       </el-card>
 
-      <!-- 初始化超级管理员 -->
+      <!-- 初始化超级管理员卡片 -->
       <el-card 
         v-if="!superadminExists" 
-        class="init-card xw-card" 
-        shadow="hover"
+        class="init-card xw-glass xw-scale-in" 
+        shadow="never"
       >
         <template #header>
           <div class="init-header">
-            <el-icon size="24" color="#f59e0b"><Warning /></el-icon>
+            <el-icon :size="24" color="#f59e0b"><Warning /></el-icon>
             <span>系统初始化</span>
           </div>
         </template>
@@ -131,22 +160,12 @@
       </el-card>
     </div>
     
-    <!-- 主题切换按钮 -->
-    <div class="theme-toggle">
-      <el-button 
-        :icon="themeIconComponent" 
-        circle 
-        size="large"
-        @click="toggleTheme"
-        :title="themeText"
-      />
-    </div>
-    
     <!-- 背景装饰 -->
-    <div class="bg-decoration">
+    <div class="bg-decoration" aria-hidden="true">
       <div class="circle circle-1"></div>
       <div class="circle circle-2"></div>
       <div class="circle circle-3"></div>
+      <div class="gradient-mesh"></div>
     </div>
   </div>
 </template>
@@ -155,7 +174,7 @@
 import { ref, onMounted, computed } from 'vue'
 import { useRouter } from 'vue-router'
 import { ElMessage } from 'element-plus'
-import { Document, User, Lock, Warning, Moon, Sunny } from '@element-plus/icons-vue'
+import { Document, User, Lock, Warning, Moon, Sunny, Plus } from '@element-plus/icons-vue'
 import api from '../api'
 import { useTheme } from '../composables/useTheme'
 
@@ -163,9 +182,7 @@ const router = useRouter()
 
 // 主题管理
 const { isDark, toggleTheme, themeText } = useTheme()
-const themeIconComponent = computed(() => {
-  return isDark.value ? Sunny : Moon
-})
+const themeIconComponent = computed(() => isDark.value ? Sunny : Moon)
 
 // 表单引用
 const loginFormRef = ref()
@@ -227,14 +244,13 @@ const handleLogin = async () => {
       headers: { 'Content-Type': 'application/x-www-form-urlencoded' }
     })
     
-    // 统一使用 access_token，兼容旧 key
     localStorage.setItem('access_token', data.access_token)
     try { localStorage.setItem('token', data.access_token) } catch(_) {}
-    ElMessage.success('登录成功')
+    ElMessage.success('登录成功，欢迎回来！')
     const redirect = new URLSearchParams(window.location.search).get('redirect')
     router.push(redirect || '/')
   } catch (error) {
-    const message = error.response?.data?.detail || '登录失败'
+    const message = error.response?.data?.detail || '登录失败，请检查用户名和密码'
     ElMessage.error(message)
   } finally {
     logging.value = false
@@ -304,88 +320,122 @@ onMounted(() => {
   align-items: center;
   justify-content: center;
   position: relative;
-  background: var(--app-bg-gradient);
+  background: var(--xw-gradient-primary);
   overflow: hidden;
-  transition: background 0.3s ease;
-}
-
-.login-container {
-  width: 100%;
-  max-width: 400px;
-  padding: 20px;
-  position: relative;
-  z-index: 2;
+  padding: var(--xw-space-6);
 }
 
 .theme-toggle {
   position: fixed;
-  top: 20px;
-  right: 20px;
+  top: var(--xw-space-6);
+  right: var(--xw-space-6);
   z-index: 1000;
+  animation: xw-fade-in 0.5s ease;
 }
 
-.login-card {
-  margin-bottom: 20px;
-  backdrop-filter: blur(10px);
-  background: var(--card-bg) !important;
-  transition: background 0.3s ease;
+.theme-btn {
+  backdrop-filter: blur(20px);
+  -webkit-backdrop-filter: blur(20px);
+  transition: var(--xw-transition);
 }
 
-.login-header {
+.theme-btn:hover {
+  transform: rotate(180deg) scale(1.1);
+}
+
+.login-container {
+  width: 100%;
+  max-width: 420px;
+  position: relative;
+  z-index: 2;
+  animation-delay: 0.1s;
+}
+
+/* 品牌标题 */
+.brand-header {
   text-align: center;
+  margin-bottom: var(--xw-space-8);
+  animation-delay: 0.2s;
 }
 
-.logo {
-  display: flex;
-  align-items: center;
-  justify-content: center;
-  gap: 12px;
-  margin-bottom: 8px;
+.brand-icon {
+  animation: xw-scale-in 0.5s ease;
 }
 
-.logo-text {
-  font-size: 24px;
-  font-weight: 600;
-  background: linear-gradient(135deg, #6366f1, #8b5cf6);
+.brand-title {
+  margin: var(--xw-space-4) 0 var(--xw-space-2);
+  font-size: var(--xw-text-4xl);
+  font-weight: var(--xw-font-bold);
+  background: linear-gradient(135deg, var(--xw-primary), var(--xw-primary-light), #8b5cf6);
   -webkit-background-clip: text;
   -webkit-text-fill-color: transparent;
   background-clip: text;
+  letter-spacing: -0.02em;
+  line-height: var(--xw-leading-tight);
 }
 
-.subtitle {
+.brand-subtitle {
   margin: 0;
-  color: var(--el-text-color-secondary);
-  font-size: 16px;
+  color: var(--xw-text-secondary);
+  font-size: var(--xw-text-lg);
+  font-weight: var(--xw-font-medium);
+}
+
+/* 登录卡片 */
+.login-card {
+  margin-bottom: var(--xw-space-6);
+  animation-delay: 0.3s;
+}
+
+.card-header h2 {
+  margin: 0 0 var(--xw-space-2);
+  color: var(--xw-text-primary);
+  font-size: var(--xw-text-2xl);
+  font-weight: var(--xw-font-bold);
+}
+
+.card-header p {
+  margin: 0;
+  color: var(--xw-text-tertiary);
+  font-size: var(--xw-text-sm);
 }
 
 .login-footer {
-  text-align: center;
-  width: 100%;
+  display: flex;
+  justify-content: center;
+  margin-top: var(--xw-space-4);
 }
 
 .register-link {
-  color: var(--el-color-primary);
+  display: inline-flex;
+  align-items: center;
+  gap: var(--xw-space-2);
+  color: var(--xw-primary);
   text-decoration: none;
-  font-size: 14px;
-  transition: color 0.3s ease;
+  font-size: var(--xw-text-sm);
+  font-weight: var(--xw-font-medium);
+  padding: var(--xw-space-2) var(--xw-space-3);
+  border-radius: var(--xw-radius-lg);
+  transition: var(--xw-transition);
 }
 
 .register-link:hover {
-  color: var(--el-color-primary-light-3);
+  background: var(--xw-gradient-highlight);
+  transform: translateY(-1px);
 }
 
+/* 初始化卡片 */
 .init-card {
-  backdrop-filter: blur(10px);
-  background: var(--card-bg) !important;
-  transition: background 0.3s ease;
+  animation-delay: 0.4s;
 }
 
 .init-header {
   display: flex;
   align-items: center;
-  gap: 8px;
-  color: var(--el-color-warning);
-  font-weight: 600;
+  gap: var(--xw-space-2);
+  color: var(--xw-warning);
+  font-weight: var(--xw-font-semibold);
+  font-size: var(--xw-text-lg);
 }
 
 /* 背景装饰 */
@@ -397,170 +447,137 @@ onMounted(() => {
   height: 100%;
   z-index: 1;
   pointer-events: none;
+  overflow: hidden;
 }
 
 .circle {
   position: absolute;
   border-radius: 50%;
-  background: linear-gradient(135deg, rgba(99, 102, 241, 0.1), rgba(139, 92, 246, 0.1));
-  animation: float 6s ease-in-out infinite;
+  background: linear-gradient(135deg, rgba(99, 102, 241, 0.15), rgba(139, 92, 246, 0.1));
+  filter: blur(60px);
+  animation: xw-float 6s ease-in-out infinite;
+}
+
+html.light .circle {
+  background: linear-gradient(135deg, rgba(99, 102, 241, 0.1), rgba(139, 92, 246, 0.05));
 }
 
 .circle-1 {
-  width: 200px;
-  height: 200px;
-  top: 10%;
-  left: 10%;
+  width: 400px;
+  height: 400px;
+  top: -100px;
+  left: -100px;
   animation-delay: 0s;
 }
 
 .circle-2 {
-  width: 150px;
-  height: 150px;
-  top: 60%;
-  right: 10%;
+  width: 300px;
+  height: 300px;
+  bottom: -80px;
+  right: -80px;
   animation-delay: 2s;
 }
 
 .circle-3 {
-  width: 100px;
-  height: 100px;
-  bottom: 20%;
-  left: 60%;
+  width: 200px;
+  height: 200px;
+  top: 40%;
+  right: 10%;
   animation-delay: 4s;
 }
 
-@keyframes float {
+.gradient-mesh {
+  position: absolute;
+  inset: 0;
+  background: 
+    radial-gradient(ellipse 800px 600px at 20% 30%, rgba(99, 102, 241, 0.12), transparent),
+    radial-gradient(ellipse 600px 800px at 80% 70%, rgba(139, 92, 246, 0.08), transparent);
+  mix-blend-mode: normal;
+  opacity: 0.6;
+}
+
+html.light .gradient-mesh {
+  background: 
+    radial-gradient(ellipse 800px 600px at 20% 30%, rgba(99, 102, 241, 0.08), transparent),
+    radial-gradient(ellipse 600px 800px at 80% 70%, rgba(139, 92, 246, 0.05), transparent);
+}
+
+@keyframes xw-float {
   0%, 100% {
-    transform: translateY(0px);
+    transform: translate(0, 0);
   }
-  50% {
-    transform: translateY(-20px);
+  33% {
+    transform: translate(30px, -30px);
+  }
+  66% {
+    transform: translate(-20px, 20px);
   }
 }
 
 /* 响应式设计 */
 @media (max-width: 768px) {
   .login-page {
-    padding: 16px;
+    padding: var(--xw-space-4);
   }
   
   .login-container {
-    max-width: 90%;
-    padding: 16px;
+    max-width: 100%;
   }
   
   .theme-toggle {
-    top: 16px;
-    right: 16px;
+    top: var(--xw-space-4);
+    right: var(--xw-space-4);
   }
   
-  .login-card,
-  .init-card {
-    margin-bottom: 16px;
+  .brand-title {
+    font-size: var(--xw-text-3xl);
   }
   
-  .logo-text {
-    font-size: 22px;
+  .brand-subtitle {
+    font-size: var(--xw-text-base);
   }
   
-  .subtitle {
-    font-size: 15px;
-  }
-  
-  /* 表单移动端适配 */
-  :deep(.el-form-item) {
-    margin-bottom: 20px;
-  }
-  
-  :deep(.el-input) {
-    font-size: 16px; /* 防止iOS缩放 */
-  }
-  
-  :deep(.el-button) {
-    font-size: 15px;
-    padding: 12px 20px;
-  }
-  
-  /* 背景装饰移动端调整 */
   .circle-1 {
-    width: 120px;
-    height: 120px;
-    top: 5%;
-    left: 5%;
+    width: 250px;
+    height: 250px;
   }
   
   .circle-2 {
-    width: 100px;
-    height: 100px;
-    top: 70%;
-    right: 5%;
+    width: 200px;
+    height: 200px;
   }
   
   .circle-3 {
-    width: 80px;
-    height: 80px;
-    bottom: 15%;
-    left: 50%;
+    width: 150px;
+    height: 150px;
   }
 }
 
 @media (max-width: 480px) {
-  .login-container {
-    max-width: 95%;
-    padding: 12px;
+  .brand-title {
+    font-size: var(--xw-text-2xl);
   }
   
-  .logo-text {
-    font-size: 20px;
+  .brand-subtitle {
+    font-size: var(--xw-text-sm);
   }
   
-  .subtitle {
-    font-size: 14px;
-  }
-  
-  :deep(.el-form-item) {
-    margin-bottom: 18px;
-  }
-  
-  :deep(.el-button) {
-    font-size: 14px;
-    padding: 10px 16px;
-  }
-  
-  .register-link {
-    font-size: 13px;
-  }
-  
-  /* 超小屏幕背景装饰 */
-  .circle-1 {
-    width: 80px;
-    height: 80px;
-  }
-  
-  .circle-2 {
-    width: 60px;
-    height: 60px;
-  }
-  
-  .circle-3 {
-    width: 50px;
-    height: 50px;
+  .card-header h2 {
+    font-size: var(--xw-text-xl);
   }
   
   .circle {
-    display: none; /* 在小屏幕上隐藏装饰元素 */
+    display: none;
   }
 }
 
-/* 深色主题适配 */
-:deep(.el-card__header) {
-  background: transparent;
-  border-bottom: 1px solid var(--el-border-color-light);
-}
-
-:deep(.el-form-item__label) {
-  color: var(--el-text-color-primary);
+/* 无障碍 */
+@media (prefers-reduced-motion: reduce) {
+  .circle,
+  .brand-icon,
+  .login-card,
+  .theme-btn {
+    animation: none !important;
+  }
 }
 </style>
-

@@ -1,0 +1,411 @@
+/**
+ * 工具类扩展
+ * ==============
+ * 补充设计系统中缺少的常用工具类
+ */
+
+/* ===== 间距工具扩展 ===== */
+
+/* Margin 单方向 */
+.xw-mt-0 { margin-top: 0; }
+.xw-mt-1 { margin-top: var(--xw-space-1); }
+.xw-mt-2 { margin-top: var(--xw-space-2); }
+.xw-mt-3 { margin-top: var(--xw-space-3); }
+.xw-mt-4 { margin-top: var(--xw-space-4); }
+.xw-mt-5 { margin-top: var(--xw-space-5); }
+.xw-mt-6 { margin-top: var(--xw-space-6); }
+.xw-mt-8 { margin-top: var(--xw-space-8); }
+
+.xw-mr-0 { margin-right: 0; }
+.xw-mr-1 { margin-right: var(--xw-space-1); }
+.xw-mr-2 { margin-right: var(--xw-space-2); }
+.xw-mr-3 { margin-right: var(--xw-space-3); }
+.xw-mr-4 { margin-right: var(--xw-space-4); }
+.xw-mr-5 { margin-right: var(--xw-space-5); }
+.xw-mr-6 { margin-right: var(--xw-space-6); }
+.xw-mr-8 { margin-right: var(--xw-space-8); }
+
+.xw-mb-0 { margin-bottom: 0; }
+.xw-mb-1 { margin-bottom: var(--xw-space-1); }
+.xw-mb-2 { margin-bottom: var(--xw-space-2); }
+.xw-mb-3 { margin-bottom: var(--xw-space-3); }
+.xw-mb-4 { margin-bottom: var(--xw-space-4); }
+.xw-mb-5 { margin-bottom: var(--xw-space-5); }
+.xw-mb-6 { margin-bottom: var(--xw-space-6); }
+.xw-mb-8 { margin-bottom: var(--xw-space-8); }
+
+.xw-ml-0 { margin-left: 0; }
+.xw-ml-1 { margin-left: var(--xw-space-1); }
+.xw-ml-2 { margin-left: var(--xw-space-2); }
+.xw-ml-3 { margin-left: var(--xw-space-3); }
+.xw-ml-4 { margin-left: var(--xw-space-4); }
+.xw-ml-5 { margin-left: var(--xw-space-5); }
+.xw-ml-6 { margin-left: var(--xw-space-6); }
+.xw-ml-8 { margin-left: var(--xw-space-8); }
+
+/* Margin X/Y 轴 */
+.xw-mx-0 { margin-left: 0; margin-right: 0; }
+.xw-mx-1 { margin-left: var(--xw-space-1); margin-right: var(--xw-space-1); }
+.xw-mx-2 { margin-left: var(--xw-space-2); margin-right: var(--xw-space-2); }
+.xw-mx-3 { margin-left: var(--xw-space-3); margin-right: var(--xw-space-3); }
+.xw-mx-4 { margin-left: var(--xw-space-4); margin-right: var(--xw-space-4); }
+.xw-mx-auto { margin-left: auto; margin-right: auto; }
+
+.xw-my-0 { margin-top: 0; margin-bottom: 0; }
+.xw-my-1 { margin-top: var(--xw-space-1); margin-bottom: var(--xw-space-1); }
+.xw-my-2 { margin-top: var(--xw-space-2); margin-bottom: var(--xw-space-2); }
+.xw-my-3 { margin-top: var(--xw-space-3); margin-bottom: var(--xw-space-3); }
+.xw-my-4 { margin-top: var(--xw-space-4); margin-bottom: var(--xw-space-4); }
+
+/* Padding 单方向 */
+.xw-pt-0 { padding-top: 0; }
+.xw-pt-1 { padding-top: var(--xw-space-1); }
+.xw-pt-2 { padding-top: var(--xw-space-2); }
+.xw-pt-3 { padding-top: var(--xw-space-3); }
+.xw-pt-4 { padding-top: var(--xw-space-4); }
+.xw-pt-5 { padding-top: var(--xw-space-5); }
+.xw-pt-6 { padding-top: var(--xw-space-6); }
+
+.xw-pr-0 { padding-right: 0; }
+.xw-pr-1 { padding-right: var(--xw-space-1); }
+.xw-pr-2 { padding-right: var(--xw-space-2); }
+.xw-pr-3 { padding-right: var(--xw-space-3); }
+.xw-pr-4 { padding-right: var(--xw-space-4); }
+.xw-pr-5 { padding-right: var(--xw-space-5); }
+.xw-pr-6 { padding-right: var(--xw-space-6); }
+
+.xw-pb-0 { padding-bottom: 0; }
+.xw-pb-1 { padding-bottom: var(--xw-space-1); }
+.xw-pb-2 { padding-bottom: var(--xw-space-2); }
+.xw-pb-3 { padding-bottom: var(--xw-space-3); }
+.xw-pb-4 { padding-bottom: var(--xw-space-4); }
+.xw-pb-5 { padding-bottom: var(--xw-space-5); }
+.xw-pb-6 { padding-bottom: var(--xw-space-6); }
+
+.xw-pl-0 { padding-left: 0; }
+.xw-pl-1 { padding-left: var(--xw-space-1); }
+.xw-pl-2 { padding-left: var(--xw-space-2); }
+.xw-pl-3 { padding-left: var(--xw-space-3); }
+.xw-pl-4 { padding-left: var(--xw-space-4); }
+.xw-pl-5 { padding-left: var(--xw-space-5); }
+.xw-pl-6 { padding-left: var(--xw-space-6); }
+
+/* Padding X/Y 轴 */
+.xw-px-0 { padding-left: 0; padding-right: 0; }
+.xw-px-1 { padding-left: var(--xw-space-1); padding-right: var(--xw-space-1); }
+.xw-px-2 { padding-left: var(--xw-space-2); padding-right: var(--xw-space-2); }
+.xw-px-3 { padding-left: var(--xw-space-3); padding-right: var(--xw-space-3); }
+.xw-px-4 { padding-left: var(--xw-space-4); padding-right: var(--xw-space-4); }
+.xw-px-5 { padding-left: var(--xw-space-5); padding-right: var(--xw-space-5); }
+.xw-px-6 { padding-left: var(--xw-space-6); padding-right: var(--xw-space-6); }
+
+.xw-py-0 { padding-top: 0; padding-bottom: 0; }
+.xw-py-1 { padding-top: var(--xw-space-1); padding-bottom: var(--xw-space-1); }
+.xw-py-2 { padding-top: var(--xw-space-2); padding-bottom: var(--xw-space-2); }
+.xw-py-3 { padding-top: var(--xw-space-3); padding-bottom: var(--xw-space-3); }
+.xw-py-4 { padding-top: var(--xw-space-4); padding-bottom: var(--xw-space-4); }
+.xw-py-5 { padding-top: var(--xw-space-5); padding-bottom: var(--xw-space-5); }
+.xw-py-6 { padding-top: var(--xw-space-6); padding-bottom: var(--xw-space-6); }
+
+/* ===== 尺寸工具 ===== */
+.xw-w-auto { width: auto; }
+.xw-w-1\/2 { width: 50%; }
+.xw-w-1\/3 { width: 33.333333%; }
+.xw-w-2\/3 { width: 66.666667%; }
+.xw-w-1\/4 { width: 25%; }
+.xw-w-3\/4 { width: 75%; }
+
+.xw-min-w-0 { min-width: 0; }
+.xw-min-w-full { min-width: 100%; }
+
+.xw-h-auto { height: auto; }
+.xw-h-screen { height: 100vh; }
+
+.xw-min-h-0 { min-height: 0; }
+.xw-min-h-full { min-height: 100%; }
+
+/* ===== Flexbox 工具扩展 ===== */
+.xw-flex-wrap { flex-wrap: wrap; }
+.xw-flex-nowrap { flex-wrap: nowrap; }
+.xw-flex-wrap-reverse { flex-wrap: wrap-reverse; }
+
+.xw-flex-1 { flex: 1 1 0%; }
+.xw-flex-auto { flex: 1 1 auto; }
+.xw-flex-initial { flex: 0 1 auto; }
+.xw-flex-none { flex: none; }
+
+.xw-grow { flex-grow: 1; }
+.xw-grow-0 { flex-grow: 0; }
+.xw-shrink { flex-shrink: 1; }
+.xw-shrink-0 { flex-shrink: 0; }
+
+.xw-items-stretch { align-items: stretch; }
+.xw-items-baseline { align-items: baseline; }
+
+.xw-self-auto { align-self: auto; }
+.xw-self-start { align-self: flex-start; }
+.xw-self-center { align-self: center; }
+.xw-self-end { align-self: flex-end; }
+.xw-self-stretch { align-self: stretch; }
+
+.xw-justify-evenly { justify-content: space-evenly; }
+
+/* ===== Grid 工具扩展 ===== */
+.xw-grid-cols-auto { grid-template-columns: repeat(auto-fit, minmax(200px, 1fr)); }
+.xw-col-span-2 { grid-column: span 2 / span 2; }
+.xw-col-span-3 { grid-column: span 3 / span 3; }
+.xw-col-span-4 { grid-column: span 4 / span 4; }
+.xw-col-span-full { grid-column: 1 / -1; }
+
+/* ===== 边框工具扩展 ===== */
+.xw-border-0 { border-width: 0; }
+.xw-border-2 { border-width: 2px; }
+
+.xw-border-solid { border-style: solid; }
+.xw-border-dashed { border-style: dashed; }
+.xw-border-dotted { border-style: dotted; }
+
+/* ===== 不透明度 ===== */
+.xw-opacity-0 { opacity: 0; }
+.xw-opacity-25 { opacity: 0.25; }
+.xw-opacity-50 { opacity: 0.5; }
+.xw-opacity-75 { opacity: 0.75; }
+.xw-opacity-100 { opacity: 1; }
+
+/* ===== 光标 ===== */
+.xw-cursor-auto { cursor: auto; }
+.xw-cursor-default { cursor: default; }
+.xw-cursor-pointer { cursor: pointer; }
+.xw-cursor-wait { cursor: wait; }
+.xw-cursor-text { cursor: text; }
+.xw-cursor-move { cursor: move; }
+.xw-cursor-not-allowed { cursor: not-allowed; }
+
+/* ===== 选择 ===== */
+.xw-select-none { user-select: none; }
+.xw-select-text { user-select: text; }
+.xw-select-all { user-select: all; }
+.xw-select-auto { user-select: auto; }
+
+/* ===== 对齐 ===== */
+.xw-align-baseline { vertical-align: baseline; }
+.xw-align-top { vertical-align: top; }
+.xw-align-middle { vertical-align: middle; }
+.xw-align-bottom { vertical-align: bottom; }
+
+/* ===== 表格布局 ===== */
+.xw-table-auto { table-layout: auto; }
+.xw-table-fixed { table-layout: fixed; }
+
+/* ===== 列表样式 ===== */
+.xw-list-none { list-style-type: none; }
+.xw-list-disc { list-style-type: disc; }
+.xw-list-decimal { list-style-type: decimal; }
+
+/* ===== 渐变背景扩展 ===== */
+.xw-bg-gradient-primary {
+  background: linear-gradient(135deg, var(--xw-primary), var(--xw-primary-light));
+}
+
+.xw-bg-gradient-success {
+  background: linear-gradient(135deg, var(--xw-success), var(--xw-success-light));
+}
+
+.xw-bg-gradient-warning {
+  background: linear-gradient(135deg, var(--xw-warning), var(--xw-warning-light));
+}
+
+.xw-bg-gradient-danger {
+  background: linear-gradient(135deg, var(--xw-danger), var(--xw-danger-light));
+}
+
+.xw-bg-gradient-dark {
+  background: var(--xw-gradient-primary);
+}
+
+/* ===== 状态样式 ===== */
+.xw-disabled {
+  opacity: 0.5;
+  cursor: not-allowed;
+  pointer-events: none;
+}
+
+.xw-loading {
+  position: relative;
+  pointer-events: none;
+  opacity: 0.7;
+}
+
+.xw-loading::after {
+  content: '';
+  position: absolute;
+  top: 50%;
+  left: 50%;
+  width: 20px;
+  height: 20px;
+  margin: -10px 0 0 -10px;
+  border: 2px solid var(--xw-primary-lightest);
+  border-top-color: var(--xw-primary);
+  border-radius: 50%;
+  animation: xw-spin 0.8s linear infinite;
+}
+
+/* ===== Z-Index 系统 ===== */
+.xw-z-0 { z-index: 0; }
+.xw-z-10 { z-index: 10; }
+.xw-z-20 { z-index: 20; }
+.xw-z-30 { z-index: 30; }
+.xw-z-40 { z-index: 40; }
+.xw-z-50 { z-index: 50; }
+.xw-z-auto { z-index: auto; }
+
+/* ===== 过渡动画扩展 ===== */
+.xw-transition-none { transition: none; }
+.xw-transition-colors { transition-property: color, background-color, border-color; transition-duration: var(--xw-duration-200); }
+.xw-transition-opacity { transition-property: opacity; transition-duration: var(--xw-duration-200); }
+.xw-transition-transform { transition-property: transform; transition-duration: var(--xw-duration-200); }
+.xw-transition-shadow { transition-property: box-shadow; transition-duration: var(--xw-duration-200); }
+
+/* ===== 响应式工具 ===== */
+
+/* 平板端 (768px - 1024px) */
+@media (min-width: 768px) and (max-width: 1024px) {
+  .xw-tablet-hidden { display: none !important; }
+  .xw-tablet-block { display: block !important; }
+  .xw-tablet-flex { display: flex !important; }
+  .xw-tablet-grid { display: grid !important; }
+}
+
+/* 桌面端 (> 1024px) */
+@media (min-width: 1024px) {
+  .xw-lg-hidden { display: none !important; }
+  .xw-lg-block { display: block !important; }
+  .xw-lg-flex { display: flex !important; }
+  .xw-lg-grid { display: grid !important; }
+  
+  .xw-lg-grid-cols-2 { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+  .xw-lg-grid-cols-3 { grid-template-columns: repeat(3, minmax(0, 1fr)); }
+  .xw-lg-grid-cols-4 { grid-template-columns: repeat(4, minmax(0, 1fr)); }
+}
+
+/* ===== 打印工具 ===== */
+@media print {
+  .xw-print-hidden { display: none !important; }
+  .xw-print-block { display: block !important; }
+  
+  .xw-print-break-before { page-break-before: always; }
+  .xw-print-break-after { page-break-after: always; }
+  .xw-print-break-avoid { page-break-inside: avoid; }
+}
+
+/* ===== 特殊效果 ===== */
+
+/* 毛玻璃效果增强 */
+.xw-glass-dark {
+  background: rgba(15, 23, 42, 0.8);
+  backdrop-filter: blur(20px) saturate(180%);
+  -webkit-backdrop-filter: blur(20px) saturate(180%);
+}
+
+.xw-glass-light {
+  background: rgba(255, 255, 255, 0.8);
+  backdrop-filter: blur(20px) saturate(180%);
+  -webkit-backdrop-filter: blur(20px) saturate(180%);
+}
+
+/* 发光边框 */
+.xw-glow-border {
+  position: relative;
+}
+
+.xw-glow-border::before {
+  content: '';
+  position: absolute;
+  top: -2px;
+  left: -2px;
+  right: -2px;
+  bottom: -2px;
+  background: linear-gradient(45deg, var(--xw-primary), var(--xw-primary-light));
+  border-radius: inherit;
+  opacity: 0;
+  transition: opacity 0.3s;
+  z-index: -1;
+}
+
+.xw-glow-border:hover::before {
+  opacity: 0.5;
+  filter: blur(4px);
+}
+
+/* 梯度文本 */
+.xw-text-gradient-primary {
+  background: linear-gradient(135deg, var(--xw-primary), var(--xw-primary-light));
+  -webkit-background-clip: text;
+  -webkit-text-fill-color: transparent;
+  background-clip: text;
+}
+
+.xw-text-gradient-success {
+  background: linear-gradient(135deg, var(--xw-success), var(--xw-success-light));
+  -webkit-background-clip: text;
+  -webkit-text-fill-color: transparent;
+  background-clip: text;
+}
+
+/* ===== 组件状态增强 ===== */
+
+/* 卡片悬浮效果 */
+.xw-card-hover {
+  transition: all 0.3s cubic-bezier(0.4, 0, 0.2, 1);
+}
+
+.xw-card-hover:hover {
+  transform: translateY(-4px);
+  box-shadow: var(--xw-shadow-xl);
+}
+
+/* 按钮组 */
+.xw-btn-group {
+  display: inline-flex;
+  border-radius: var(--xw-radius-lg);
+  overflow: hidden;
+}
+
+.xw-btn-group > * {
+  border-radius: 0;
+  margin: 0 !important;
+}
+
+.xw-btn-group > *:not(:last-child) {
+  border-right: 1px solid rgba(255, 255, 255, 0.2);
+}
+
+/* 徽章 */
+.xw-badge {
+  position: relative;
+  display: inline-block;
+}
+
+.xw-badge::after {
+  content: attr(data-count);
+  position: absolute;
+  top: -8px;
+  right: -8px;
+  min-width: 20px;
+  height: 20px;
+  padding: 0 6px;
+  border-radius: var(--xw-radius-full);
+  background: var(--xw-danger);
+  color: white;
+  font-size: 12px;
+  font-weight: var(--xw-font-semibold);
+  line-height: 20px;
+  text-align: center;
+  border: 2px solid var(--xw-bg-primary);
+  z-index: 10;
+}
+
+.xw-badge[data-count="0"]::after {
+  display: none;
+}
+
