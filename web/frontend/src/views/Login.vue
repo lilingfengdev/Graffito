@@ -2,7 +2,7 @@
   <div class="login-page">
     <div class="login-container">
       <!-- 登录表单 -->
-      <el-card class="login-card" shadow="always">
+      <el-card class="login-card xw-card" shadow="always">
         <template #header>
           <div class="login-header">
             <div class="logo">
@@ -66,7 +66,7 @@
       <!-- 初始化超级管理员 -->
       <el-card 
         v-if="!superadminExists" 
-        class="init-card" 
+        class="init-card xw-card" 
         shadow="hover"
       >
         <template #header>
@@ -227,7 +227,9 @@ const handleLogin = async () => {
       headers: { 'Content-Type': 'application/x-www-form-urlencoded' }
     })
     
-    localStorage.setItem('token', data.access_token)
+    // 统一使用 access_token，兼容旧 key
+    localStorage.setItem('access_token', data.access_token)
+    try { localStorage.setItem('token', data.access_token) } catch(_) {}
     ElMessage.success('登录成功')
     const redirect = new URLSearchParams(window.location.search).get('redirect')
     router.push(redirect || '/')

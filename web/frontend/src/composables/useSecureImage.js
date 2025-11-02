@@ -32,7 +32,7 @@ async function createSecureImageUrl(url) {
   }
   
   try {
-    const token = localStorage.getItem('token')
+    const token = localStorage.getItem('access_token') || localStorage.getItem('token')
     if (!token) {
       console.warn('[SecureImage] No token found, fallback to direct URL')
       return url
@@ -60,7 +60,7 @@ async function createSecureImageUrl(url) {
     console.error('[SecureImage] Failed to load image:', url, error)
     // 降级到 URL 参数方式（兼容性）
     const sep = url.includes('?') ? '&' : '?'
-    const token = localStorage.getItem('token')
+    const token = localStorage.getItem('access_token') || localStorage.getItem('token')
     return token ? `${url}${sep}access_token=${encodeURIComponent(token)}` : url
   }
 }

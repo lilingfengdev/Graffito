@@ -4,7 +4,7 @@
     <el-aside 
       v-if="!isMobile"
       :width="collapsed ? '64px' : '250px'" 
-      class="sidebar"
+      class="sidebar xw-sidebar"
       :class="{ 'collapsed': collapsed }"
     >
       <div class="logo-container" :class="{ 'collapsed': collapsed }">
@@ -101,7 +101,7 @@
     <!-- 主内容区 -->
     <el-container class="main-container">
       <!-- 顶部面包屑 -->
-      <el-header class="header">
+      <el-header class="header xw-header xw-header-glass">
         <div class="header-left">
           <el-breadcrumb separator=">" class="breadcrumb">
             <el-breadcrumb-item :to="{ path: '/' }">首页</el-breadcrumb-item>
@@ -161,7 +161,7 @@
     </el-container>
 
     <!-- 移动端底部导航栏 -->
-    <nav v-if="isMobile" class="mobile-bottom-nav">
+    <nav v-if="isMobile" class="mobile-bottom-nav xw-glass">
       <div 
         v-for="route in menuRoutes" 
         :key="route.path" 
@@ -379,6 +379,7 @@ const handleUserCommand = (command) => {
 }
 
 const logout = () => {
+  localStorage.removeItem('access_token')
   localStorage.removeItem('token')
   localStorage.removeItem('user')
   router.push('/login')

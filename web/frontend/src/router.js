@@ -1,16 +1,19 @@
 import { createRouter, createWebHistory } from 'vue-router'
 import api from './api'
-import Login from './views/Login.vue'
-import Register from './views/Register.vue'
-import Layout from './views/Layout.vue'
-import Dashboard from './views/Dashboard.vue'
-import Audit from './views/Audit.vue'
-import SubmissionDetail from './views/SubmissionDetail.vue'
-import UserManagement from './views/UserManagement.vue'
-import StoredPosts from './views/StoredPosts.vue'
-import LogsManagement from './views/LogsManagement.vue'
-import FeedbackManagement from './views/FeedbackManagement.vue'
-import ReportManagement from './views/ReportManagement.vue'
+
+// 路由懒加载，降低首屏体积
+const Login = () => import('./views/Login.vue')
+const Register = () => import('./views/Register.vue')
+const Layout = () => import('./views/Layout.vue')
+const Dashboard = () => import('./views/Dashboard.vue')
+const Audit = () => import('./views/Audit.vue')
+const SubmissionDetail = () => import('./views/SubmissionDetail.vue')
+const UserManagement = () => import('./views/UserManagement.vue')
+const StoredPosts = () => import('./views/StoredPosts.vue')
+const LogsManagement = () => import('./views/LogsManagement.vue')
+const FeedbackManagement = () => import('./views/FeedbackManagement.vue')
+const ReportManagement = () => import('./views/ReportManagement.vue')
+const NotFound = () => import('./views/NotFound.vue')
 
 const routes = [
   { path: '/login', component: Login },
@@ -69,7 +72,9 @@ const routes = [
         meta: { title: '举报审核', icon: 'Warning' }
       }
     ]
-  }
+  },
+  // 404 兜底路由
+  { path: '/:pathMatch(.*)*', name: 'NotFound', component: NotFound, meta: { title: '未找到', hidden: true } }
 ]
 
 const router = createRouter({
@@ -78,7 +83,7 @@ const router = createRouter({
 })
 
 router.beforeEach(async (to, from, next) => {
-  const token = localStorage.getItem('token')
+  const token = localStorage.getItem('access_token') || localStorage.getItem('token')
   const isAuthPage = to.path === '/login' || to.path === '/register'
   
   if (!token && !isAuthPage) {
@@ -113,6 +118,16 @@ router.beforeEach(async (to, from, next) => {
     }
   } else {
     next()
+  }
+})
+
+// 动态设置页面标题
+router.afterEach((to) => {
+  const baseTitle = 'Graffito 审核后台'
+  if (to.meta && to.meta.title) {
+    document.title = `${to.meta.title} - ${baseTitle}`
+  } else {
+    document.title = baseTitle
   }
 })
 
