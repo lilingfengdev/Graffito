@@ -505,7 +505,6 @@ class AuditService:
     @invalidate_cache_after
     @with_submission("添加评论失败")
     @audit_command('评论', '添加内部评论')
-    @with_submission()
     @log_audit_action(AuditAction.COMMENT)
     async def add_comment(self, submission: Submission, session, submission_id: int, operator_id: str, comment: Optional[str] = None) -> Dict[str, Any]:
         """添加评论"""
@@ -530,7 +529,6 @@ class AuditService:
             
     @with_submission("回复投稿者失败")
     @audit_command('回复', '回复投稿者')
-    @with_submission()
     async def reply_to_sender(self, submission: Submission, session, submission_id: int, operator_id: str, message: Optional[str] = None) -> Dict[str, Any]:
         """回复投稿者"""
         if not message:
@@ -549,7 +547,6 @@ class AuditService:
             
     @with_submission("展示内容失败")
     @audit_command('展示', '展示投稿内容')
-    @with_submission()
     async def show_content(self, submission: Submission, session, submission_id: int, operator_id: str, extra: Optional[str] = None) -> Dict[str, Any]:
         """展示内容"""
         # 返回渲染的图片
@@ -563,8 +560,6 @@ class AuditService:
     @invalidate_cache_after
     @with_submission("拉黑用户失败")
     @audit_command('拉黑', '拉黑投稿者')
-    @with_submission()
-    @invalidate_cache_after()
     @log_audit_action(AuditAction.BLACKLIST)
     async def blacklist(self, submission: Submission, session, submission_id: int, operator_id: str, reason: Optional[str] = None) -> Dict[str, Any]:
         """拉黑用户"""
