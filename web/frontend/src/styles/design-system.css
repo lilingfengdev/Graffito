@@ -1,27 +1,32 @@
 /**
- * XWall 设计系统 - Talk is cheap, show me the code
- * 精简、实用、不花哨
+ * XWall Fluent Design System
+ * Microsoft Fluent Design - 实用、美观、不废话
  */
 
-/* ===== 核心颜色 ===== */
+/* 导入 Fluent 设计系统 */
+@import './fluent-tokens.css';
+@import './fluent-materials.css';
+@import './fluent-components.css';
+
+/* ===== 向后兼容：保留 xw- 前缀映射到 Fluent ===== */
 :root {
-  /* 主色 */
-  --xw-primary: #6366f1;
-  --xw-primary-dark: #4f46e5;
-  --xw-primary-light: #818cf8;
-  --xw-primary-lightest: #c7d2fe;
-  --xw-primary-200: #a5b4fc;
+  /* 主色映射 */
+  --xw-primary: var(--fluent-blue);
+  --xw-primary-dark: var(--fluent-blue-pressed);
+  --xw-primary-light: var(--fluent-blue-light);
+  --xw-primary-lightest: var(--fluent-blue-lightest);
+  --xw-primary-200: var(--fluent-blue-lighter);
   
-  /* 功能色 */
-  --xw-success: #10b981;
-  --xw-warning: #f59e0b;
-  --xw-danger: #ef4444;
-  --xw-info: #3b82f6;
+  /* 功能色映射 */
+  --xw-success: var(--fluent-success);
+  --xw-warning: var(--fluent-warning);
+  --xw-danger: var(--fluent-danger);
+  --xw-info: var(--fluent-info);
   
-  /* 效果 */
-  --xw-focus-ring: rgba(99, 102, 241, 0.25);
-  --xw-shadow-hover: 0 10px 20px rgba(0, 0, 0, 0.12);
-  --xw-gradient-highlight: linear-gradient(135deg, rgba(99, 102, 241, 0.06), rgba(139, 92, 246, 0.04));
+  /* 效果映射 */
+  --xw-focus-ring: rgba(0, 120, 212, 0.25);
+  --xw-shadow-hover: var(--fluent-elevation-8);
+  --xw-gradient-highlight: linear-gradient(135deg, rgba(0, 120, 212, 0.06), rgba(43, 136, 216, 0.04));
 }
 
 /* ===== 浅色主题 ===== */

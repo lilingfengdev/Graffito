@@ -1,0 +1,315 @@
+/**
+ * Microsoft Fluent Design System - Acrylic Materials
+ * 亚克力材质实现 - 真正的 Fluent 精髓
+ */
+
+/* ===== Acrylic 基础材质 ===== */
+.fluent-acrylic-base {
+  position: relative;
+  background: var(--fluent-acrylic-bg);
+  backdrop-filter: blur(30px) saturate(125%);
+  -webkit-backdrop-filter: blur(30px) saturate(125%);
+  border: 1px solid var(--fluent-acrylic-border);
+}
+
+/* 支持降级：如果浏览器不支持 backdrop-filter */
+@supports not (backdrop-filter: blur(30px)) {
+  .fluent-acrylic-base {
+    background: var(--fluent-bg-layer);
+  }
+}
+
+/* ===== In-App Acrylic（应用内亚克力）===== */
+/* 用于导航栏、侧边栏等 */
+.fluent-acrylic-in-app {
+  background: var(--fluent-acrylic-bg);
+  backdrop-filter: blur(30px) saturate(125%);
+  -webkit-backdrop-filter: blur(30px) saturate(125%);
+  border: 1px solid var(--fluent-acrylic-border);
+  position: relative;
+  overflow: hidden;
+}
+
+/* 添加细微的噪点纹理（通过渐变模拟） */
+.fluent-acrylic-in-app::before {
+  content: '';
+  position: absolute;
+  inset: 0;
+  background-image: 
+    repeating-linear-gradient(
+      0deg,
+      transparent,
+      transparent 2px,
+      rgba(0, 0, 0, 0.01) 2px,
+      rgba(0, 0, 0, 0.01) 4px
+    );
+  pointer-events: none;
+  z-index: 1;
+}
+
+html.dark .fluent-acrylic-in-app::before {
+  background-image: 
+    repeating-linear-gradient(
+      0deg,
+      transparent,
+      transparent 2px,
+      rgba(255, 255, 255, 0.01) 2px,
+      rgba(255, 255, 255, 0.01) 4px
+    );
+}
+
+/* ===== Background Acrylic（背景亚克力）===== */
+/* 用于模态框背景、全屏遮罩等 */
+.fluent-acrylic-background {
+  background: var(--fluent-acrylic-bg);
+  backdrop-filter: blur(40px) saturate(150%);
+  -webkit-backdrop-filter: blur(40px) saturate(150%);
+  border: 1px solid var(--fluent-acrylic-border);
+}
+
+/* ===== Acrylic Card（亚克力卡片）===== */
+.fluent-card {
+  background: var(--fluent-bg-layer);
+  border: 1px solid var(--fluent-stroke-default);
+  border-radius: var(--fluent-radius-large);
+  box-shadow: var(--fluent-elevation-4);
+  transition: var(--fluent-transition-normal);
+  overflow: hidden;
+}
+
+.fluent-card:hover {
+  box-shadow: var(--fluent-elevation-8);
+  transform: translateY(-2px);
+}
+
+.fluent-card.acrylic {
+  background: var(--fluent-acrylic-bg);
+  backdrop-filter: blur(30px) saturate(125%);
+  -webkit-backdrop-filter: blur(30px) saturate(125%);
+  border-color: var(--fluent-acrylic-border);
+}
+
+/* ===== Reveal Highlight（揭示高光）===== */
+/* Fluent 的标志性交互效果 */
+.fluent-reveal {
+  position: relative;
+  overflow: hidden;
+}
+
+.fluent-reveal::before {
+  content: '';
+  position: absolute;
+  inset: 0;
+  background: radial-gradient(
+    circle at var(--mouse-x, 50%) var(--mouse-y, 50%),
+    rgba(255, 255, 255, 0.1) 0%,
+    transparent 50%
+  );
+  opacity: 0;
+  transition: opacity var(--fluent-duration-normal) var(--fluent-ease-standard);
+  pointer-events: none;
+  z-index: 1;
+}
+
+.fluent-reveal:hover::before {
+  opacity: 1;
+}
+
+html.dark .fluent-reveal::before {
+  background: radial-gradient(
+    circle at var(--mouse-x, 50%) var(--mouse-y, 50%),
+    rgba(255, 255, 255, 0.15) 0%,
+    transparent 50%
+  );
+}
+
+/* ===== Reveal Border（揭示边框）===== */
+.fluent-reveal-border {
+  position: relative;
+  border: 1px solid transparent;
+}
+
+.fluent-reveal-border::after {
+  content: '';
+  position: absolute;
+  inset: -1px;
+  border-radius: inherit;
+  background: radial-gradient(
+    circle 100px at var(--mouse-x, 50%) var(--mouse-y, 50%),
+    var(--fluent-stroke-focus) 0%,
+    transparent 100%
+  );
+  opacity: 0;
+  transition: opacity var(--fluent-duration-normal) var(--fluent-ease-standard);
+  pointer-events: none;
+  mask: linear-gradient(#fff 0 0) content-box, linear-gradient(#fff 0 0);
+  -webkit-mask: linear-gradient(#fff 0 0) content-box, linear-gradient(#fff 0 0);
+  mask-composite: exclude;
+  -webkit-mask-composite: xor;
+  padding: 1px;
+}
+
+.fluent-reveal-border:hover::after {
+  opacity: 1;
+}
+
+/* ===== Depth Layers（深度层级）===== */
+.fluent-layer-0 {
+  background: var(--fluent-bg-canvas);
+  box-shadow: none;
+}
+
+.fluent-layer-1 {
+  background: var(--fluent-bg-layer);
+  box-shadow: var(--fluent-elevation-2);
+  z-index: var(--fluent-z-base);
+}
+
+.fluent-layer-2 {
+  background: var(--fluent-bg-layer);
+  box-shadow: var(--fluent-elevation-4);
+  z-index: var(--fluent-z-raised);
+}
+
+.fluent-layer-3 {
+  background: var(--fluent-bg-layer);
+  box-shadow: var(--fluent-elevation-8);
+  z-index: var(--fluent-z-floating);
+}
+
+.fluent-layer-4 {
+  background: var(--fluent-bg-layer);
+  box-shadow: var(--fluent-elevation-16);
+  z-index: var(--fluent-z-overlay);
+}
+
+.fluent-layer-floating {
+  background: var(--fluent-bg-layer);
+  box-shadow: var(--fluent-elevation-32);
+  z-index: var(--fluent-z-floating);
+}
+
+.fluent-layer-dialog {
+  background: var(--fluent-bg-layer);
+  box-shadow: var(--fluent-elevation-64);
+  z-index: var(--fluent-z-dialog);
+  border-radius: var(--fluent-radius-large);
+}
+
+/* ===== 交互状态材质 ===== */
+.fluent-interactive {
+  position: relative;
+  transition: var(--fluent-transition-fast);
+  cursor: pointer;
+  user-select: none;
+}
+
+.fluent-interactive:hover {
+  background: var(--fluent-bg-hover);
+}
+
+.fluent-interactive:active {
+  background: var(--fluent-bg-pressed);
+  transform: scale(0.98);
+}
+
+.fluent-interactive.selected {
+  background: var(--fluent-bg-selected);
+}
+
+.fluent-interactive:disabled {
+  cursor: not-allowed;
+  opacity: 0.5;
+}
+
+/* ===== 表面材质 ===== */
+.fluent-surface {
+  background: var(--fluent-bg-layer);
+  border: 1px solid var(--fluent-stroke-default);
+  border-radius: var(--fluent-radius-medium);
+}
+
+.fluent-surface-alt {
+  background: var(--fluent-bg-layer-alt);
+  border: 1px solid var(--fluent-stroke-default);
+  border-radius: var(--fluent-radius-medium);
+}
+
+/* ===== 浮动面板 ===== */
+.fluent-flyout {
+  background: var(--fluent-acrylic-bg);
+  backdrop-filter: blur(30px) saturate(125%);
+  -webkit-backdrop-filter: blur(30px) saturate(125%);
+  border: 1px solid var(--fluent-acrylic-border);
+  border-radius: var(--fluent-radius-large);
+  box-shadow: var(--fluent-elevation-16);
+  padding: var(--fluent-space-8);
+  z-index: var(--fluent-z-flyout);
+}
+
+/* ===== 命令栏材质 ===== */
+.fluent-commandbar {
+  background: var(--fluent-acrylic-bg);
+  backdrop-filter: blur(30px) saturate(125%);
+  -webkit-backdrop-filter: blur(30px) saturate(125%);
+  border-bottom: 1px solid var(--fluent-stroke-default);
+  padding: var(--fluent-space-8) var(--fluent-space-16);
+  min-height: 48px;
+  display: flex;
+  align-items: center;
+  gap: var(--fluent-space-8);
+}
+
+/* ===== 导航材质 ===== */
+.fluent-navigation {
+  background: var(--fluent-acrylic-bg);
+  backdrop-filter: blur(30px) saturate(125%);
+  -webkit-backdrop-filter: blur(30px) saturate(125%);
+  border-right: 1px solid var(--fluent-stroke-default);
+  height: 100%;
+}
+
+/* ===== 侧边栏材质 ===== */
+.fluent-sidebar {
+  background: var(--fluent-acrylic-bg);
+  backdrop-filter: blur(30px) saturate(125%);
+  -webkit-backdrop-filter: blur(30px) saturate(125%);
+  border-left: 1px solid var(--fluent-stroke-default);
+  height: 100%;
+  box-shadow: var(--fluent-elevation-8);
+}
+
+/* ===== 半透明遮罩 ===== */
+.fluent-backdrop {
+  background: var(--fluent-acrylic-bg);
+  backdrop-filter: blur(40px) saturate(150%);
+  -webkit-backdrop-filter: blur(40px) saturate(150%);
+  position: fixed;
+  inset: 0;
+  z-index: var(--fluent-z-overlay);
+}
+
+/* ===== 性能优化提示 ===== */
+/* GPU 加速 */
+.fluent-acrylic-base,
+.fluent-acrylic-in-app,
+.fluent-acrylic-background,
+.fluent-card.acrylic {
+  will-change: backdrop-filter;
+  transform: translateZ(0);
+}
+
+/* 减少运动偏好 */
+@media (prefers-reduced-motion: reduce) {
+  .fluent-card,
+  .fluent-interactive,
+  .fluent-reveal::before,
+  .fluent-reveal-border::after {
+    transition: none !important;
+  }
+  
+  .fluent-card:hover,
+  .fluent-interactive:active {
+    transform: none !important;
+  }
+}

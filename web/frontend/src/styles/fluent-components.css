@@ -1,0 +1,567 @@
+/**
+ * Microsoft Fluent Design System - Components
+ * 基础组件样式 - 简单有效
+ */
+
+/* ===== 按钮系统 ===== */
+.fluent-button {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: var(--fluent-space-8);
+  padding: 0 var(--fluent-space-20);
+  height: 32px;
+  min-width: 96px;
+  font-family: var(--fluent-font-family);
+  font-size: var(--fluent-font-size-300);
+  font-weight: var(--fluent-font-weight-semibold);
+  line-height: var(--fluent-line-height-100);
+  text-align: center;
+  border: 1px solid transparent;
+  border-radius: var(--fluent-radius-medium);
+  background: transparent;
+  color: var(--fluent-text-primary);
+  cursor: pointer;
+  user-select: none;
+  outline: none;
+  transition: var(--fluent-transition-fast);
+  position: relative;
+  overflow: hidden;
+}
+
+.fluent-button:hover {
+  background: var(--fluent-bg-hover);
+}
+
+.fluent-button:active {
+  background: var(--fluent-bg-pressed);
+  transform: scale(0.98);
+}
+
+.fluent-button:disabled {
+  cursor: not-allowed;
+  opacity: 0.5;
+  background: transparent;
+}
+
+/* 主要按钮 */
+.fluent-button-primary {
+  background: var(--fluent-blue);
+  color: var(--fluent-text-on-accent);
+  border-color: var(--fluent-blue);
+}
+
+.fluent-button-primary:hover {
+  background: var(--fluent-blue-hover);
+  border-color: var(--fluent-blue-hover);
+}
+
+.fluent-button-primary:active {
+  background: var(--fluent-blue-pressed);
+  border-color: var(--fluent-blue-pressed);
+}
+
+.fluent-button-primary:disabled {
+  background: var(--fluent-grey-60);
+  border-color: var(--fluent-grey-60);
+  opacity: 1;
+}
+
+/* 默认按钮 */
+.fluent-button-default {
+  background: var(--fluent-bg-layer);
+  border: 1px solid var(--fluent-stroke-default);
+}
+
+.fluent-button-default:hover {
+  background: var(--fluent-bg-hover);
+  border-color: var(--fluent-stroke-accessible);
+}
+
+/* 轻量按钮 */
+.fluent-button-subtle {
+  background: transparent;
+  border: none;
+}
+
+.fluent-button-subtle:hover {
+  background: var(--fluent-bg-hover);
+}
+
+/* 透明按钮 */
+.fluent-button-transparent {
+  background: transparent;
+  border: none;
+}
+
+.fluent-button-transparent:hover {
+  background: var(--fluent-bg-hover);
+}
+
+/* 大尺寸 */
+.fluent-button-large {
+  height: 40px;
+  padding: 0 var(--fluent-space-24);
+  font-size: var(--fluent-font-size-400);
+}
+
+/* 小尺寸 */
+.fluent-button-small {
+  height: 24px;
+  min-width: 64px;
+  padding: 0 var(--fluent-space-12);
+  font-size: var(--fluent-font-size-200);
+}
+
+/* 图标按钮 */
+.fluent-button-icon {
+  width: 32px;
+  height: 32px;
+  min-width: 32px;
+  padding: 0;
+  border-radius: var(--fluent-radius-medium);
+}
+
+/* ===== 输入框系统 ===== */
+.fluent-input {
+  display: inline-flex;
+  align-items: center;
+  padding: 0 var(--fluent-space-12);
+  height: 32px;
+  width: 100%;
+  font-family: var(--fluent-font-family);
+  font-size: var(--fluent-font-size-300);
+  font-weight: var(--fluent-font-weight-regular);
+  line-height: var(--fluent-line-height-100);
+  color: var(--fluent-text-primary);
+  background: var(--fluent-bg-layer-alt);
+  border: 1px solid var(--fluent-stroke-default);
+  border-radius: var(--fluent-radius-medium);
+  outline: none;
+  transition: var(--fluent-transition-fast);
+}
+
+.fluent-input:hover {
+  border-color: var(--fluent-stroke-accessible);
+}
+
+.fluent-input:focus {
+  border-color: var(--fluent-stroke-focus);
+  box-shadow: 0 0 0 1px var(--fluent-stroke-focus) inset;
+}
+
+.fluent-input:disabled {
+  cursor: not-allowed;
+  opacity: 0.5;
+  background: var(--fluent-bg-layer);
+}
+
+.fluent-input::placeholder {
+  color: var(--fluent-text-tertiary);
+}
+
+/* 输入框容器 */
+.fluent-input-wrapper {
+  position: relative;
+  display: inline-flex;
+  width: 100%;
+}
+
+/* 带图标的输入框 */
+.fluent-input-with-icon {
+  padding-left: var(--fluent-space-40);
+}
+
+.fluent-input-icon {
+  position: absolute;
+  left: var(--fluent-space-12);
+  top: 50%;
+  transform: translateY(-50%);
+  color: var(--fluent-text-tertiary);
+  pointer-events: none;
+}
+
+/* ===== 标签 ===== */
+.fluent-label {
+  display: block;
+  font-family: var(--fluent-font-family);
+  font-size: var(--fluent-font-size-300);
+  font-weight: var(--fluent-font-weight-semibold);
+  color: var(--fluent-text-primary);
+  margin-bottom: var(--fluent-space-4);
+}
+
+.fluent-label-required::after {
+  content: ' *';
+  color: var(--fluent-danger);
+}
+
+/* ===== 复选框 ===== */
+.fluent-checkbox {
+  display: inline-flex;
+  align-items: center;
+  gap: var(--fluent-space-8);
+  cursor: pointer;
+  user-select: none;
+}
+
+.fluent-checkbox-input {
+  position: relative;
+  width: 20px;
+  height: 20px;
+  appearance: none;
+  -webkit-appearance: none;
+  background: var(--fluent-bg-layer);
+  border: 1px solid var(--fluent-stroke-default);
+  border-radius: var(--fluent-radius-small);
+  cursor: pointer;
+  outline: none;
+  transition: var(--fluent-transition-fast);
+}
+
+.fluent-checkbox-input:hover {
+  border-color: var(--fluent-stroke-accessible);
+}
+
+.fluent-checkbox-input:checked {
+  background: var(--fluent-blue);
+  border-color: var(--fluent-blue);
+}
+
+.fluent-checkbox-input:checked::after {
+  content: '';
+  position: absolute;
+  left: 50%;
+  top: 50%;
+  transform: translate(-50%, -50%);
+  width: 12px;
+  height: 12px;
+  background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 12 12'%3E%3Cpath fill='white' d='M4.5 8.5L1.5 5.5L2.5 4.5L4.5 6.5L9.5 1.5L10.5 2.5L4.5 8.5Z'/%3E%3C/svg%3E");
+  background-size: contain;
+  background-repeat: no-repeat;
+}
+
+.fluent-checkbox-input:focus {
+  border-color: var(--fluent-stroke-focus);
+  box-shadow: 0 0 0 1px var(--fluent-stroke-focus);
+}
+
+.fluent-checkbox-input:disabled {
+  cursor: not-allowed;
+  opacity: 0.5;
+}
+
+.fluent-checkbox-label {
+  font-family: var(--fluent-font-family);
+  font-size: var(--fluent-font-size-300);
+  color: var(--fluent-text-primary);
+}
+
+/* ===== 单选按钮 ===== */
+.fluent-radio {
+  display: inline-flex;
+  align-items: center;
+  gap: var(--fluent-space-8);
+  cursor: pointer;
+  user-select: none;
+}
+
+.fluent-radio-input {
+  position: relative;
+  width: 20px;
+  height: 20px;
+  appearance: none;
+  -webkit-appearance: none;
+  background: var(--fluent-bg-layer);
+  border: 1px solid var(--fluent-stroke-default);
+  border-radius: var(--fluent-radius-circular);
+  cursor: pointer;
+  outline: none;
+  transition: var(--fluent-transition-fast);
+}
+
+.fluent-radio-input:hover {
+  border-color: var(--fluent-stroke-accessible);
+}
+
+.fluent-radio-input:checked {
+  border-color: var(--fluent-blue);
+}
+
+.fluent-radio-input:checked::after {
+  content: '';
+  position: absolute;
+  left: 50%;
+  top: 50%;
+  transform: translate(-50%, -50%);
+  width: 10px;
+  height: 10px;
+  background: var(--fluent-blue);
+  border-radius: var(--fluent-radius-circular);
+}
+
+.fluent-radio-input:focus {
+  border-color: var(--fluent-stroke-focus);
+  box-shadow: 0 0 0 1px var(--fluent-stroke-focus);
+}
+
+.fluent-radio-label {
+  font-family: var(--fluent-font-family);
+  font-size: var(--fluent-font-size-300);
+  color: var(--fluent-text-primary);
+}
+
+/* ===== 开关 ===== */
+.fluent-switch {
+  display: inline-flex;
+  align-items: center;
+  gap: var(--fluent-space-8);
+  cursor: pointer;
+  user-select: none;
+}
+
+.fluent-switch-input {
+  position: relative;
+  width: 40px;
+  height: 20px;
+  appearance: none;
+  -webkit-appearance: none;
+  background: var(--fluent-grey-60);
+  border: 1px solid transparent;
+  border-radius: var(--fluent-radius-circular);
+  cursor: pointer;
+  outline: none;
+  transition: var(--fluent-transition-normal);
+}
+
+.fluent-switch-input::before {
+  content: '';
+  position: absolute;
+  left: 2px;
+  top: 50%;
+  transform: translateY(-50%);
+  width: 14px;
+  height: 14px;
+  background: white;
+  border-radius: var(--fluent-radius-circular);
+  transition: var(--fluent-transition-normal);
+}
+
+.fluent-switch-input:checked {
+  background: var(--fluent-blue);
+}
+
+.fluent-switch-input:checked::before {
+  left: calc(100% - 16px);
+}
+
+.fluent-switch-input:focus {
+  box-shadow: 0 0 0 2px var(--fluent-stroke-focus);
+}
+
+.fluent-switch-label {
+  font-family: var(--fluent-font-family);
+  font-size: var(--fluent-font-size-300);
+  color: var(--fluent-text-primary);
+}
+
+/* ===== 下拉选择 ===== */
+.fluent-select {
+  position: relative;
+  display: inline-block;
+  width: 100%;
+}
+
+.fluent-select-trigger {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: 0 var(--fluent-space-12);
+  height: 32px;
+  width: 100%;
+  font-family: var(--fluent-font-family);
+  font-size: var(--fluent-font-size-300);
+  color: var(--fluent-text-primary);
+  background: var(--fluent-bg-layer-alt);
+  border: 1px solid var(--fluent-stroke-default);
+  border-radius: var(--fluent-radius-medium);
+  cursor: pointer;
+  outline: none;
+  transition: var(--fluent-transition-fast);
+}
+
+.fluent-select-trigger:hover {
+  border-color: var(--fluent-stroke-accessible);
+}
+
+.fluent-select-trigger:focus {
+  border-color: var(--fluent-stroke-focus);
+  box-shadow: 0 0 0 1px var(--fluent-stroke-focus) inset;
+}
+
+/* ===== 滑块 ===== */
+.fluent-slider {
+  position: relative;
+  width: 100%;
+  height: 20px;
+  display: flex;
+  align-items: center;
+}
+
+.fluent-slider-input {
+  width: 100%;
+  height: 4px;
+  appearance: none;
+  -webkit-appearance: none;
+  background: var(--fluent-grey-60);
+  border-radius: var(--fluent-radius-circular);
+  outline: none;
+  cursor: pointer;
+}
+
+.fluent-slider-input::-webkit-slider-thumb {
+  appearance: none;
+  -webkit-appearance: none;
+  width: 20px;
+  height: 20px;
+  background: var(--fluent-blue);
+  border: 2px solid white;
+  border-radius: var(--fluent-radius-circular);
+  box-shadow: var(--fluent-elevation-4);
+  cursor: pointer;
+  transition: var(--fluent-transition-fast);
+}
+
+.fluent-slider-input::-webkit-slider-thumb:hover {
+  transform: scale(1.1);
+}
+
+.fluent-slider-input::-moz-range-thumb {
+  width: 20px;
+  height: 20px;
+  background: var(--fluent-blue);
+  border: 2px solid white;
+  border-radius: var(--fluent-radius-circular);
+  box-shadow: var(--fluent-elevation-4);
+  cursor: pointer;
+  transition: var(--fluent-transition-fast);
+}
+
+.fluent-slider-input::-moz-range-thumb:hover {
+  transform: scale(1.1);
+}
+
+/* ===== 徽章 ===== */
+.fluent-badge {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  padding: 0 var(--fluent-space-8);
+  height: 20px;
+  min-width: 20px;
+  font-family: var(--fluent-font-family);
+  font-size: var(--fluent-font-size-200);
+  font-weight: var(--fluent-font-weight-semibold);
+  color: var(--fluent-text-on-accent);
+  background: var(--fluent-blue);
+  border-radius: var(--fluent-radius-circular);
+}
+
+.fluent-badge-success {
+  background: var(--fluent-success);
+}
+
+.fluent-badge-warning {
+  background: var(--fluent-warning);
+}
+
+.fluent-badge-danger {
+  background: var(--fluent-danger);
+}
+
+/* ===== 分割线 ===== */
+.fluent-divider {
+  height: 1px;
+  background: var(--fluent-stroke-default);
+  border: none;
+  margin: var(--fluent-space-16) 0;
+}
+
+.fluent-divider-vertical {
+  width: 1px;
+  height: auto;
+  background: var(--fluent-stroke-default);
+  border: none;
+  margin: 0 var(--fluent-space-16);
+}
+
+/* ===== 加载指示器 ===== */
+.fluent-spinner {
+  display: inline-block;
+  width: 20px;
+  height: 20px;
+  border: 2px solid var(--fluent-stroke-default);
+  border-top-color: var(--fluent-blue);
+  border-radius: var(--fluent-radius-circular);
+  animation: fluent-spin 0.8s linear infinite;
+}
+
+.fluent-spinner-large {
+  width: 32px;
+  height: 32px;
+  border-width: 3px;
+}
+
+@keyframes fluent-spin {
+  to { transform: rotate(360deg); }
+}
+
+/* ===== 进度条 ===== */
+.fluent-progress {
+  width: 100%;
+  height: 4px;
+  background: var(--fluent-grey-60);
+  border-radius: var(--fluent-radius-circular);
+  overflow: hidden;
+}
+
+.fluent-progress-bar {
+  height: 100%;
+  background: var(--fluent-blue);
+  border-radius: var(--fluent-radius-circular);
+  transition: width var(--fluent-duration-normal) var(--fluent-ease-standard);
+}
+
+.fluent-progress-indeterminate .fluent-progress-bar {
+  width: 30%;
+  animation: fluent-progress-indeterminate 1.5s ease-in-out infinite;
+}
+
+@keyframes fluent-progress-indeterminate {
+  0% { transform: translateX(-100%); }
+  50% { transform: translateX(350%); }
+  100% { transform: translateX(-100%); }
+}
+
+/* ===== 工具提示 ===== */
+.fluent-tooltip {
+  position: absolute;
+  padding: var(--fluent-space-8) var(--fluent-space-12);
+  font-family: var(--fluent-font-family);
+  font-size: var(--fluent-font-size-200);
+  color: var(--fluent-text-on-accent);
+  background: var(--fluent-grey-90);
+  border-radius: var(--fluent-radius-medium);
+  box-shadow: var(--fluent-elevation-8);
+  z-index: var(--fluent-z-tooltip);
+  pointer-events: none;
+  white-space: nowrap;
+}
+
+html.light .fluent-tooltip {
+  background: var(--fluent-grey-90);
+}
+
+html.dark .fluent-tooltip {
+  background: var(--fluent-grey-80);
+}
