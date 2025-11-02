@@ -1,68 +1,120 @@
 /**
- * Layout组件样式 - 从Layout.vue提取
+ * Layout组件样式 - 玻璃拟态布局
  * 侧边栏、导航、用户信息等布局相关样式
  */
 
 /* ===== 布局容器 ===== */
 .layout-container {
   height: 100vh;
-  background: var(--el-bg-color-page);
+  background: var(--xw-gradient-background);
+  position: relative;
+  overflow: hidden;
+}
+
+/* 背景装饰层 */
+.layout-container::before {
+  content: '';
+  position: absolute;
+  top: -50%;
+  left: -50%;
+  width: 200%;
+  height: 200%;
+  background: var(--xw-spotlight-primary);
+  opacity: 0.5;
+  pointer-events: none;
+  animation: xw-float-subtle 20s ease-in-out infinite;
+}
+
+html.dark .layout-container::before {
+  opacity: 0.3;
 }
 
 .main-container {
   background: transparent;
+  position: relative;
+  z-index: 1;
 }
 
 .content {
   padding: 24px;
   overflow-y: auto;
   min-height: calc(100vh - 64px);
+  animation: xw-fade-in 0.4s var(--xw-ease-out);
 }
 
 /* ===== 侧边栏 ===== */
 .sidebar {
   background: var(--sidebar-bg);
   border-right: 1px solid var(--el-border-color);
-  transition: width 0.3s cubic-bezier(0.4, 0, 0.2, 1);
+  transition: width var(--xw-duration-slow) var(--xw-ease-spring);
   display: flex;
   flex-direction: column;
-  backdrop-filter: blur(20px);
+  backdrop-filter: blur(32px) saturate(180%);
+  -webkit-backdrop-filter: blur(32px) saturate(180%);
   position: relative;
   z-index: 100;
   overflow-x: hidden;
   overflow-y: auto;
 }
 
-/* 浅色侧边栏 */
+/* 浅色侧边栏 - 玻璃增强 */
 html.light .sidebar {
-  background: linear-gradient(180deg, rgba(255, 255, 255, 0.95) 0%, rgba(249, 250, 251, 0.92) 50%, rgba(243, 244, 246, 0.9) 100%);
-  box-shadow: 2px 0 12px rgba(0, 0, 0, 0.04);
+  background: var(--xw-glass-gradient-light);
+  box-shadow: 2px 0 16px rgba(0, 0, 0, 0.05), 
+               inset 0 0 0 1px rgba(255, 255, 255, 0.5);
 }
 
 html.light .sidebar::before {
   content: '';
   position: absolute;
   inset: 0;
-  background: linear-gradient(135deg, rgba(99, 102, 241, 0.02) 0%, transparent 50%, rgba(139, 92, 246, 0.02) 100%);
+  background: var(--xw-spotlight-primary),
+               linear-gradient(180deg, rgba(99, 102, 241, 0.03) 0%, transparent 50%);
   pointer-events: none;
   z-index: -1;
+  animation: xw-gradient-shift 15s ease-in-out infinite;
+  background-size: 200% 200%;
 }
 
-/* 深色侧边栏 */
+/* 深色侧边栏 - 霍虹发光 */
 html.dark .sidebar {
-  background: linear-gradient(180deg, rgba(10, 15, 30, 0.95) 0%, rgba(20, 27, 45, 0.92) 30%, rgba(30, 41, 67, 0.9) 70%, rgba(45, 58, 90, 0.88) 100%);
-  border-right-color: rgba(99, 102, 241, 0.15);
-  box-shadow: 2px 0 20px rgba(0, 0, 0, 0.5), inset -1px 0 0 rgba(99, 102, 241, 0.1);
+  background: var(--xw-glass-gradient-dark);
+  border-right-color: var(--xw-border-glow);
+  box-shadow: 2px 0 24px rgba(0, 0, 0, 0.6), 
+               2px 0 40px rgba(99, 102, 241, 0.1),
+               inset -1px 0 0 rgba(99, 102, 241, 0.2),
+               inset 0 0 30px rgba(99, 102, 241, 0.05);
 }
 
 html.dark .sidebar::before {
   content: '';
   position: absolute;
   inset: 0;
-  background: radial-gradient(ellipse at top left, rgba(99, 102, 241, 0.08) 0%, transparent 50%),
-    radial-gradient(ellipse at bottom right, rgba(139, 92, 246, 0.06) 0%, transparent 50%);
+  background: var(--xw-spotlight-primary),
+               var(--xw-spotlight-secondary),
+               linear-gradient(180deg, rgba(99, 102, 241, 0.08) 0%, transparent 50%);
   pointer-events: none;
   z-index: -1;
+  animation: xw-gradient-shift 20s ease-in-out infinite;
+  background-size: 200% 200%;
+}
+
+/* 侧边栏边缘发光 */
+html.dark .sidebar::after {
+  content: '';
+  position: absolute;
+  top: 0;
+  right: 0;
+  width: 1px;
+  height: 100%;
+  background: linear-gradient(180deg, 
+    transparent 0%, 
+    rgba(99, 102, 241, 0.5) 30%,
+    rgba(99, 102, 241, 0.8) 50%,
+    rgba(99, 102, 241, 0.5) 70%,
+    transparent 100%);
+  pointer-events: none;
+  animation: xw-breathing 3s ease-in-out infinite;
 }
 
 /* ===== Logo区域 ===== */
@@ -114,11 +166,21 @@ html.dark .logo-container {
 
 .logo-text {
   font-size: 18px;
-  font-weight: 600;
-  color: var(--xw-primary);
+  font-weight: var(--xw-font-bold);
+  background: var(--xw-gradient-primary-intense);
+  -webkit-background-clip: text;
+  -webkit-text-fill-color: transparent;
+  background-clip: text;
   white-space: nowrap;
   overflow: hidden;
   flex-shrink: 0;
+  position: relative;
+  animation: xw-gradient-shift 8s linear infinite;
+  background-size: 200% 200%;
+}
+
+html.dark .logo-text {
+  filter: drop-shadow(0 0 8px rgba(99, 102, 241, 0.5));
 }
 
 .collapse-btn {
@@ -128,18 +190,37 @@ html.dark .logo-container {
   width: 32px;
   height: 32px;
   border: none;
-  border-radius: var(--xw-radius);
+  border-radius: var(--xw-radius-lg);
   background: transparent;
   color: var(--xw-text-tertiary);
   cursor: pointer;
-  transition: all 0.3s cubic-bezier(0.4, 0, 0.2, 1);
+  transition: var(--xw-transition-transform), var(--xw-transition-colors) !important;
   flex-shrink: 0;
+  position: relative;
+  overflow: hidden;
+}
+
+.collapse-btn::before {
+  content: '';
+  position: absolute;
+  inset: 0;
+  background: var(--xw-gradient-highlight);
+  opacity: 0;
+  transition: opacity var(--xw-duration-normal) var(--xw-ease-out);
+  border-radius: var(--xw-radius-lg);
 }
 
 .collapse-btn:hover {
-  background: var(--xw-bg-secondary);
   color: var(--xw-primary);
-  transform: scale(1.05);
+  transform: scale(1.1);
+}
+
+.collapse-btn:hover::before {
+  opacity: 1;
+}
+
+html.dark .collapse-btn:hover {
+  box-shadow: 0 0 15px rgba(99, 102, 241, 0.4);
 }
 
 .collapse-btn:active {
@@ -147,7 +228,9 @@ html.dark .logo-container {
 }
 
 .collapse-icon {
-  transition: transform 0.3s cubic-bezier(0.4, 0, 0.2, 1);
+  transition: transform var(--xw-duration-slow) var(--xw-ease-spring);
+  position: relative;
+  z-index: 1;
 }
 
 .collapse-btn:hover .collapse-icon {
@@ -166,10 +249,15 @@ html.dark .logo-container {
 .nav-item {
   margin: 6px 12px;
   border-radius: var(--xw-radius-xl);
-  transition: all 0.3s cubic-bezier(0.4, 0, 0.2, 1);
+  transition: var(--xw-transition-transform), 
+              var(--xw-transition-colors), 
+              var(--xw-transition-shadow) !important;
   position: relative;
+  backdrop-filter: blur(8px);
+  -webkit-backdrop-filter: blur(8px);
 }
 
+/* 导航项激活指示条 */
 .nav-item::before {
   content: '';
   position: absolute;
@@ -178,9 +266,10 @@ html.dark .logo-container {
   transform: translateY(-50%);
   height: 0;
   width: 4px;
-  background: linear-gradient(180deg, var(--xw-primary), var(--xw-primary-light));
-  transition: height 0.3s cubic-bezier(0.4, 0, 0.2, 1);
+  background: var(--xw-gradient-primary);
+  transition: height var(--xw-duration-slow) var(--xw-ease-spring);
   border-radius: 0 4px 4px 0;
+  box-shadow: 2px 0 8px rgba(99, 102, 241, 0.4);
 }
 
 .nav-item:hover::before {
@@ -189,41 +278,59 @@ html.dark .logo-container {
 
 .nav-item:hover {
   background: var(--xw-gradient-highlight);
-  transform: translateX(4px);
+  transform: translateX(6px) scale(1.02);
 }
 
 html.dark .nav-item:hover {
-  background: rgba(99, 102, 241, 0.12);
-  box-shadow: inset 0 0 10px rgba(99, 102, 241, 0.05);
+  background: rgba(99, 102, 241, 0.15);
+  box-shadow: inset 0 0 15px rgba(99, 102, 241, 0.1),
+               0 0 20px rgba(99, 102, 241, 0.1);
 }
 
 .nav-item.is-active {
   background: linear-gradient(135deg, var(--xw-primary-lightest), var(--xw-primary-200));
   color: var(--xw-primary);
-  box-shadow: var(--xw-shadow-sm);
-  font-weight: 600;
+  box-shadow: var(--xw-shadow-md);
+  font-weight: var(--xw-font-semibold);
+  transform: translateX(4px);
 }
 
 .nav-item.is-active::before {
   height: 80%;
+  box-shadow: 3px 0 12px rgba(99, 102, 241, 0.6);
 }
 
 html.dark .nav-item.is-active {
-  background: linear-gradient(135deg, rgba(99, 102, 241, 0.2), rgba(129, 140, 248, 0.15));
-  box-shadow: var(--xw-shadow-md), 0 0 15px rgba(99, 102, 241, 0.2), inset 0 0 10px rgba(99, 102, 241, 0.1);
+  background: linear-gradient(135deg, rgba(99, 102, 241, 0.25), rgba(129, 140, 248, 0.2));
+  box-shadow: var(--xw-shadow-md), 
+               0 0 20px rgba(99, 102, 241, 0.3), 
+               inset 0 0 15px rgba(99, 102, 241, 0.15);
+}
+
+/* 导航项动画 */
+.nav-item .el-menu-item__title {
+  transition: transform var(--xw-duration-normal) var(--xw-ease-out);
+}
+
+.nav-item:hover .el-menu-item__title {
+  transform: translateX(2px);
 }
 
 /* ===== 用户信息区域 ===== */
 .user-section {
   padding: 16px;
   border-top: 1px solid var(--el-border-color-light);
-  transition: all 0.3s cubic-bezier(0.4, 0, 0.2, 1);
-  background: linear-gradient(180deg, transparent 0%, rgba(99, 102, 241, 0.02) 100%);
+  transition: var(--xw-transition-colors);
+  background: var(--xw-gradient-highlight);
+  backdrop-filter: blur(8px);
+  -webkit-backdrop-filter: blur(8px);
+  position: relative;
 }
 
 html.dark .user-section {
-  background: linear-gradient(180deg, transparent 0%, rgba(99, 102, 241, 0.05) 100%);
-  border-top-color: rgba(99, 102, 241, 0.15);
+  background: linear-gradient(180deg, transparent 0%, rgba(99, 102, 241, 0.08) 100%);
+  border-top-color: var(--xw-border-glow);
+  box-shadow: inset 0 1px 0 rgba(99, 102, 241, 0.2);
 }
 
 .user-section.collapsed {
@@ -256,14 +363,16 @@ html.dark .user-section {
 }
 
 .user-info:hover {
-  background: linear-gradient(135deg, rgba(99, 102, 241, 0.1), rgba(129, 140, 248, 0.08));
-  transform: translateY(-2px) scale(1.02);
-  box-shadow: var(--xw-shadow-md);
+  background: linear-gradient(135deg, rgba(99, 102, 241, 0.15), rgba(129, 140, 248, 0.1));
+  transform: translateY(-3px) scale(1.05);
+  box-shadow: var(--xw-shadow-lg);
 }
 
 html.dark .user-info:hover {
-  background: linear-gradient(135deg, rgba(99, 102, 241, 0.2), rgba(129, 140, 248, 0.15));
-  box-shadow: var(--xw-shadow-md), 0 0 15px rgba(99, 102, 241, 0.3);
+  background: linear-gradient(135deg, rgba(99, 102, 241, 0.25), rgba(129, 140, 248, 0.2));
+  box-shadow: var(--xw-shadow-lg), 
+               0 0 20px rgba(99, 102, 241, 0.4),
+               inset 0 0 15px rgba(99, 102, 241, 0.2);
 }
 
 .username {
@@ -283,10 +392,26 @@ html.dark .user-info:hover {
   align-items: center;
   justify-content: space-between;
   padding: 0 24px;
-  background: var(--card-bg);
-  border-bottom: 1px solid var(--el-border-color);
-  backdrop-filter: blur(10px);
+  background: var(--xw-card-bg);
+  border-bottom: 1px solid var(--xw-border-primary);
+  backdrop-filter: blur(24px) saturate(180%);
+  -webkit-backdrop-filter: blur(24px) saturate(180%);
+  box-shadow: 0 2px 8px rgba(0, 0, 0, 0.05);
+  position: relative;
+  z-index: 10;
 }
+
+/* Header \u4e0b\u8fb9\u6846\u53d1\u5149 */
+html.dark .header {
+  border-bottom-color: var(--xw-border-glow);
+  box-shadow: 0 2px 12px rgba(0, 0, 0, 0.3),
+               0 0 30px rgba(99, 102, 241, 0.1),
+               inset 0 -1px 0 rgba(99, 102, 241, 0.2);
+}
+
+/* Header \u9ad8\u5149\u6548\u679c */
+.header::before {
+  content: '';\n  position: absolute;\n  bottom: 0;\n  left: 0;\n  right: 0;\n  height: 1px;\n  background: linear-gradient(90deg, \n    transparent 0%, \n    rgba(255, 255, 255, 0.3) 50%, \n    transparent 100%);\n  pointer-events: none;\n}\n\nhtml.dark .header::before {\n  background: linear-gradient(90deg, \n    transparent 0%, \n    rgba(99, 102, 241, 0.4) 50%, \n    transparent 100%);\n}"}
 
 .header-left {
   display: flex;

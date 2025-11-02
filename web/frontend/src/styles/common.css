@@ -1,162 +1,209 @@
 /**
- * 通用样式 - 从App.vue提取出来的公共样式
- * 避免到处写重复代码
+ * 通用样式 - Element Plus 组件深度定制
+ * 玻璃拟态 + 微交互动画 + 发光效果
  */
 
 /* ===== Element Plus 全局增强 ===== */
 
-/* 卡片 */
-.el-card {
-  background: var(--xw-card-bg) !important;
-  border: 1px solid var(--xw-card-border) !important;
-  backdrop-filter: blur(10px);
-  border-radius: var(--xw-radius-xl) !important;
-  transition: var(--xw-transition-transform), var(--xw-transition-colors), box-shadow 0.2s var(--xw-ease-out) !important;
+/* 卡片 - 已在 design-system.css 中定制 */
+/* 这里仅添加特殊场景的增强 */
+.el-card.xw-featured {
+  background: var(--xw-gradient-card) !important;
+  box-shadow: var(--xw-shadow-xl), var(--xw-glow-primary) !important;
 }
 
-.el-card:hover {
-  transform: translateY(-2px);
-  box-shadow: var(--xw-shadow-hover) !important;
+html.dark .el-card.xw-featured {
+  box-shadow: var(--xw-shadow-xl), var(--xw-neon-primary) !important;
 }
 
-/* 按钮 */
-.el-button {
-  border-radius: var(--xw-radius-lg) !important;
-  font-weight: 500 !important;
-  transition: var(--xw-transition-transform), var(--xw-transition-colors) !important;
-}
-
-.el-button:hover {
-  transform: translateY(-1px);
-}
-
-.el-button:active {
-  transform: translateY(0) scale(0.98);
-}
-
-.el-button--primary {
-  background: linear-gradient(135deg, var(--xw-primary), var(--xw-primary-dark)) !important;
+/* 按钮 - 更多样式变体 */
+/* 成功按钮 */
+.el-button--success {
+  background: var(--xw-gradient-success) !important;
   border: none !important;
+  box-shadow: var(--xw-shadow-sm) !important;
 }
 
-.el-button--primary:hover {
-  background: linear-gradient(135deg, var(--xw-primary-light), var(--xw-primary)) !important;
-  box-shadow: var(--xw-shadow-md) !important;
+.el-button--success:hover:not(:disabled) {
+  box-shadow: var(--xw-shadow-md), 0 0 20px rgba(16, 185, 129, 0.4) !important;
 }
 
-.el-button--primary:focus {
-  box-shadow: 0 0 0 3px var(--xw-focus-ring) !important;
+/* 警告按钮 */
+.el-button--warning {
+  background: var(--xw-gradient-warning) !important;
+  border: none !important;
+  box-shadow: var(--xw-shadow-sm) !important;
 }
 
-/* 深色模式按钮增强 */
-html.dark .el-button--primary:hover {
-  box-shadow: var(--xw-shadow-md), 0 0 15px rgba(99, 102, 241, 0.4) !important;
+.el-button--warning:hover:not(:disabled) {
+  box-shadow: var(--xw-shadow-md), 0 0 20px rgba(245, 158, 11, 0.4) !important;
 }
 
-/* 输入框 */
-.el-input__wrapper {
-  border-radius: var(--xw-radius-lg) !important;
-  transition: var(--xw-transition-colors), box-shadow 0.2s var(--xw-ease-out) !important;
-  background: var(--xw-bg-tertiary) !important;
+/* 危险按钮 */
+.el-button--danger {
+  background: var(--xw-gradient-danger) !important;
+  border: none !important;
+  box-shadow: var(--xw-shadow-sm) !important;
 }
 
-.el-input__wrapper:hover {
-  border-color: var(--xw-border-secondary) !important;
+.el-button--danger:hover:not(:disabled) {
+  box-shadow: var(--xw-shadow-md), 0 0 20px rgba(239, 68, 68, 0.4) !important;
 }
 
-.el-input__wrapper.is-focus {
-  box-shadow: 0 0 0 1px var(--xw-primary) inset, 0 0 0 3px var(--xw-focus-ring) !important;
-  border-color: var(--xw-primary) !important;
+/* 信息按钮 */
+.el-button--info {
+  background: var(--xw-gradient-info) !important;
+  border: none !important;
+  box-shadow: var(--xw-shadow-sm) !important;
 }
 
-html.dark .el-input__wrapper.is-focus {
-  box-shadow: 0 0 0 1px var(--xw-primary) inset, 0 0 0 3px var(--xw-focus-ring), 0 0 10px rgba(99, 102, 241, 0.2) !important;
+.el-button--info:hover:not(:disabled) {
+  box-shadow: var(--xw-shadow-md), 0 0 20px rgba(59, 130, 246, 0.4) !important;
 }
 
-/* 文本域 */
+/* 文字按钮 */
+.el-button--text {
+  position: relative;
+  overflow: hidden;
+}
+
+.el-button--text::before {
+  content: '';
+  position: absolute;
+  inset: 0;
+  background: var(--xw-gradient-highlight);
+  opacity: 0;
+  transition: opacity var(--xw-duration-fast) var(--xw-ease-out);
+}
+
+.el-button--text:hover:not(:disabled)::before {
+  opacity: 1;
+}
+
+/* 加载状态 */
+.el-button.is-loading {
+  position: relative;
+  overflow: hidden;
+}
+
+.el-button.is-loading::after {
+  content: '';
+  position: absolute;
+  top: 0;
+  left: -100%;
+  width: 100%;
+  height: 100%;
+  background: linear-gradient(90deg, 
+    transparent, 
+    rgba(255, 255, 255, 0.3), 
+    transparent);
+  animation: xw-shimmer 1.5s linear infinite;
+}
+
+/* 输入框 - 已在 design-system.css 中定制 */
+/* 文本域增强 */
 .el-textarea__inner {
   border-radius: var(--xw-radius-lg) !important;
-  transition: var(--xw-transition-colors), box-shadow 0.2s var(--xw-ease-out) !important;
+  transition: var(--xw-transition-colors), var(--xw-transition-shadow) !important;
   background: var(--xw-bg-tertiary) !important;
+  backdrop-filter: blur(8px);
+  -webkit-backdrop-filter: blur(8px);
 }
 
-.el-textarea__inner:hover {
+.el-textarea__inner:hover:not(:disabled) {
   border-color: var(--xw-border-secondary) !important;
+  background: var(--xw-bg-secondary) !important;
 }
 
 .el-textarea__inner:focus {
   box-shadow: 0 0 0 1px var(--xw-primary) inset, 0 0 0 3px var(--xw-focus-ring) !important;
   border-color: var(--xw-primary) !important;
+  background: var(--xw-bg-primary) !important;
 }
 
 html.dark .el-textarea__inner:focus {
-  box-shadow: 0 0 0 1px var(--xw-primary) inset, 0 0 0 3px var(--xw-focus-ring), 0 0 10px rgba(99, 102, 241, 0.2) !important;
+  box-shadow: 0 0 0 1px var(--xw-primary) inset, 0 0 0 3px var(--xw-focus-ring), var(--xw-glow-primary) !important;
 }
 
-/* 下拉菜单统一样式 */
-.el-dropdown-menu,
-.el-select-dropdown {
-  background: var(--xw-card-bg) !important;
-  border: 1px solid var(--xw-card-border) !important;
-  border-radius: var(--xw-radius-xl) !important;
-  backdrop-filter: blur(20px);
-  box-shadow: var(--xw-shadow-xl) !important;
-  padding: var(--xw-space-2) !important;
-  animation: fadeScaleIn 0.2s var(--xw-ease-out);
+/* Select 选择器 */
+.el-select__wrapper {
+  backdrop-filter: blur(8px);
+  -webkit-backdrop-filter: blur(8px);
+  transition: var(--xw-transition-shadow), var(--xw-transition-colors) !important;
 }
 
-html.dark .el-dropdown-menu,
-html.dark .el-select-dropdown {
-  box-shadow: var(--xw-shadow-xl), 0 0 30px rgba(0, 0, 0, 0.5) !important;
-  border-color: rgba(99, 102, 241, 0.2) !important;
+.el-select__wrapper:hover:not(.is-disabled) {
+  background: var(--xw-bg-secondary) !important;
 }
 
-.el-dropdown-menu__item,
-.el-select-dropdown__item {
-  border-radius: var(--xw-radius-lg) !important;
-  margin: var(--xw-space-1) 0 !important;
-  padding: var(--xw-space-3) var(--xw-space-4) !important;
-  transition: var(--xw-transition-transform), var(--xw-transition-colors) !important;
-  font-weight: 500;
-  display: flex !important;
-  align-items: center !important;
-  gap: var(--xw-space-2) !important;
+.el-select__wrapper.is-focused {
+  box-shadow: 0 0 0 1px var(--xw-primary) inset, 0 0 0 3px var(--xw-focus-ring) !important;
+  border-color: var(--xw-primary) !important;
 }
 
-.el-dropdown-menu__item:hover,
-.el-select-dropdown__item:hover {
-  background: var(--xw-gradient-highlight) !important;
-  color: var(--xw-primary) !important;
-  transform: translateX(3px);
+html.dark .el-select__wrapper.is-focused {
+  box-shadow: 0 0 0 1px var(--xw-primary) inset, 0 0 0 3px var(--xw-focus-ring), var(--xw-glow-primary) !important;
 }
 
-html.dark .el-dropdown-menu__item:hover,
-html.dark .el-select-dropdown__item:hover {
-  background: rgba(99, 102, 241, 0.15) !important;
-  box-shadow: inset 0 0 10px rgba(99, 102, 241, 0.1);
-}
-
+/* 下拉菜单 - 已在 design-system.css 中定制 */
+/* 选中项增强 */
 .el-select-dropdown__item.is-selected {
   background: var(--xw-primary-lightest) !important;
   color: var(--xw-primary) !important;
-  font-weight: 600;
+  font-weight: var(--xw-font-semibold);
+  position: relative;
+}
+
+.el-select-dropdown__item.is-selected::before {
+  content: '';
+  position: absolute;
+  left: 0;
+  top: 50%;
+  transform: translateY(-50%);
+  width: 3px;
+  height: 60%;
+  background: var(--xw-gradient-primary);
+  border-radius: 0 4px 4px 0;
 }
 
 html.dark .el-select-dropdown__item.is-selected {
-  background: rgba(99, 102, 241, 0.2) !important;
+  background: rgba(99, 102, 241, 0.25) !important;
+  box-shadow: inset 0 0 15px rgba(99, 102, 241, 0.15);
 }
 
-/* 对话框 */
-.el-dialog {
-  background: var(--xw-card-bg) !important;
-  border: 1px solid var(--xw-card-border) !important;
-  border-radius: var(--xw-radius-2xl) !important;
-  backdrop-filter: blur(20px);
-  box-shadow: var(--xw-shadow-2xl) !important;
-}
-
+/* 对话框 - 已在 design-system.css 中定制 */
+/* 对话框标题增强 */
 .el-dialog__header {
   border-bottom: 1px solid var(--xw-border-primary) !important;
+  background: var(--xw-gradient-highlight);
+  position: relative;
+}
+
+.el-dialog__title {
+  font-weight: var(--xw-font-semibold);
+  background: var(--xw-gradient-primary);
+  -webkit-background-clip: text;
+  -webkit-text-fill-color: transparent;
+  background-clip: text;
+}
+
+/* 对话框关闭按钮 */
+.el-dialog__headerbtn {
+  transition: var(--xw-transition-transform), var(--xw-transition-colors) !important;
+  border-radius: var(--xw-radius) !important;
+}
+
+.el-dialog__headerbtn:hover {
+  background: var(--xw-bg-tertiary) !important;
+  transform: rotate(90deg) scale(1.1);
+}
+
+/* 对话框底部 */
+.el-dialog__footer {
+  border-top: 1px solid var(--xw-border-primary) !important;
+  background: var(--xw-bg-secondary);
+  backdrop-filter: blur(8px);
+  -webkit-backdrop-filter: blur(8px);
 }
 
 /* 分页 */
@@ -177,41 +224,150 @@ html.dark .el-select-dropdown__item.is-selected {
   color: white !important;
 }
 
-/* 表格 */
-html.dark .el-table {
-  background: transparent !important;
+/* 表格 - 已在 design-system.css 中定制 */
+/* 表头增强 */
+.el-table th.el-table__cell {
+  background: var(--xw-gradient-highlight) !important;
+  font-weight: var(--xw-font-semibold) !important;
+  text-transform: uppercase;
+  letter-spacing: 0.05em;
+  font-size: var(--xw-text-xs);
 }
 
-html.dark .el-table tr {
-  background: rgba(30, 41, 59, 0.5) !important;
+/* 表格行悬浮发光效果 */
+html.dark .el-table__row:hover > td.el-table__cell {
+  position: relative;
+  z-index: 1;
 }
 
+/* 表格斑马纹 */
 html.dark .el-table--striped .el-table__body tr.el-table__row--striped td {
-  background: rgba(71, 85, 105, 0.2) !important;
-}
-
-html.light .el-table {
-  background: transparent !important;
-}
-
-html.light .el-table tr {
-  background: rgba(255, 255, 255, 0.8) !important;
+  background: rgba(71, 85, 105, 0.15) !important;
 }
 
 html.light .el-table--striped .el-table__body tr.el-table__row--striped td {
-  background: rgba(249, 250, 251, 0.8) !important;
+  background: rgba(249, 250, 251, 0.9) !important;
 }
 
-/* 动画 */
-@keyframes fadeScaleIn {
-  from {
-    opacity: 0;
-    transform: scale(0.95);
-  }
-  to {
-    opacity: 1;
-    transform: scale(1);
-  }
+/* 标签增强 */
+.el-tag {
+  border-radius: var(--xw-radius-lg) !important;
+  font-weight: var(--xw-font-medium);
+  backdrop-filter: blur(8px);
+  -webkit-backdrop-filter: blur(8px);
+  transition: var(--xw-transition-transform), var(--xw-transition-colors) !important;
+}
+
+.el-tag:hover {
+  transform: scale(1.05);
+}
+
+/* 不同类型标签的渐变背景 */
+.el-tag--primary {
+  background: linear-gradient(135deg, rgba(99, 102, 241, 0.2), rgba(129, 140, 248, 0.15)) !important;
+  border-color: rgba(99, 102, 241, 0.4) !important;
+  color: var(--xw-primary) !important;
+}
+
+.el-tag--success {
+  background: linear-gradient(135deg, rgba(16, 185, 129, 0.2), rgba(52, 211, 153, 0.15)) !important;
+  border-color: rgba(16, 185, 129, 0.4) !important;
+  color: var(--xw-success) !important;
+}
+
+.el-tag--warning {
+  background: linear-gradient(135deg, rgba(245, 158, 11, 0.2), rgba(251, 191, 36, 0.15)) !important;
+  border-color: rgba(245, 158, 11, 0.4) !important;
+  color: var(--xw-warning) !important;
+}
+
+.el-tag--danger {
+  background: linear-gradient(135deg, rgba(239, 68, 68, 0.2), rgba(248, 113, 113, 0.15)) !important;
+  border-color: rgba(239, 68, 68, 0.4) !important;
+  color: var(--xw-danger) !important;
+}
+
+.el-tag--info {
+  background: linear-gradient(135deg, rgba(59, 130, 246, 0.2), rgba(96, 165, 250, 0.15)) !important;
+  border-color: rgba(59, 130, 246, 0.4) !important;
+  color: var(--xw-info) !important;
+}
+
+html.dark .el-tag--primary:hover {
+  box-shadow: 0 0 15px rgba(99, 102, 241, 0.3);
+}
+
+html.dark .el-tag--success:hover {
+  box-shadow: 0 0 15px rgba(16, 185, 129, 0.3);
+}
+
+html.dark .el-tag--warning:hover {
+  box-shadow: 0 0 15px rgba(245, 158, 11, 0.3);
+}
+
+html.dark .el-tag--danger:hover {
+  box-shadow: 0 0 15px rgba(239, 68, 68, 0.3);
+}
+
+html.dark .el-tag--info:hover {
+  box-shadow: 0 0 15px rgba(59, 130, 246, 0.3);
+}
+
+/* 消息提示 */
+.el-message {
+  background: var(--xw-card-bg) !important;
+  border: 1px solid var(--xw-card-border) !important;
+  border-radius: var(--xw-radius-xl) !important;
+  backdrop-filter: blur(24px) saturate(180%);
+  -webkit-backdrop-filter: blur(24px) saturate(180%);
+  box-shadow: var(--xw-shadow-xl) !important;
+  animation: xw-slide-down 0.3s var(--xw-ease-spring);
+}
+
+html.dark .el-message {
+  box-shadow: var(--xw-shadow-xl), 0 0 30px rgba(0, 0, 0, 0.5) !important;
+  border-color: var(--xw-border-glow) !important;
+}
+
+/* 通知 */
+.el-notification {
+  background: var(--xw-card-bg) !important;
+  border: 1px solid var(--xw-card-border) !important;
+  border-radius: var(--xw-radius-xl) !important;
+  backdrop-filter: blur(24px) saturate(180%);
+  -webkit-backdrop-filter: blur(24px) saturate(180%);
+  box-shadow: var(--xw-shadow-2xl) !important;
+  animation: xw-slide-left 0.3s var(--xw-ease-spring);
+}
+
+html.dark .el-notification {
+  box-shadow: var(--xw-shadow-2xl), var(--xw-glow-border-primary) !important;
+  border-color: var(--xw-border-glow) !important;
+}
+
+/* Badge 徽章 */
+.el-badge__content {
+  background: var(--xw-gradient-danger) !important;
+  border: 2px solid var(--xw-bg-primary) !important;
+  box-shadow: var(--xw-shadow-sm) !important;
+  font-weight: var(--xw-font-semibold);
+  animation: xw-pulse-scale 2s var(--xw-ease-out) infinite;
+}
+
+html.dark .el-badge__content {
+  box-shadow: var(--xw-shadow-sm), 0 0 10px rgba(239, 68, 68, 0.4) !important;
+}
+
+/* 加载中 */
+.el-loading-mask {
+  backdrop-filter: blur(8px) !important;
+  -webkit-backdrop-filter: blur(8px) !important;
+}
+
+.el-loading-spinner .path {
+  stroke: var(--xw-primary) !important;
+  stroke-width: 3;
+  animation: xw-rotate 1.5s linear infinite;
 }
 
 /* ===== 移动端优化 ===== */
