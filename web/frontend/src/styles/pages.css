@@ -1,6 +1,6 @@
 /**
- * 页面级样式 - Dashboard, Login, Audit等页面通用样式
- * 避免每个页面都写一遍相同的样式
+ * Pages - Fluent Design 风格
+ * 干净、简洁、实用
  */
 
 /* ===== Dashboard 页面 ===== */
@@ -25,8 +25,8 @@
 
 .stat-icon {
   padding: 12px;
-  border-radius: 12px;
-  background: rgba(99, 102, 241, 0.1);
+  border-radius: var(--fluent-radius-large);
+  background: var(--fluent-bg-selected);
 }
 
 .stat-info {
@@ -35,14 +35,14 @@
 
 .stat-value {
   font-size: 24px;
-  font-weight: 600;
-  color: var(--el-text-color-primary);
+  font-weight: var(--fluent-font-weight-semibold);
+  color: var(--fluent-text-primary);
   line-height: 1;
 }
 
 .stat-label {
   font-size: 14px;
-  color: var(--el-text-color-secondary);
+  color: var(--fluent-text-secondary);
   margin-top: 4px;
 }
 
@@ -59,8 +59,8 @@
 
 .card-title {
   font-size: 16px;
-  font-weight: 600;
-  color: var(--el-text-color-primary);
+  font-weight: var(--fluent-font-weight-semibold);
+  color: var(--fluent-text-primary);
 }
 
 .chart-container {
@@ -82,17 +82,17 @@
 .status-indicator {
   width: 12px;
   height: 12px;
-  border-radius: 50%;
+  border-radius: var(--fluent-radius-circular);
 }
 
 .status-label {
   flex: 1;
-  color: var(--el-text-color-regular);
+  color: var(--fluent-text-secondary);
 }
 
 .status-count {
-  font-weight: 600;
-  color: var(--el-text-color-primary);
+  font-weight: var(--fluent-font-weight-semibold);
+  color: var(--fluent-text-primary);
 }
 
 .groups-list {
@@ -109,14 +109,14 @@
   padding: 10px 0;
 }
 
-/* ===== Login 页面 ===== */
+/* ===== Login 页面 - Fluent 风格 ===== */
 .login-page {
   min-height: 100vh;
   display: flex;
   align-items: center;
   justify-content: center;
   position: relative;
-  background: var(--app-bg-gradient);
+  background: var(--fluent-bg-canvas);
   overflow: hidden;
 }
 
@@ -138,8 +138,8 @@
 .login-card,
 .init-card {
   margin-bottom: 20px;
-  backdrop-filter: blur(10px);
-  background: var(--card-bg) !important;
+  backdrop-filter: blur(30px) saturate(125%);
+  -webkit-backdrop-filter: blur(30px) saturate(125%);
 }
 
 .login-header,
@@ -157,16 +157,13 @@
 
 .logo-text {
   font-size: 24px;
-  font-weight: 600;
-  background: linear-gradient(135deg, #6366f1, #8b5cf6);
-  -webkit-background-clip: text;
-  -webkit-text-fill-color: transparent;
-  background-clip: text;
+  font-weight: var(--fluent-font-weight-semibold);
+  color: var(--fluent-blue);
 }
 
 .subtitle {
   margin: 0;
-  color: var(--el-text-color-secondary);
+  color: var(--fluent-text-secondary);
   font-size: 16px;
 }
 
@@ -176,37 +173,39 @@
 }
 
 .register-link {
-  color: var(--el-color-primary);
+  color: var(--fluent-blue);
   text-decoration: none;
   font-size: 14px;
-  transition: color 0.3s ease;
+  transition: color var(--fluent-duration-fast) var(--fluent-ease-standard);
 }
 
 .register-link:hover {
-  color: var(--el-color-primary-light-3);
+  color: var(--fluent-blue-hover);
+  text-decoration: underline;
 }
 
 .init-header {
   display: flex;
   align-items: center;
   gap: 8px;
-  color: var(--el-color-warning);
-  font-weight: 600;
+  color: var(--fluent-warning);
+  font-weight: var(--fluent-font-weight-semibold);
 }
 
-/* 背景装饰 */
+/* 简化背景装饰 - Fluent 不需要太花哨 */
 .bg-decoration {
   position: absolute;
   inset: 0;
   z-index: 1;
   pointer-events: none;
+  opacity: 0.3;
 }
 
 .circle {
   position: absolute;
-  border-radius: 50%;
-  background: linear-gradient(135deg, rgba(99, 102, 241, 0.1), rgba(139, 92, 246, 0.1));
-  animation: float 6s ease-in-out infinite;
+  border-radius: var(--fluent-radius-circular);
+  background: var(--fluent-bg-selected);
+  animation: float 8s ease-in-out infinite;
 }
 
 .circle-1 {
@@ -221,7 +220,7 @@
   height: 150px;
   top: 60%;
   right: 10%;
-  animation-delay: 2s;
+  animation-delay: 3s;
 }
 
 .circle-3 {
@@ -229,7 +228,7 @@
   height: 100px;
   bottom: 20%;
   left: 60%;
-  animation-delay: 4s;
+  animation-delay: 6s;
 }
 
 @keyframes float {
@@ -261,9 +260,9 @@
 
 .page-title h2 {
   margin: 0;
-  color: var(--el-text-color-primary);
+  color: var(--fluent-text-primary);
   font-size: 24px;
-  font-weight: 600;
+  font-weight: var(--fluent-font-weight-semibold);
 }
 
 .header-actions {
@@ -283,14 +282,14 @@
 }
 
 .nickname {
-  font-weight: 500;
-  color: var(--el-text-color-primary);
+  font-weight: var(--fluent-font-weight-regular);
+  color: var(--fluent-text-primary);
   font-size: 14px;
 }
 
 .user-id {
   font-size: 12px;
-  color: var(--el-text-color-secondary);
+  color: var(--fluent-text-secondary);
 }
 
 .attributes {
@@ -309,15 +308,15 @@
   display: flex;
   flex-direction: column;
   align-items: center;
-  gap: var(--xw-space-3);
-  margin: var(--xw-space-8) var(--xw-space-4) var(--xw-space-4);
-  padding-top: var(--xw-space-6);
-  border-top: 1px solid var(--xw-border-tertiary);
+  gap: var(--fluent-space-12);
+  margin: var(--fluent-space-32) var(--fluent-space-16) var(--fluent-space-16);
+  padding-top: var(--fluent-space-24);
+  border-top: 1px solid var(--fluent-stroke-default);
 }
 
 .pagination-info {
-  color: var(--xw-text-secondary);
-  font-size: var(--xw-text-sm);
+  color: var(--fluent-text-secondary);
+  font-size: var(--fluent-font-size-200);
   text-align: center;
 }
 
@@ -480,7 +479,7 @@
   }
 
   .circle {
-    display: none;
+    opacity: 0.1;
   }
 
   /* Audit 超小屏 */
@@ -500,4 +499,3 @@
     font-size: 16px;
   }
 }
-
